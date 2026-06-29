@@ -1,0 +1,132 @@
+@import "tailwindcss";
+@source "../components";
+@source "../lib";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme {
+  --font-heading: var(--font-heading);
+  --font-body: var(--font-body);
+  
+  --color-brand-teal: #1DB6B2;
+  --color-brand-green: #85DD5A;
+  --color-brand-ocean: #0A6C87;
+}
+
+:root {
+  /* App Background: #F8F9FA */
+  --background: #F8F9FA;
+  /* Primary Text: #1A202C */
+  --foreground: #1A202C;
+  
+  /* Surface/Card Background: #FFFFFF */
+  --card: #FFFFFF;
+  --card-foreground: #1A202C;
+  
+  --popover: #FFFFFF;
+  --popover-foreground: #1A202C;
+  
+  /* Primary Button Background: #1DB6B2 */
+  --primary: #1DB6B2;
+  /* Primary Button Text: #FFFFFF */
+  --primary-foreground: #FFFFFF;
+  
+  /* Secondary Button: #E2E8F0 */
+  --secondary: #E2E8F0;
+  /* Secondary Button Text: #1A202C */
+  --secondary-foreground: #1A202C;
+  
+  --muted: #F1F5F9;
+  /* Secondary Text: #4A5568 */
+  --muted-foreground: #4A5568;
+  
+  --accent: #E2E8F0;
+  --accent-foreground: #1A202C;
+  
+  --destructive: #EF4444;
+  --destructive-foreground: #FFFFFF;
+  
+  /* Border Color: #E2E8F0 */
+  --border: #E2E8F0;
+  --input: #E2E8F0;
+  --ring: #1DB6B2;
+  
+  --radius: 0.5rem;
+}
+
+.dark {
+  /* App Background: #0F172A */
+  --background: #0F172A;
+  /* Primary Text: #F8FAFC */
+  --foreground: #F8FAFC;
+  
+  /* Surface/Card Background: #1E293B */
+  --card: #1E293B;
+  --card-foreground: #F8FAFC;
+  
+  --popover: #1E293B;
+  --popover-foreground: #F8FAFC;
+  
+  /* Primary Button Background: #1DB6B2 */
+  --primary: #1DB6B2;
+  /* Primary Button Text: #0F172A */
+  --primary-foreground: #0F172A;
+  
+  --secondary: #334155;
+  --secondary-foreground: #F8FAFC;
+  
+  --muted: #1E293B;
+  /* Secondary Text: #94A3B8 */
+  --muted-foreground: #94A3B8;
+  
+  --accent: #334155;
+  --accent-foreground: #F8FAFC;
+  
+  --destructive: #7F1D1D;
+  --destructive-foreground: #FEF2F2;
+  
+  /* Border Color: #334155 */
+  --border: #334155;
+  --input: #334155;
+  --ring: #1DB6B2;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-heading;
+  }
+}

@@ -1,0 +1,88 @@
+'use client'
+
+import { useState } from 'react'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { buttonVariants } from '@/components/ui/button'
+import { createModule } from './actions'
+
+export function AddModuleDialog() {
+  const [open, setOpen] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault()
+    setLoading(true)
+    setError(null)
+    
+    const formData = new FormData(e.currentTarget)
+    
+    try {
+      await createModule(formData)
+      setOpen(false)
+    } catch (err: any) {
+      setError(err.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger className={buttonVariants()}>Add Module</DialogTrigger>
+      <DialogContent className="sm:max-w-[425px]">
+        <DialogHeader>
+          <DialogTitle>Create New Module</DialogTitle>
+          <DialogDescription>
+            Define a new system module. The system will automatically generate standard CRUD (Create, Read, Update, Delete) permissions for it.
+          </DialogDescription>
+        </DialogHeader>
+        
+        <form onSubmit={handleSubmit} className="space-y-4 pt-4">
+          {error && (
+            <div className="bg-red-50 text-red-500 p-3 rounded-md text-sm border border-red-200">
+              {error}
+            </div>
+          )}
+          
+          <div className="space-y-2">
+            <Label htmlFor="module">Module Name</Label>
+            <Input 
+              id="module" 
+              name="module" 
+              placeholder="e.g. Billing, Prescriptions, Staff" 
+              required 
+            />
+          </div>
+
+          <div className="pt-4 flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              className={buttonVariants({ variant: "outline" })}
+              disabled={loading}
+            >
+              Cancel
+            </button>
+            <button 
+              type="submit" 
+              className={buttonVariants()} 
+              disabled={loading}
+            >
+              {loading ? "Creating..." : "Create Module"}
+            </button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
+}

@@ -1,0 +1,5 @@
+npx supabase db query "INSERT INTO storage.buckets (id, name, public) VALUES ('lead_documents', 'lead_documents', true) ON CONFLICT (id) DO NOTHING;"
+npx supabase db query "CREATE POLICY `"Public Read Access`" ON storage.objects FOR SELECT USING (bucket_id = 'lead_documents');"
+npx supabase db query "CREATE POLICY `"Authenticated users can upload documents`" ON storage.objects FOR INSERT TO authenticated WITH CHECK (bucket_id = 'lead_documents');"
+npx supabase db query "CREATE POLICY `"Authenticated users can update documents`" ON storage.objects FOR UPDATE TO authenticated USING (bucket_id = 'lead_documents');"
+npx supabase db query "CREATE POLICY `"Authenticated users can delete documents`" ON storage.objects FOR DELETE TO authenticated USING (bucket_id = 'lead_documents');"
