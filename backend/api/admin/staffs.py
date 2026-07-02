@@ -1,0 +1,107 @@
+from fastapi import APIRouter, Depends, HTTPException, Form
+from supabase import Client
+from db.supabase import get_supabase_client
+from api.deps import get_current_user
+
+router = APIRouter()
+
+@router.get("/")
+async def list_staffs(
+    current_user: dict = Depends(get_current_user),
+    supabase: Client = Depends(get_supabase_client)
+):
+    # Fetch profiles that have staff roles
+    staff_roles = ["superadmin", "master_admin", "admin", "sales_rep", "doctor", "inventory_manager", "logistics_manager", "support", "staff", "sales"]
+    res = supabase.table("staffs").select("id, full_name, email, roles!inner(name), created_at").in_("roles.name", staff_roles).order("created_at", desc=True).execute()
+    # Fetch all roles
+    roles_res = supabase.table("roles").select("id, name").order("name").execute()
+    return {"profiles": res.data, "roles": roles_res.data}
+
+@router.get("/me")
+async def get_me(
+    current_user: dict = Depends(get_current_user),
+    supabase: Client = Depends(get_supabase_client)
+):
+    profile = supabase.table("staffs").select("roles(name)").eq("id", current_user["id"]).single().execute()
+    return {"data": profile.data}
+
+@router.post("/")
+async def admin_create_user(
+    email: str = Form(...),
+    password: str = Form(...),
+    full_name: str = Form(...),
+    role_id: str = Form(...),
+    current_user: dict = Depends(get_current_user),
+    supabase: Client = Depends(get_supabase_client)
+):
+    # Verify current user is master_admin
+    # In deps.py, we return the user profile. Let's assume it has role_id
+    # We need to fetch role name
+    profile_response = supabase.table("staffs").select("roles(name)").eq("id", current_user["id"]).single().execute()
+    profile = profile_response.data
+    
+    role_name = profile.get("roles", {}).get("name") if profile.get("roles") else None
+    if role_name not in ["master_admin", "superadmin"]:
+        raise HTTPException(status_code=403, detail="Unauthorized. Master Admin access required.")
+        
+    # Create user in auth
+    try:
+        user_response = supabase.auth.admin.create_user({
+            "email": email,
+            "password": password,
+            "email_confirm": True,
+            "user_metadata": {"full_name": full_name}
+        })
+        
+        # Note: In the frontend, there was a 1s delay for a trigger to create the staff record.
+        # We assume the trigger still works. We might just need to update the role_id.
+        import time
+        time.sleep(1)
+        
+        new_user_id = user_response.user.id
+        
+        role_update = supabase.table("staffs").update({"role_id": role_id}).eq("id", new_user_id).execute()
+        if not role_update.data:
+            # Fallback if the database trigger is missing from migration
+            supabase.table("staffs").insert({
+                "id": new_user_id,
+                "email": email,
+                "full_name": full_name,
+                "role_id": role_id
+            }).execute()
+        
+        return {"success": True, "message": "Staff created successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.put("/{user_id}/role")
+async def update_user_role(
+    user_id: str,
+    new_role: str = Form(...),
+    current_user: dict = Depends(get_current_user),
+    supabase: Client = Depends(get_supabase_client)
+):
+    profile_response = supabase.table("staffs").select("roles(name)").eq("id", current_user["id"]).single().execute()
+    profile = profile_response.data
+    
+    role_name = profile.get("roles", {}).get("name") if profile.get("roles") else None
+    is_master_admin = role_name in ["master_admin", "superadmin"]
+    is_admin = role_name == "admin"
+    
+    if not is_master_admin and not is_admin:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+        
+    if (new_role == "admin" or new_role == "master_admin" or new_role == "superadmin") and not is_master_admin:
+        raise HTTPException(status_code=403, detail="Only Master Admins can assign Admin roles")
+        
+    # Lookup role ID
+    role_data = supabase.table("roles").select("id").eq("name", new_role).single().execute()
+    if not role_data.data:
+        raise HTTPException(status_code=400, detail="Invalid role specified")
+        
+    role_id = role_data.data["id"]
+    
+    # Update target user role
+    supabase.table("staffs").update({"role_id": role_id}).eq("id", user_id).execute()
+    
+    return {"success": True, "message": "Role updated successfully"}

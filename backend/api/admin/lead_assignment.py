@@ -1,0 +1,72 @@
+from fastapi import APIRouter, Depends, HTTPException, Body
+from supabase import Client
+from db.supabase import get_supabase_client
+from api.deps import get_current_user
+
+router = APIRouter()
+
+def verify_admin(current_user: dict, supabase: Client):
+    profile_response = supabase.table("staffs").select("roles(name)").eq("id", current_user["id"]).single().execute()
+    profile = profile_response.data
+    
+    role_name = profile.get("roles", {}).get("name") if profile.get("roles") else None
+    if role_name not in ["superadmin", "master_admin", "admin"]:
+        raise HTTPException(status_code=403, detail="Unauthorized. Admin access required.")
+
+@router.get("/")
+async def get_unassigned_leads(
+    current_user: dict = Depends(get_current_user),
+    supabase: Client = Depends(get_supabase_client)
+):
+    verify_admin(current_user, supabase)
+    
+    u_res = supabase.table("users").select("id, name, email, phone, status, created_at").is_("assigned_sales_rep_id", "null").execute()
+    users_data = u_res.data or []
+    for u in users_data: u["record_type"] = "USER"
+    
+    leads_data = []
+    try:
+        l_res = supabase.table("leads").select("id, name, email, phone, status, created_at").is_("assigned_sales_rep_id", "null").execute()
+        leads_data = l_res.data or []
+        for l in leads_data: l["record_type"] = "LEAD"
+    except Exception:
+        pass
+        
+    combined = users_data + leads_data
+    combined.sort(key=lambda x: x.get("created_at", "") or "", reverse=True)
+    return {"data": combined}
+
+@router.get("/sales-reps")
+async def get_sales_reps(
+    current_user: dict = Depends(get_current_user),
+    supabase: Client = Depends(get_supabase_client)
+):
+    verify_admin(current_user, supabase)
+    
+    staff_roles = ["sales_rep", "sales", "master_admin", "superadmin", "admin"]
+    res = supabase.table("staffs").select("id, full_name, email, roles!inner(name)").in_("roles.name", staff_roles).execute()
+    return {"data": res.data}
+
+from pydantic import BaseModel
+class AssignLeadRequest(BaseModel):
+    lead_id: str
+    record_type: str
+    sales_rep_id: str
+
+@router.post("/assign")
+async def assign_lead(
+    request: AssignLeadRequest,
+    current_user: dict = Depends(get_current_user),
+    supabase: Client = Depends(get_supabase_client)
+):
+    verify_admin(current_user, supabase)
+    
+    table = "leads" if request.record_type == "LEAD" else "users"
+    
+    # Assign it and also update status to ASSIGNED if it's new
+    response = supabase.table(table).update({
+        "assigned_sales_rep_id": request.sales_rep_id,
+        "status": "ASSIGNED"
+    }).eq("id", request.lead_id).execute()
+    
+    return {"success": True, "message": "Lead assigned successfully", "data": response.data}
