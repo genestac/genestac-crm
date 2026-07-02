@@ -12,9 +12,10 @@ async def list_staffs(
 ):
     # Fetch profiles that have staff roles
     staff_roles = ["superadmin", "master_admin", "admin", "sales_rep", "doctor", "inventory_manager", "logistics_manager", "support", "staff", "sales"]
-    res = supabase.table("staffs").select("id, full_name, email, roles!inner(name), created_at").in_("roles.name", staff_roles).order("created_at", desc=True).execute()
+    res = supabase.table("staffs").select("id, full_name, email, phone, address, city, state, pincode, date_of_birth, gender, avatar_url, is_active, roles!inner(name), created_at").in_("roles.name", staff_roles).order("created_at", desc=True).execute()
     # Fetch all roles
     roles_res = supabase.table("roles").select("id, name").order("name").execute()
+    
     return {"profiles": res.data, "roles": roles_res.data}
 
 @router.get("/me")
@@ -105,3 +106,77 @@ async def update_user_role(
     supabase.table("staffs").update({"role_id": role_id}).eq("id", user_id).execute()
     
     return {"success": True, "message": "Role updated successfully"}
+
+@router.put("/{user_id}/details")
+async def update_staff_details(
+    user_id: str,
+    full_name: str = Form(...),
+    email: str = Form(...),
+    phone: str = Form(None),
+    address: str = Form(None),
+    city: str = Form(None),
+    state: str = Form(None),
+    pincode: str = Form(None),
+    date_of_birth: str = Form(None),
+    gender: str = Form(None),
+    password: str = Form(None),
+    is_active: str = Form(None),
+    current_user: dict = Depends(get_current_user),
+    supabase: Client = Depends(get_supabase_client)
+):
+    profile_response = supabase.table("staffs").select("roles(name)").eq("id", current_user["id"]).single().execute()
+    profile = profile_response.data
+    
+    role_name = profile.get("roles", {}).get("name") if profile.get("roles") else None
+    is_master_admin = role_name in ["master_admin", "superadmin"]
+    is_admin = role_name == "admin"
+    
+    if not is_master_admin and not is_admin:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+
+    try:
+        # Update auth user if email, full_name, password or is_active changed
+        update_data = {}
+        if email:
+            update_data["email"] = email
+        if full_name:
+            update_data["user_metadata"] = {"full_name": full_name}
+        if password:
+            update_data["password"] = password
+            
+        if is_active is not None:
+            if str(is_active).lower() == "false":
+                update_data["ban_duration"] = "87600h"  # Effectively ban user
+            else:
+                update_data["ban_duration"] = "none"  # Lift ban
+                
+        if update_data:
+            # Requires service role key to use admin api
+            supabase.auth.admin.update_user_by_id(user_id, update_data)
+            
+    except Exception as e:
+        # Auth update might fail if email exists, etc.
+        raise HTTPException(status_code=400, detail=f"Failed to update auth user: {str(e)}")
+
+    # Update staffs table
+    staff_update = {
+        "full_name": full_name,
+        "email": email,
+        "phone": phone,
+        "address": address,
+        "city": city,
+        "state": state,
+        "pincode": pincode,
+        "date_of_birth": date_of_birth if date_of_birth else None,
+        "gender": gender,
+    }
+    
+    if is_active is not None:
+        staff_update["is_active"] = str(is_active).lower() == "true"
+    
+    # Remove None values
+    staff_update = {k: v for k, v in staff_update.items() if v is not None}
+    
+    supabase.table("staffs").update(staff_update).eq("id", user_id).execute()
+    
+    return {"success": True, "message": "Staff details updated successfully"}

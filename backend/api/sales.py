@@ -396,6 +396,8 @@ async def get_leads(
             leads_data = l_res.data or []
             for l in leads_data:
                 l["record_type"] = "LEAD"
+                if "phone_number" in l:
+                    l["phone"] = l.pop("phone_number", None)
                 if "metadata" not in l or not l["metadata"]:
                     l["metadata"] = {}
         except Exception as e:

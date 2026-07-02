@@ -3,9 +3,10 @@
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { PlusCircle } from 'lucide-react'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Ticket, User, Calendar, Percent } from 'lucide-react'
 import { createCoupon } from './actions'
 
 export function AddCouponModal({ plans }: { plans: any[] }) {
@@ -55,74 +56,120 @@ export function AddCouponModal({ plans }: { plans: any[] }) {
       </Button>
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Create New Coupon</DialogTitle>
-          </DialogHeader>
-        <form onSubmit={handleSubmit} className="space-y-6 mt-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label>Influencer Name *</Label>
-              <Input name="influencer_name" required placeholder="John Doe" />
-            </div>
-            <div className="space-y-2">
-              <Label>Coupon Code *</Label>
-              <Input name="coupon_code" required placeholder="JOHNDOE20" className="uppercase" />
-            </div>
-            <div className="space-y-2">
-              <Label>Email</Label>
-              <Input type="email" name="influencer_email" placeholder="john@example.com" />
-            </div>
-            <div className="space-y-2">
-              <Label>Phone</Label>
-              <Input type="tel" name="influencer_phone" placeholder="+1234567890" />
-            </div>
+        <DialogContent className="sm:max-w-[700px] p-0 rounded-xl overflow-hidden flex flex-col">
+          <div className="bg-gradient-to-br from-indigo-50 to-white px-6 py-6 border-b shrink-0">
+            <DialogHeader>
+              <DialogTitle className="text-2xl font-bold text-indigo-950 flex items-center gap-2">
+                <Ticket className="w-5 h-5 text-indigo-600" /> Create New Coupon
+              </DialogTitle>
+              <DialogDescription className="text-indigo-900/60 mt-1">
+                Generate a promotional code and set discount rules for specific plans.
+              </DialogDescription>
+            </DialogHeader>
           </div>
 
-          <div className="grid grid-cols-3 gap-4">
-            <div className="space-y-2">
-              <Label>Start Date *</Label>
-              <Input type="date" name="start_date" required />
-            </div>
-            <div className="space-y-2">
-              <Label>End Date</Label>
-              <Input type="date" name="end_date" />
-            </div>
-            <div className="space-y-2">
-              <Label>Max Uses</Label>
-              <Input type="number" name="max_uses" placeholder="Unlimited" min="1" />
-            </div>
-          </div>
-
-          <div className="space-y-3">
-            <Label>Plan Discounts (%)</Label>
-            <div className="bg-gray-50 p-4 rounded-lg border grid grid-cols-2 gap-4">
-              {plans.map(plan => (
-                <div key={plan.id} className="flex items-center justify-between gap-4">
-                  <Label className="text-sm font-normal truncate flex-1">{plan.name}</Label>
-                  <Input 
-                    type="number" 
-                    placeholder="0%" 
-                    min="0" 
-                    max="100" 
-                    className="w-20"
-                    value={planDiscounts[plan.id] || ''}
-                    onChange={e => setPlanDiscounts({...planDiscounts, [plan.id]: e.target.value})}
-                  />
+          <div className="overflow-y-auto flex-1 p-6 max-h-[70vh]">
+            <form id="add-coupon-form" onSubmit={handleSubmit} className="space-y-8">
+              
+              {/* Basic Info Section */}
+              <div className="space-y-4">
+                <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2 border-b pb-2">
+                  <User className="w-4 h-4 text-indigo-500" /> Influencer Details
+                </h3>
+                <div className="grid grid-cols-2 gap-5">
+                  <div className="space-y-2">
+                    <Label className="text-xs font-semibold text-gray-600">Influencer Name *</Label>
+                    <Input name="influencer_name" required placeholder="John Doe" className="bg-gray-50/50" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs font-semibold text-gray-600">Coupon Code *</Label>
+                    <Input name="coupon_code" required placeholder="JOHNDOE20" className="uppercase font-mono bg-indigo-50/30 border-indigo-200 focus-visible:ring-indigo-500" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs font-semibold text-gray-600">Email Address</Label>
+                    <Input type="email" name="influencer_email" placeholder="john@example.com" className="bg-gray-50/50" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs font-semibold text-gray-600">Phone Number</Label>
+                    <Input type="tel" name="influencer_phone" placeholder="+1234567890" className="bg-gray-50/50" />
+                  </div>
                 </div>
-              ))}
-            </div>
-            <p className="text-xs text-gray-500">Leave blank if the coupon is not valid for a specific plan.</p>
+              </div>
+
+              {/* Usage & Dates Section */}
+              <div className="space-y-4">
+                <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2 border-b pb-2">
+                  <Calendar className="w-4 h-4 text-indigo-500" /> Validity & Usage
+                </h3>
+                <div className="grid grid-cols-3 gap-5">
+                  <div className="space-y-2">
+                    <Label className="text-xs font-semibold text-gray-600">Start Date *</Label>
+                    <Input type="date" name="start_date" required className="bg-gray-50/50" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs font-semibold text-gray-600">End Date</Label>
+                    <Input type="date" name="end_date" className="bg-gray-50/50" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs font-semibold text-gray-600">Max Uses</Label>
+                    <Input type="number" name="max_uses" placeholder="Unlimited" min="1" className="bg-gray-50/50" />
+                  </div>
+                </div>
+              </div>
+
+              {/* Plan Discounts Section */}
+              <div className="space-y-4">
+                <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2 border-b pb-2">
+                  <Percent className="w-4 h-4 text-indigo-500" /> Plan Discounts
+                </h3>
+                <p className="text-xs text-gray-500">Configure the percentage discount applied when this coupon is used for specific plans. Leave blank if the coupon doesn't apply.</p>
+                <div className="bg-gray-50 p-5 rounded-xl border flex flex-col gap-5">
+                  {plans.map(plan => (
+                    <div key={plan.id} className="space-y-2">
+                       <h4 className="font-semibold text-gray-800 text-sm border-b border-gray-200 pb-1">{plan.name}</h4>
+                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                         {plan.plan_variants?.length > 0 ? plan.plan_variants.map((v: any) => (
+                           <div key={v.id} className="flex items-center justify-between gap-3 bg-white p-2.5 rounded-lg border shadow-sm hover:border-indigo-200 transition-colors">
+                             <Label className="text-sm font-medium text-gray-700 truncate flex-1">{v.duration_label}</Label>
+                             <div className="relative w-24 shrink-0">
+                               <Input 
+                                 type="number" placeholder="0" min="0" max="100" step="any"
+                                 className="pr-8 text-right font-mono h-8 bg-gray-50 focus:bg-white"
+                                 value={planDiscounts[v.id] || ''}
+                                 onChange={e => setPlanDiscounts({...planDiscounts, [v.id]: e.target.value})}
+                               />
+                               <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs font-semibold">%</span>
+                             </div>
+                           </div>
+                         )) : (
+                           <div className="flex items-center justify-between gap-3 bg-white p-2.5 rounded-lg border shadow-sm">
+                             <Label className="text-sm font-medium text-gray-700 truncate flex-1">Base Plan</Label>
+                             <div className="relative w-24 shrink-0">
+                               <Input 
+                                 type="number" placeholder="0" min="0" max="100" step="any"
+                                 className="pr-8 text-right font-mono h-8 bg-gray-50 focus:bg-white"
+                                 value={planDiscounts[plan.id] || ''}
+                                 onChange={e => setPlanDiscounts({...planDiscounts, [plan.id]: e.target.value})}
+                               />
+                               <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs font-semibold">%</span>
+                             </div>
+                           </div>
+                         )}
+                       </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </form>
           </div>
 
-          <div className="flex justify-end gap-3 pt-4 border-t">
-            <Button type="button" variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-            <Button type="submit" disabled={loading}>
+          <div className="flex justify-end gap-3 px-6 py-4 border-t bg-gray-50 shrink-0">
+            <Button type="button" variant="outline" onClick={() => setOpen(false)} className="px-6">Cancel</Button>
+            <Button type="submit" form="add-coupon-form" disabled={loading} className="px-8 bg-indigo-600 hover:bg-indigo-700 text-white shadow-md">
               {loading ? 'Creating...' : 'Create Coupon'}
             </Button>
           </div>
-        </form>
-      </DialogContent>
+        </DialogContent>
     </Dialog>
     </>
   )

@@ -3,19 +3,6 @@
 import { fetchAPI } from '@/utils/api'
 import { revalidatePath } from 'next/cache'
 
-export async function addPlan(formData: FormData) {
-  try {
-    await fetchAPI('/api/admin/crm-settings/plans', {
-      method: 'POST',
-      body: formData
-    })
-    revalidatePath('/admin/crm-settings')
-    return { success: true }
-  } catch (error: any) {
-    throw new Error(error.message)
-  }
-}
-
 export async function addSource(formData: FormData) {
   try {
     await fetchAPI('/api/admin/crm-settings/sources', {
@@ -24,20 +11,6 @@ export async function addSource(formData: FormData) {
     })
     revalidatePath('/admin/crm-settings')
     return { success: true }
-  } catch (error: any) {
-    throw new Error(error.message)
-  }
-}
-
-export async function togglePlan(id: string, isActive: boolean) {
-  try {
-    const formData = new FormData()
-    formData.append('is_active', isActive.toString())
-    await fetchAPI(`/api/admin/crm-settings/plans/${id}/toggle`, {
-      method: 'PUT',
-      body: formData
-    })
-    revalidatePath('/admin/crm-settings')
   } catch (error: any) {
     throw new Error(error.message)
   }

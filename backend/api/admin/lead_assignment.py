@@ -26,10 +26,14 @@ async def get_unassigned_leads(
     
     leads_data = []
     try:
-        l_res = supabase.table("leads").select("id, name, email, phone, status, created_at").is_("assigned_sales_rep_id", "null").execute()
+        l_res = supabase.table("leads").select("id, name, email, phone_number, status, created_at").is_("assigned_sales_rep_id", "null").execute()
         leads_data = l_res.data or []
-        for l in leads_data: l["record_type"] = "LEAD"
-    except Exception:
+        for l in leads_data:
+            l["record_type"] = "LEAD"
+            # Map phone_number to phone for frontend consistency
+            l["phone"] = l.pop("phone_number", None)
+    except Exception as e:
+        print(f"Error fetching leads: {e}")
         pass
         
     combined = users_data + leads_data

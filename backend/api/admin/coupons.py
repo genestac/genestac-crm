@@ -27,10 +27,23 @@ async def list_coupons(
         print(f"Skipping coupons table fetch (may not exist): {e}")
         coupons_data = []
         
-    # Also fetch plans so frontend can resolve plan names from plan_discounts JSON
-    plans_res = supabase.table("plans").select("id, name, price").execute()
+    try:
+        # Fetch plans
+        plans_res = supabase.table("plans").select("id, name, price").execute()
+        plans_data = plans_res.data or []
+        
+        # Fetch all variants
+        variants_res = supabase.table("plan_variants").select("id, plan_id, duration_label, duration_days, base_price, discounted_price").execute()
+        variants_data = variants_res.data or []
+        
+        # Join variants into plans
+        for plan in plans_data:
+            plan["plan_variants"] = [v for v in variants_data if v["plan_id"] == plan["id"]]
+    except Exception as e:
+        print(f"Error fetching plans or variants: {e}")
+        plans_data = []
     
-    return {"data": coupons_data, "plans": plans_res.data}
+    return {"data": coupons_data, "plans": plans_data}
 
 from pydantic import BaseModel
 from typing import Optional, Dict

@@ -13,7 +13,8 @@ import {
   BarChart3,
   LogOut,
   Settings,
-  Activity
+  Activity,
+  CreditCard
 } from 'lucide-react'
 import { logout } from '@/app/auth/actions'
 
@@ -28,6 +29,7 @@ const routes = [
   { name: 'Coupons', path: '/admin/coupons', icon: Settings },
   { name: 'Audit Logs', path: '/admin/logs', icon: Activity },
   { name: 'Lead Assignment', path: '/admin/lead-assignment', icon: Users },
+  { name: 'Medical Plans', path: '/admin/plans', icon: CreditCard },
   { name: 'CRM Settings', path: '/admin/crm-settings', icon: Settings },
   { name: 'Custom Fields', path: '/admin/custom-fields', icon: Settings },
 ]

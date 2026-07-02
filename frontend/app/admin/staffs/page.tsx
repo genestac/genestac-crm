@@ -9,6 +9,7 @@ import {
 } from '@/components/ui/table'
 import { RoleDropdown } from './role-dropdown'
 import { AddStaffDialog } from './add-staff-dialog'
+import { EditStaffDialog } from './edit-staff-dialog'
 
 export default async function StaffsPage() {
   let data;
@@ -53,8 +54,10 @@ export default async function StaffsPage() {
               <TableHead>Full Name</TableHead>
               <TableHead>Email</TableHead>
               <TableHead>Joined</TableHead>
+              <TableHead>Status</TableHead>
               <TableHead>Current Role</TableHead>
               <TableHead>Update Role</TableHead>
+              <TableHead className="text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -71,6 +74,13 @@ export default async function StaffsPage() {
                 </TableCell>
                 <TableCell>
                   <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
+                    profile.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                  }`}>
+                    {profile.is_active ? 'ACTIVE' : 'INACTIVE'}
+                  </span>
+                </TableCell>
+                <TableCell>
+                  <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
                     roleName === 'master_admin' || roleName === 'superadmin' ? 'bg-purple-100 text-purple-800' :
                     roleName === 'admin' ? 'bg-blue-100 text-blue-800' :
                     'bg-gray-100 text-gray-800'
@@ -84,6 +94,9 @@ export default async function StaffsPage() {
                     currentRole={roleName}
                     isMasterAdmin={isMasterAdmin}
                   />
+                </TableCell>
+                <TableCell className="text-right">
+                  <EditStaffDialog profile={profile} />
                 </TableCell>
               </TableRow>
             )})}

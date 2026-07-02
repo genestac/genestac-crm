@@ -31,3 +31,16 @@ export async function updateUserRole(userId: string, newRole: string) {
     throw new Error(error.message)
   }
 }
+
+export async function updateStaffDetails(userId: string, formData: FormData) {
+  try {
+    await fetchAPI(`/api/admin/staffs/${userId}/details`, {
+      method: 'PUT',
+      body: formData
+    })
+    revalidatePath('/admin/staffs')
+    return { success: true }
+  } catch (error: any) {
+    throw new Error(error.message)
+  }
+}
