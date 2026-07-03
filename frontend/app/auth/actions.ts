@@ -59,8 +59,9 @@ export async function login(formData: FormData) {
     const cookieStore = await cookies()
     cookieStore.set('access_token', token, { 
       httpOnly: true, 
-      secure: false, // Allow cookies over HTTP for testing without SSL
+      secure: true, // Enforce HTTPS
       sameSite: 'lax',
+      domain: '.genestac.com', // Share cookie across subdomains
       path: '/'
     })
   } else {

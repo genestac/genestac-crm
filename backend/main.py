@@ -1,13 +1,24 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from core.config import settings
-
 from api import sales, auth, doctor
 from api.admin import staffs, roles, crm_settings, logs, lead_assignment, coupons
 from api import public
 
+class ForceHTTPSMiddleware(BaseHTTPMiddleware):
+    """Force HTTPS scheme in FastAPI for proper URL generation behind proxies."""
+    async def dispatch(self, request, call_next):
+        request.scope["scheme"] = "https"
+        return await call_next(request)
+
 app = FastAPI(title=settings.PROJECT_NAME)
 
+# Trust proxy headers (e.g., from Nginx)
+app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=["*"])
+# Force HTTPS context
+app.add_middleware(ForceHTTPSMiddleware)
 origins = [o.strip() for o in settings.ALLOWED_ORIGINS.split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,

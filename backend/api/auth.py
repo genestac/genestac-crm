@@ -35,8 +35,9 @@ async def login_for_access_token(
             key="access_token",
             value=access_token,
             httponly=True,
-            secure=False, # Set to True in production
+            secure=True, # Enforce HTTPS
             samesite="lax",
+            domain=".genestac.com", # Allow sharing between crm.genestac.com and api.genestac.com
             max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         )
         
