@@ -516,13 +516,17 @@ async def list_orders(
         user_ids = [o["user_id"] for o in orders_data if o.get("user_id")]
         if user_ids:
             try:
-                users_res = supabase.table("leads").select("id, name, full_name, email, phone, metadata").in_("id", user_ids).execute()
-                users_map = {u["id"]: u for u in users_res.data} if users_res.data else {}
+                users_res = supabase.table("leads").select("id, name, email, phone_number, metadata").in_("id", user_ids).execute()
+                users_map = {}
+                if users_res.data:
+                    for u in users_res.data:
+                        u["phone"] = u.get("phone_number") # Normalise to 'phone' for the frontend
+                        users_map[u["id"]] = u
                 
                 # Fetch missing users from the 'users' table (actual onboarded patients)
                 missing_user_ids = [uid for uid in user_ids if uid not in users_map]
                 if missing_user_ids:
-                    patients_res = supabase.table("users").select("id, name, full_name, email, phone, metadata").in_("id", missing_user_ids).execute()
+                    patients_res = supabase.table("users").select("id, name, email, phone, metadata").in_("id", missing_user_ids).execute()
                     if patients_res.data:
                         for u in patients_res.data:
                             users_map[u["id"]] = u

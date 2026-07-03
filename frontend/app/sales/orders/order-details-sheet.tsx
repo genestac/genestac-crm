@@ -3,13 +3,12 @@
 import { useState } from 'react'
 import { format } from 'date-fns'
 import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetTrigger,
-  SheetClose,
-} from '@/components/ui/sheet'
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Eye, User, FileText, CreditCard, Activity, ShoppingBag } from 'lucide-react'
@@ -62,44 +61,43 @@ export function OrderDetailsSheet({ order }: { order: any }) {
   }
 
   return (
-    <Sheet open={open} onOpenChange={setOpen}>
-      <SheetTrigger render={
-        <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
-          <span className="sr-only">Open menu</span>
-          <Eye className="h-4 w-4" />
-        </Button>
-      } />
+    <>
+      <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => setOpen(true)}>
+        <span className="sr-only">Open menu</span>
+        <Eye className="h-4 w-4" />
+      </Button>
       
-      <SheetContent className="w-full sm:max-w-xl p-0 flex flex-col h-full border-l shadow-2xl">
-        <div className="bg-gray-50 border-b p-6 flex flex-col gap-4">
-          <div className="flex items-center justify-between">
-            <SheetTitle className="text-2xl font-bold flex items-center gap-2">
-              Order Details
-            </SheetTitle>
-            <SheetClose render={
-              <Button variant="outline" size="sm">Close</Button>
-            } />
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="sm:max-w-[700px] p-0 rounded-xl overflow-hidden flex flex-col max-h-[85vh] outline-none border-none shadow-2xl">
+          <div className="bg-gradient-to-br from-teal-50/50 to-white px-6 py-6 border-b shrink-0 flex items-center justify-between">
+            <DialogHeader>
+              <DialogTitle className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+                <ShoppingBag className="w-6 h-6 text-primary" /> Order Details
+              </DialogTitle>
+              <DialogDescription className="text-muted-foreground mt-1">
+                View transaction details and customer medical profile.
+              </DialogDescription>
+            </DialogHeader>
           </div>
           
-          <div className="flex items-center gap-4">
+          <div className="bg-gray-50/50 border-b px-6 py-4 flex items-center gap-6 text-sm shrink-0">
             <div className="flex flex-col">
-              <span className="text-sm text-muted-foreground">Order ID</span>
-              <span className="font-mono font-medium">{order.id?.slice(0, 8).toUpperCase()}</span>
+              <span className="text-xs text-muted-foreground">Order ID</span>
+              <span className="font-mono font-medium text-gray-900">{order.id?.slice(0, 8).toUpperCase()}</span>
             </div>
-            <div className="w-px h-10 bg-gray-200" />
+            <div className="w-px h-8 bg-gray-200" />
             <div className="flex flex-col">
-              <span className="text-sm text-muted-foreground">Date</span>
-              <span className="font-medium">{order.created_at ? format(new Date(order.created_at), 'PPP') : 'N/A'}</span>
+              <span className="text-xs text-muted-foreground">Date</span>
+              <span className="font-medium text-gray-900">{order.created_at ? format(new Date(order.created_at), 'PPP') : 'N/A'}</span>
             </div>
-            <div className="w-px h-10 bg-gray-200" />
+            <div className="w-px h-8 bg-gray-200" />
             <div className="flex flex-col">
-              <span className="text-sm text-muted-foreground">Status</span>
+              <span className="text-xs text-muted-foreground">Status</span>
               <div className="mt-1">{getStatusBadge(order.status)}</div>
             </div>
           </div>
-        </div>
 
-        <div className="flex-1 p-6 overflow-y-auto">
+          <div className="overflow-y-auto flex-1 p-6 space-y-8">
           <div className="space-y-8">
             
             {/* Customer Details */}
@@ -262,7 +260,8 @@ export function OrderDetailsSheet({ order }: { order: any }) {
 
           </div>
         </div>
-      </SheetContent>
-    </Sheet>
+      </DialogContent>
+    </Dialog>
+  </>
   )
 }
