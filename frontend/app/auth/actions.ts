@@ -33,20 +33,31 @@ export async function login(formData: FormData) {
     redirect('/auth?error=' + encodeURIComponent(errorData.detail || 'Login failed'))
   }
 
-  // Forward the cookie set by FastAPI to Next.js
-  const setCookieHeader = res.headers.get('set-cookie')
-  if (setCookieHeader) {
-    // Basic parser for the access_token cookie
-    const tokenMatch = setCookieHeader.match(/access_token=([^;]+)/)
-    if (tokenMatch) {
-      const cookieStore = await cookies()
-      cookieStore.set('access_token', tokenMatch[1], { 
-        httpOnly: true, 
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'lax',
-        path: '/'
-      })
+  // Extract access token from response body or set-cookie headers
+  const data = await res.json().catch(() => ({}))
+  let token = data.access_token
+
+  if (!token) {
+    // Fallback: parse access_token from Set-Cookie header
+    const setCookieHeader = res.headers.get('set-cookie')
+    if (setCookieHeader) {
+      const tokenMatch = setCookieHeader.match(/access_token=([^;]+)/)
+      if (tokenMatch) {
+        token = tokenMatch[1]
+      }
     }
+  }
+
+  if (token) {
+    const cookieStore = await cookies()
+    cookieStore.set('access_token', token, { 
+      httpOnly: true, 
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      path: '/'
+    })
+  } else {
+    redirect('/auth?error=' + encodeURIComponent('Login failed: Authentication token could not be retrieved.'))
   }
 
   revalidatePath('/', 'layout')

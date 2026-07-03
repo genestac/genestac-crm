@@ -40,7 +40,7 @@ async def login_for_access_token(
             max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         )
         
-        return {"success": True}
+        return {"success": True, "access_token": access_token}
     except Exception as e:
         raise HTTPException(
             status_code=401,
