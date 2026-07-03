@@ -17,6 +17,12 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7 # 7 days
 
+    # CORS Settings
+    ALLOWED_ORIGINS: str = "http://localhost:3000,http://localhost:3001,http://127.0.0.1:3000,http://127.0.0.1:3001"
+
+    # Running Environment (development, production, testing)
+    ENVIRONMENT: str = "development"
+
     class Config:
         env_file = ".env"
 
