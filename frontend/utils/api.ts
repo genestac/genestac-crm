@@ -9,7 +9,8 @@ export async function fetchAPI(endpoint: string, options: RequestInit = {}) {
   const headers = new Headers(options.headers || {})
   
   if (token) {
-    // Send token via Authorization header as requested
+    // Send token via Cookie AND Authorization headers (Original Way)
+    headers.set('Cookie', `access_token=${token}`)
     headers.set('Authorization', `Bearer ${token}`)
   }
   
