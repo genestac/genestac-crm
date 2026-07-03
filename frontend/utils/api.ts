@@ -9,16 +9,13 @@ export async function fetchAPI(endpoint: string, options: RequestInit = {}) {
   const headers = new Headers(options.headers || {})
   
   if (token) {
-    // We can still pass it as Bearer token if we want, OR we can pass it as a Cookie header
-    // The Python backend is looking for `request.cookies.get("access_token")`.
-    // Since fetch from Node to Python doesn't auto-send cookies, we MUST manually add the Cookie header.
-    headers.set('Cookie', `access_token=${token}`)
-    // Just in case we also pass the bearer token so the backend fallback works
+    // Send token via Authorization header as requested
     headers.set('Authorization', `Bearer ${token}`)
   }
   
   console.log(`[fetchAPI] Fetching: ${API_BASE_URL}${endpoint}`)
   const res = await fetch(`${API_BASE_URL}${endpoint}`, {
+    cache: 'no-store', // Prevent Next.js from caching authenticated API responses
     ...options,
     headers
   })
