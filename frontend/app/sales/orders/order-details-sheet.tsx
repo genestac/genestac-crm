@@ -1,5 +1,9 @@
 'use client'
 
+/**
+ * OrderDetailsSheet
+ * A centered modal dialog showing user profile information, medical history, order items, and transaction history.
+ */
 import { useState } from 'react'
 import { format } from 'date-fns'
 import {
