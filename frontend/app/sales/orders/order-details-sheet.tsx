@@ -19,8 +19,27 @@ export function OrderDetailsSheet({ order }: { order: any }) {
 
   const items = order.order_items || []
   const payments = order.payments || []
-  const user = order.user || {}
-  const metadata = user.metadata || {}
+  
+  // Use order.user if available, otherwise fall back to fields stored directly on the order row
+  const user = {
+    name: order.user?.name || order.user?.full_name || order.full_name || 'N/A',
+    full_name: order.user?.full_name || order.full_name || 'N/A',
+    email: order.user?.email || order.email || 'No email',
+    phone: order.user?.phone || order.phone || 'No phone',
+  }
+  
+  const metadata = {
+    age: order.user?.metadata?.age || order.age || 'N/A',
+    height_cm: order.user?.metadata?.height_cm || order.height_cm,
+    weight_kg: order.user?.metadata?.weight_kg || order.weight_kg,
+    diabetes: order.user?.metadata?.diabetes || order.diabetes || false,
+    thyroid_disease: order.user?.metadata?.thyroid_disease || order.thyroid_disease || false,
+    pcos: order.user?.metadata?.pcos || order.pcos || false,
+    fatty_liver: order.user?.metadata?.fatty_liver || order.fatty_liver || false,
+    pancreatitis: order.user?.metadata?.pancreatitis || order.pancreatitis || false,
+    kidney_disease: order.user?.metadata?.kidney_disease || order.kidney_disease || false,
+    current_medications: order.user?.metadata?.current_medications || order.current_medications,
+  }
 
   const getStatusBadge = (status: string) => {
     switch (status?.toLowerCase()) {
