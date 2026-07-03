@@ -35,22 +35,22 @@ export default async function AuthPage({
           </div>
         )}
 
-        <Card>
+        <Card className="hover:shadow-lg transition-shadow duration-300 border-gray-200/80">
           <CardHeader>
-            <CardTitle>Login</CardTitle>
+            <CardTitle className="text-2xl font-bold text-gray-900">Login</CardTitle>
             <CardDescription>Enter your credentials to continue.</CardDescription>
           </CardHeader>
           <CardContent>
             <form action={login} className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
-                <Input id="email" name="email" type="email" required placeholder="you@example.com" />
+                <Label htmlFor="email" className="text-gray-700">Email</Label>
+                <Input id="email" name="email" type="email" required placeholder="you@example.com" autoComplete="email" className="focus-visible:ring-indigo-500" />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="password">Password</Label>
-                <Input id="password" name="password" type="password" required />
+                <Label htmlFor="password" className="text-gray-700">Password</Label>
+                <Input id="password" name="password" type="password" required autoComplete="current-password" className="focus-visible:ring-indigo-500" />
               </div>
-              <Button type="submit" className="w-full">Sign In</Button>
+              <Button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700 transition-colors">Sign In</Button>
             </form>
           </CardContent>
         </Card>
