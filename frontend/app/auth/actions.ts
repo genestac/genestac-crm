@@ -59,7 +59,7 @@ export async function login(formData: FormData) {
     const cookieStore = await cookies()
     cookieStore.set('access_token', token, { 
       httpOnly: true, 
-      secure: process.env.NODE_ENV === 'production',
+      secure: false, // Allow cookies over HTTP for testing without SSL
       sameSite: 'lax',
       path: '/'
     })
