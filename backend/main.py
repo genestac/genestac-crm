@@ -30,7 +30,7 @@ from api import templates, custom_fields
 app.include_router(templates.router, prefix="/api/templates", tags=["templates"])
 app.include_router(custom_fields.router, prefix="/api/admin/custom-fields", tags=["admin-custom-fields"])
 app.include_router(public.router, prefix="/api/public", tags=["public"])
-# Health check endpoint to verify API deployment
+# Production deployment health check endpoint
 @app.get("/")
 def read_root():
     return {"message": "Welcome to Genestac API"}
