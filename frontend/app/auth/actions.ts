@@ -14,13 +14,19 @@ export async function login(formData: FormData) {
   form.append('username', email)
   form.append('password', password)
 
-  const res = await fetch(`${API_BASE_URL}/api/auth/login`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded'
-    },
-    body: form.toString()
-  })
+  let res;
+  try {
+    res = await fetch(`${API_BASE_URL}/api/auth/login`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: form.toString()
+    })
+  } catch (err: any) {
+    console.error("Login connection error:", err)
+    redirect('/auth?error=' + encodeURIComponent(`Cannot connect to backend server at ${API_BASE_URL}. Verify the server is running and accessible.`))
+  }
 
   if (!res.ok) {
     const errorData = await res.json().catch(() => ({ detail: 'Login failed' }))
