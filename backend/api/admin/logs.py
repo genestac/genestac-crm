@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from supabase import Client
 from db.supabase import get_supabase_client
 from api.deps import get_current_user
