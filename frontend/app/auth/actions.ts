@@ -34,15 +34,8 @@ export async function login(formData: FormData) {
   }
 
   // Extract access token from response body or set-cookie headers
-  const text = await res.text().catch(() => '')
-  let data: any = {}
-  try {
-    data = JSON.parse(text)
-  } catch (e) {
-    // It's not JSON! (Probably HTML from a redirect or Nginx welcome page)
-    console.error("Failed to parse JSON. Raw response:", text.substring(0, 200))
-  }
-  let token = data?.access_token
+  const data = await res.json().catch(() => ({}))
+  let token = data.access_token
 
   if (!token) {
     // Fallback: parse access_token from Set-Cookie header
@@ -64,11 +57,7 @@ export async function login(formData: FormData) {
       path: '/'
     })
   } else {
-    let errorMsg = 'Login failed: Authentication token could not be retrieved.'
-    if (text && !text.includes('access_token')) {
-      errorMsg += ` Raw response preview: ${text.substring(0, 100)}`
-    }
-    redirect('/auth?error=' + encodeURIComponent(errorMsg))
+    redirect('/auth?error=' + encodeURIComponent('Login failed: Authentication token could not be retrieved.'))
   }
 
   revalidatePath('/', 'layout')
