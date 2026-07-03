@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { AlertCircle, CheckCircle2 } from 'lucide-react'
 
 export default async function AuthPage({
   searchParams,
@@ -24,14 +25,16 @@ export default async function AuthPage({
         </div>
 
         {params.error && (
-          <div className="bg-red-50 text-red-500 p-4 rounded-md text-sm text-center">
-            {params.error}
+          <div className="bg-red-50 border border-red-200 text-red-700 p-4 rounded-xl text-sm flex items-start gap-3 shadow-sm">
+            <AlertCircle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
+            <div className="flex-1 font-medium">{params.error}</div>
           </div>
         )}
 
         {params.message && (
-          <div className="bg-green-50 text-green-600 p-4 rounded-md text-sm text-center">
-            {params.message}
+          <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 p-4 rounded-xl text-sm flex items-start gap-3 shadow-sm">
+            <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+            <div className="flex-1 font-medium">{params.message}</div>
           </div>
         )}
 
