@@ -14,7 +14,8 @@ import {
   LogOut,
   Settings,
   Activity,
-  CreditCard
+  CreditCard,
+  ShoppingCart
 } from 'lucide-react'
 import { logout } from '@/app/auth/actions'
 
@@ -22,6 +23,8 @@ const routes = [
   { name: 'Dashboard', path: '/admin', icon: LayoutDashboard },
   { name: 'Staff Management', path: '/admin/staffs', icon: Users },
   { name: 'Roles & Permissions', path: '/admin/roles', icon: ShieldCheck },
+  { name: 'Orders', path: '/admin/orders', icon: ShoppingCart },
+  { name: 'Abandoned Carts', path: '/admin/carts', icon: ShoppingCart },
   { name: 'Inventory', path: '/admin/inventory', icon: Box },
   { name: 'Logistics', path: '/admin/logistics', icon: Truck },
   { name: 'Doctors', path: '/admin/doctors', icon: Stethoscope },
@@ -43,7 +46,7 @@ export function AdminSidebar() {
       <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-br from-[var(--color-brand-green)] to-[var(--color-brand-teal)]"></div>
       
       <div className="flex items-center justify-center h-20 border-b border-border/50 shrink-0 mt-1 transition-transform hover:scale-105 duration-500">
-        <Image src="/genestac.webp" alt="Genestac Logo" width={100} height={28} className="object-contain dark:invert drop-shadow-md" />
+        <Image src="/genestac.webp" alt="Genestac Logo" width={100} height={28} priority style={{ height: 'auto' }} className="object-contain dark:invert drop-shadow-md" />
       </div>
       
       <div className="flex flex-col flex-1 overflow-y-auto mt-4 px-3 space-y-1">

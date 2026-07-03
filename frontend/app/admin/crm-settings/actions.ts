@@ -10,7 +10,6 @@ export async function addSource(formData: FormData) {
       body: formData
     })
     revalidatePath('/admin/crm-settings')
-    return { success: true }
   } catch (error: any) {
     throw new Error(error.message)
   }

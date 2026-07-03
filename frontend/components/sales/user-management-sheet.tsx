@@ -236,7 +236,7 @@ export function UserManagementSheet({
         <div className="flex border-b px-8 bg-muted/30 pt-2 gap-2">
           {[
             { id: "overview", label: "Overview" },
-            { id: "pipeline", label: "Pipeline" },
+            { id: "pipeline", label: "Prospect Lead" },
             { id: "appointments", label: "Appointments" },
             { id: "files", label: "Files & Notes" }
           ].map(tab => (

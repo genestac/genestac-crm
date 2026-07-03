@@ -27,7 +27,7 @@ export default async function RoleConfigPage({ params }: { params: Promise<{ id:
 
   // Group permissions by module
   const modulesMap = new Map<string, any[]>()
-  permissions?.forEach(p => {
+  permissions?.forEach((p: any) => {
     const moduleName = p.module || 'General'
     if (!modulesMap.has(moduleName)) {
       modulesMap.set(moduleName, [])
@@ -61,7 +61,7 @@ export default async function RoleConfigPage({ params }: { params: Promise<{ id:
       <RoleModulePermissions 
         roleId={role.id}
         modules={modules}
-        initialActiveIds={Array.from(activePermissionIds)}
+        initialActiveIds={Array.from(activePermissionIds) as string[]}
       />
     </div>
   )

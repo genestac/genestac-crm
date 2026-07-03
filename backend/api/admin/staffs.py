@@ -23,8 +23,8 @@ async def get_me(
     current_user: dict = Depends(get_current_user),
     supabase: Client = Depends(get_supabase_client)
 ):
-    profile = supabase.table("staffs").select("roles(name)").eq("id", current_user["id"]).single().execute()
-    return {"data": profile.data}
+    currentUserProfile = {"roles": current_user.get("roles")}
+    return {"data": currentUserProfile}
 
 @router.post("/")
 async def admin_create_user(
@@ -36,12 +36,7 @@ async def admin_create_user(
     supabase: Client = Depends(get_supabase_client)
 ):
     # Verify current user is master_admin
-    # In deps.py, we return the user profile. Let's assume it has role_id
-    # We need to fetch role name
-    profile_response = supabase.table("staffs").select("roles(name)").eq("id", current_user["id"]).single().execute()
-    profile = profile_response.data
-    
-    role_name = profile.get("roles", {}).get("name") if profile.get("roles") else None
+    role_name = current_user.get("role")
     if role_name not in ["master_admin", "superadmin"]:
         raise HTTPException(status_code=403, detail="Unauthorized. Master Admin access required.")
         

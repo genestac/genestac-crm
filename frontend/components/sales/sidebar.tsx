@@ -11,17 +11,20 @@ import {
   FolderOpen,
   LogOut,
   Kanban,
-  FileText
+  FileText,
+  ShoppingCart
 } from 'lucide-react'
 import { logout } from '@/app/auth/actions'
 
 const routes = [
   { name: 'Dashboard', path: '/sales', icon: LayoutDashboard },
-  { name: 'Pipeline', path: '/sales/pipeline', icon: Kanban },
+  { name: 'Prospect Leads', path: '/sales/pipeline', icon: Kanban },
   { name: 'Leads', path: '/sales/leads', icon: Users },
   { name: 'Follow-ups', path: '/sales/followups', icon: PhoneCall },
   { name: 'Contacted', path: '/sales/contacted', icon: FolderOpen },
   { name: 'Templates', path: '/sales/templates', icon: FileText },
+  { name: 'Orders', path: '/sales/orders', icon: ShoppingCart },
+  { name: 'Abandoned Carts', path: '/sales/carts', icon: ShoppingCart },
 ]
 
 export function SalesSidebar() {
@@ -33,7 +36,7 @@ export function SalesSidebar() {
       <div className="absolute top-0 left-0 w-full h-[3px] bg-gradient-to-r from-[var(--color-brand-green)] via-[var(--color-brand-teal)] to-[var(--color-brand-ocean)] shadow-[0_0_15px_rgba(29,182,178,0.5)]"></div>
       
       <div className="flex items-center justify-center h-20 border-b border-border/50 shrink-0 mt-1 transition-transform hover:scale-105 duration-500">
-        <Image src="/genestac.webp" alt="Genestac Logo" width={100} height={28} className="object-contain dark:invert drop-shadow-md" />
+        <Image src="/genestac.webp" alt="Genestac Logo" width={100} height={28} priority style={{ height: 'auto' }} className="object-contain dark:invert drop-shadow-md" />
       </div>
       
       <div className="flex flex-col flex-1 overflow-y-auto mt-4 px-3 space-y-1">

@@ -28,7 +28,7 @@ export function DoctorSidebar() {
       <div className="absolute top-0 left-0 w-full h-[3px] bg-gradient-to-r from-teal-500 via-emerald-500 to-cyan-500 shadow-[0_0_15px_rgba(20,184,166,0.5)]"></div>
       
       <div className="flex items-center justify-center h-20 border-b border-border/50 shrink-0 mt-1 transition-transform hover:scale-105 duration-500">
-        <Image src="/genestac.webp" alt="Genestac Logo" width={100} height={28} className="object-contain dark:invert drop-shadow-md" />
+        <Image src="/genestac.webp" alt="Genestac Logo" width={100} height={28} priority style={{ height: 'auto' }} className="object-contain dark:invert drop-shadow-md" />
       </div>
       
       <div className="flex flex-col flex-1 overflow-y-auto mt-4 px-3 space-y-1">

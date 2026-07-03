@@ -6,10 +6,7 @@ from api.deps import get_current_user
 router = APIRouter()
 
 def verify_admin(current_user: dict, supabase: Client):
-    profile_response = supabase.table("staffs").select("roles(name)").eq("id", current_user["id"]).single().execute()
-    profile = profile_response.data
-    
-    role_name = profile.get("roles", {}).get("name") if profile.get("roles") else None
+    role_name = current_user.get("role")
     if role_name not in ["superadmin", "master_admin", "admin"]:
         raise HTTPException(status_code=403, detail="Unauthorized. Admin access required.")
 

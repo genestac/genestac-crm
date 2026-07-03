@@ -19,7 +19,7 @@ function PlanToggle({ plan }: { plan: any }) {
       'use server'
       await togglePlan(plan.id, !plan.is_active)
     }}>
-      <Switch checked={plan.is_active} type="submit" />
+      <Switch checked={plan.is_active} {...({ type: 'submit' } as any)} />
     </form>
   )
 }

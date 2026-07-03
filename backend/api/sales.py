@@ -482,3 +482,102 @@ async def book_appointment(
     response = supabase.table("appointments").insert(payload).execute()
     return {"message": "Appointment booked successfully", "data": response.data}
 
+def is_admin(user: dict, supabase: Client) -> bool:
+    res = supabase.table("staffs").select("roles(name)").eq("id", user["id"]).execute()
+    if not res.data:
+        return False
+    role_name = res.data[0].get("roles", {}).get("name", "")
+    return role_name in ("superadmin", "master_admin", "admin")
+
+@router.get("/orders")
+async def list_orders(
+    current_user: dict = Depends(get_current_user),
+    supabase: Client = Depends(get_supabase_client)
+):
+    admin = is_admin(current_user, supabase)
+    
+    query = "*, order_items(*), payments(*)"
+    
+    if admin:
+        res = supabase.table("orders").select(query).order("created_at", desc=True).execute()
+    else:
+        leads_res = supabase.table("leads").select("id").eq("assigned_sales_rep_id", current_user["id"]).execute()
+        lead_ids = [lead["id"] for lead in leads_res.data] if leads_res.data else []
+        
+        if not lead_ids:
+            return {"data": []}
+            
+        res = supabase.table("orders").select(query).in_("user_id", lead_ids).order("created_at", desc=True).execute()
+        
+    # We might want to enrich the orders with lead/user data since user_id points to leads/users
+    # Let's try to fetch user info for these orders
+    orders_data = res.data or []
+    if orders_data:
+        user_ids = [o["user_id"] for o in orders_data if o.get("user_id")]
+        if user_ids:
+            try:
+                users_res = supabase.table("leads").select("id, name, full_name, email, phone, metadata").in_("id", user_ids).execute()
+                users_map = {u["id"]: u for u in users_res.data}
+                for o in orders_data:
+                    if o.get("user_id") in users_map:
+                        o["user"] = users_map[o["user_id"]]
+            except Exception:
+                pass
+                
+    return {"data": orders_data}
+
+@router.get("/test_carts")
+async def test_carts(supabase: Client = Depends(get_supabase_client)):
+    try:
+        res = supabase.table("inventory").select("*").limit(1).execute()
+        return {"success": True, "data": res.data}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+@router.get("/carts")
+async def list_carts(
+    current_user: dict = Depends(get_current_user),
+    supabase: Client = Depends(get_supabase_client)
+):
+    admin = is_admin(current_user, supabase)
+    
+    # 1. Fetch Carts
+    if admin:
+        res = supabase.table("cart").select("*").order("added_at", desc=True).execute()
+    else:
+        leads_res = supabase.table("leads").select("id").eq("assigned_sales_rep_id", current_user["id"]).execute()
+        lead_ids = [lead["id"] for lead in leads_res.data] if leads_res.data else []
+        
+        if not lead_ids:
+            return {"data": []}
+            
+        res = supabase.table("cart").select("*").in_("user_id", lead_ids).order("added_at", desc=True).execute()
+        
+    carts_data = res.data or []
+    
+    if carts_data:
+        # 2. Fetch Users
+        user_ids = list(set([c["user_id"] for c in carts_data if c.get("user_id")]))
+        if user_ids:
+            try:
+                users_res = supabase.table("leads").select("id, name, full_name, email, phone").in_("id", user_ids).execute()
+                users_map = {u["id"]: u for u in users_res.data}
+                for c in carts_data:
+                    if c.get("user_id") in users_map:
+                        c["user"] = users_map[c["user_id"]]
+            except Exception:
+                pass
+                
+        # 3. Fetch Inventory (medicines)
+        medicine_ids = list(set([c["medicine_id"] for c in carts_data if c.get("medicine_id")]))
+        if medicine_ids:
+            try:
+                inv_res = supabase.table("inventory").select("id, name, price").in_("id", medicine_ids).execute()
+                inv_map = {i["id"]: i for i in inv_res.data}
+                for c in carts_data:
+                    if c.get("medicine_id") in inv_map:
+                        c["inventory"] = inv_map[c["medicine_id"]]
+            except Exception:
+                pass
+                
+    return {"data": carts_data}

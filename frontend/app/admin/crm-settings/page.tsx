@@ -40,7 +40,7 @@ export default async function CRMSettingsPage() {
             </form>
 
             <div className="space-y-3">
-              {sources?.map((source) => (
+              {sources?.map((source: any) => (
                 <div key={source.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border">
                   <p className="font-medium">{source.name}</p>
                   <span className={`px-2 py-1 text-xs rounded-full ${source.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'}`}>

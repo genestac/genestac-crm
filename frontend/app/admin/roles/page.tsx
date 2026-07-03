@@ -35,7 +35,7 @@ export default async function RolesPage() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {roles?.map((role) => (
+        {roles?.map((role: any) => (
           <Link key={role.id} href={`/admin/roles/${role.id}`}>
             <div className="bg-white border rounded-xl p-6 shadow-sm hover:shadow-md transition-shadow cursor-pointer flex flex-col h-full group">
               <div className="flex items-center gap-3 mb-4">

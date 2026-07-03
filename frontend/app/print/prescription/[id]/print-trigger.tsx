@@ -490,8 +490,8 @@ export default function PrintTrigger() {
   const downloadPDF = async () => {
     try {
       // Dynamically import pdfmake only on client side
-      const pdfMake = (await import('pdfmake/build/pdfmake')).default
-      const pdfFonts = (await import('pdfmake/build/vfs_fonts')).default
+      const pdfMake = (await import('pdfmake/build/pdfmake')).default as any
+      const pdfFonts = (await import('pdfmake/build/vfs_fonts')).default as any
       pdfMake.vfs = pdfFonts.pdfMake.vfs
 
       // Get prescription data from the DOM

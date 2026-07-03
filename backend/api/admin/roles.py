@@ -7,10 +7,7 @@ from typing import Optional
 router = APIRouter()
 
 def verify_master_admin(current_user: dict, supabase: Client):
-    profile_response = supabase.table("staffs").select("roles(name)").eq("id", current_user["id"]).single().execute()
-    profile = profile_response.data
-    
-    role_name = profile.get("roles", {}).get("name") if profile.get("roles") else None
+    role_name = current_user.get("role")
     if role_name not in ["master_admin", "superadmin"]:
         raise HTTPException(status_code=403, detail="Unauthorized. Master Admin access required.")
 
@@ -22,9 +19,9 @@ async def list_roles(
     res = supabase.table("roles").select("*").order("name").execute()
     
     # We also need currentUserProfile to determine if user is master_admin for UI rendering
-    profile = supabase.table("staffs").select("roles(name)").eq("id", current_user["id"]).single().execute()
+    currentUserProfile = {"roles": current_user.get("roles")}
     
-    return {"roles": res.data, "currentUserProfile": profile.data}
+    return {"roles": res.data, "currentUserProfile": currentUserProfile}
 
 @router.get("/{role_id}")
 async def get_role_details(

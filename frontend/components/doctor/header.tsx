@@ -1,6 +1,8 @@
 'use client'
 
-import { Bell, User } from 'lucide-react'
+import { useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { Bell, User, RefreshCw } from 'lucide-react'
 import { ThemeToggle } from '@/components/theme-toggle'
 import {
   DropdownMenu,
@@ -15,6 +17,17 @@ import { Button, buttonVariants } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
 export function DoctorHeader() {
+  const router = useRouter()
+  const [isRefreshing, setIsRefreshing] = useState(false)
+
+  const handleRefresh = () => {
+    setIsRefreshing(true)
+    router.refresh()
+    setTimeout(() => {
+      setIsRefreshing(false)
+    }, 800)
+  }
+
   return (
     <header className="sticky top-0 z-10 flex items-center justify-between h-20 px-8 bg-card/80 backdrop-blur-xl border-b border-border/50 shrink-0 shadow-sm">
       <div className="flex items-center">
@@ -22,6 +35,15 @@ export function DoctorHeader() {
       </div>
 
       <div className="flex items-center space-x-6">
+        <Button 
+          variant="ghost" 
+          size="icon" 
+          onClick={handleRefresh}
+          className="text-foreground hover:bg-muted/80 rounded-full transition-transform hover:scale-105"
+          title="Refresh Data"
+        >
+          <RefreshCw className={cn("w-5 h-5 text-muted-foreground hover:text-foreground", isRefreshing && "animate-spin text-primary")} />
+        </Button>
         <ThemeToggle />
         <Button variant="ghost" size="icon" className="relative text-foreground hover:bg-muted/80 rounded-full transition-transform hover:scale-105">
           <Bell className="w-5 h-5" />

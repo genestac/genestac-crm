@@ -17,6 +17,22 @@ export function EditCouponModal({ coupon, plans }: { coupon: any; plans: any[] }
       Object.entries(coupon.plan_discounts || {}).map(([k, v]) => [k, String(v)])
     )
   )
+  const [globalDiscount, setGlobalDiscount] = useState('')
+
+  const handleApplyToAll = () => {
+    if (!globalDiscount) return
+    const newDiscounts: Record<string, string> = {}
+    plans.forEach(plan => {
+      if (plan.plan_variants?.length > 0) {
+        plan.plan_variants.forEach((v: any) => {
+          newDiscounts[v.id] = globalDiscount
+        })
+      } else {
+        newDiscounts[plan.id] = globalDiscount
+      }
+    })
+    setPlanDiscounts(newDiscounts)
+  }
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
@@ -135,7 +151,23 @@ export function EditCouponModal({ coupon, plans }: { coupon: any; plans: any[] }
                 <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2 border-b pb-2">
                   <Percent className="w-4 h-4 text-indigo-500" /> Plan Discounts
                 </h3>
-                <p className="text-xs text-gray-500">Configure the percentage discount applied when this coupon is used for specific plans. Leave blank if the coupon doesn't apply.</p>
+                <div className="flex items-center justify-between">
+                  <p className="text-xs text-gray-500">Configure the percentage discount applied when this coupon is used.</p>
+                  <div className="flex items-center gap-2">
+                    <Input 
+                      type="number" 
+                      placeholder="%" 
+                      min="0" 
+                      max="100" 
+                      value={globalDiscount}
+                      onChange={e => setGlobalDiscount(e.target.value)}
+                      className="w-16 h-8 text-sm px-2 bg-gray-50"
+                    />
+                    <Button type="button" onClick={handleApplyToAll} variant="secondary" size="sm" className="h-8 text-xs bg-indigo-50 text-indigo-600 hover:bg-indigo-100">
+                      Apply to All
+                    </Button>
+                  </div>
+                </div>
                 <div className="bg-gray-50 p-5 rounded-xl border flex flex-col gap-5">
                   {plans.map(plan => (
                     <div key={plan.id} className="space-y-2">

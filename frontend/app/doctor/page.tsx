@@ -40,7 +40,7 @@ export default function DoctorDashboard() {
       console.log('All appointments (no filter):', todaysAppts)
       
       // Sort by time
-      todaysAppts.sort((a, b) => new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime())
+      todaysAppts.sort((a: any, b: any) => new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime())
       setAppointments(todaysAppts)
       
     } catch (err) {
