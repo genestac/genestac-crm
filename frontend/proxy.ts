@@ -1,7 +1,23 @@
 import { NextResponse, type NextRequest } from 'next/server'
+import { getAuthToken } from './utils/cookie-helper'
 
 export async function proxy(request: NextRequest) {
-  const token = request.cookies.get('access_token')?.value
+  if (request.nextUrl.searchParams.get('clear') === '1') {
+    const url = request.nextUrl.clone()
+    url.searchParams.delete('clear')
+    const response = NextResponse.redirect(url)
+    
+    response.cookies.delete('access_token')
+    const allCookies = request.cookies.getAll()
+    for (const cookie of allCookies) {
+      if (cookie.name.startsWith('sb-') && cookie.name.endsWith('-auth-token')) {
+        response.cookies.delete(cookie.name)
+      }
+    }
+    return response
+  }
+
+  const token = getAuthToken(request.cookies.getAll())
   const isAuthPage = request.nextUrl.pathname.startsWith('/auth')
   const isSetupPage = request.nextUrl.pathname.startsWith('/setup')
 

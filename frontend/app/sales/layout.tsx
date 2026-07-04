@@ -11,7 +11,7 @@ export default async function SalesLayout({ children }: { children: React.ReactN
   }
 
   const roleName = data.user.role
-  if (!roleName || !['sales', 'admin', 'master_admin', 'superadmin', 'manager', 'support'].includes(roleName)) {
+  if (!roleName || !['sales', 'admin', 'master_admin', 'superadmin', 'SUPER_ADMIN', 'manager', 'support'].includes(roleName)) {
     redirect('/auth?error=unauthorized')
   }
 
@@ -19,7 +19,7 @@ export default async function SalesLayout({ children }: { children: React.ReactN
     <div className="flex h-screen overflow-hidden bg-gray-50">
       <SalesSidebar />
       <div className="flex flex-col flex-1 w-full">
-        <SalesHeader />
+        <SalesHeader role={roleName} />
         <main className="flex-1 overflow-y-auto bg-gray-50/50 p-6">
           {children}
         </main>

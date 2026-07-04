@@ -32,7 +32,6 @@ export async function createLead(formData: FormData) {
     method: 'POST',
     body: formData // send as multipart/form-data implicitly by not setting Content-Type
   })
-  revalidatePath('/sales/leads')
 }
 
 export async function updateLeadDetails(formData: FormData) {
@@ -41,7 +40,7 @@ export async function updateLeadDetails(formData: FormData) {
     method: 'PUT',
     body: formData
   })
-  revalidatePath('/sales', 'layout')
+  revalidatePath('/sales/leads')
 }
 
 export async function uploadLeadDocument(formData: FormData) {
@@ -50,7 +49,6 @@ export async function uploadLeadDocument(formData: FormData) {
     method: 'POST',
     body: formData
   })
-  revalidatePath('/sales', 'layout')
   return { success: true }
 }
 
@@ -65,7 +63,6 @@ export async function addInteractionNote(userId: string, content: string, create
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ content, created_at: createdAt })
   })
-  revalidatePath('/sales', 'layout')
   return { success: true }
 }
 
@@ -86,4 +83,37 @@ export async function bookAppointment(formData: FormData) {
   })
   revalidatePath('/sales', 'layout')
   return { success: true }
+}
+
+export async function generateRazorpayLink(leadId: string, planId: string, discount: number = 0, invoiceId?: string) {
+  const formData = new FormData()
+  if (planId) formData.append('plan_id', planId)
+  formData.append('discount', discount.toString())
+  if (invoiceId) formData.append('invoice_id', invoiceId)
+  
+  const response = await fetchAPI(`/api/sales/leads/${leadId}/generate-payment`, {
+    method: 'POST',
+    body: formData
+  })
+  
+  return response
+}
+
+export async function getProformaInvoices(leadId: string) {
+  const res = await fetchAPI(`/api/sales/leads/${leadId}/invoices`)
+  return res.data || []
+}
+
+export async function deleteProformaInvoice(invoiceId: string) {
+  await fetchAPI(`/api/admin/crm-settings/invoices/${invoiceId}`, {
+    method: 'DELETE',
+    headers: { 'Cookie': (await cookies()).toString() }
+  })
+}
+
+export async function getCurrentUserRole() {
+  const data = await fetchAPI('/api/auth/me', {
+    headers: { 'Cookie': (await cookies()).toString() }
+  })
+  return data?.user?.role || data?.role || 'USER'
 }

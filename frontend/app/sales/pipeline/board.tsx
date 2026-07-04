@@ -113,7 +113,7 @@ export function ProspectLeadsBoard({ initialLeads }: { initialLeads: any[] }) {
                 className="cursor-grab active:cursor-grabbing transform transition-transform hover:-translate-y-0.5"
               >
                 <UserManagementSheet lead={u}>
-                  <div className="w-full text-left outline-none">
+                  <button type="button" className="w-full text-left outline-none">
                     <Card className="hover:border-primary/40 hover:shadow-md transition-all duration-300 border-gray-200/70 group bg-white overflow-hidden rounded-lg">
                       <div className={`h-0.5 w-full ${STAGE_COLORS[u.status] || 'bg-gray-300'}`} />
                       <CardContent className="p-3 flex flex-col gap-2.5">
@@ -149,7 +149,7 @@ export function ProspectLeadsBoard({ initialLeads }: { initialLeads: any[] }) {
                         )}
                       </CardContent>
                     </Card>
-                  </div>
+                  </button>
                 </UserManagementSheet>
               </div>
             ))}

@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { cookies } from 'next/headers'
+import { clearAuthCookies } from '@/utils/cookie-helper'
 
 const API_BASE_URL = process.env.API_BASE_URL || 'http://localhost:8000'
 
@@ -56,12 +57,13 @@ export async function login(formData: FormData) {
   }
 
   if (token) {
+    const isProd = process.env.NODE_ENV === 'production' && !API_BASE_URL.includes('localhost');
     const cookieStore = await cookies()
     cookieStore.set('access_token', token, { 
       httpOnly: true, 
-      secure: true, // Enforce HTTPS
+      secure: isProd, // Enforce HTTPS in prod
       sameSite: 'lax',
-      domain: '.genestac.com', // Share cookie across subdomains
+      ...(isProd ? { domain: '.genestac.com' } : {}), // Share cookie across subdomains in prod
       path: '/'
     })
   } else {
@@ -89,6 +91,6 @@ export async function logout() {
     }).catch(() => {}) // Ignore errors on logout
   }
   
-  cookieStore.delete('access_token')
+  clearAuthCookies(cookieStore)
   redirect('/auth')
 }

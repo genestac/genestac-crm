@@ -7,6 +7,7 @@ export async function addSource(formData: FormData) {
   try {
     await fetchAPI('/api/admin/crm-settings/sources', {
       method: 'POST',
+      headers: { 'Cookie': (await cookies()).toString() },
       body: formData
     })
     revalidatePath('/admin/crm-settings')
@@ -21,6 +22,7 @@ export async function toggleSource(id: string, isActive: boolean) {
     formData.append('is_active', isActive.toString())
     await fetchAPI(`/api/admin/crm-settings/sources/${id}/toggle`, {
       method: 'PUT',
+      headers: { 'Cookie': (await cookies()).toString() },
       body: formData
     })
     revalidatePath('/admin/crm-settings')
@@ -31,7 +33,7 @@ export async function toggleSource(id: string, isActive: boolean) {
 
 import { cookies } from 'next/headers'
 
-export async function updateGlobalSettings(settings: { shared_lead_pool: boolean }) {
+export async function updateGlobalSettings(settings: any) {
   const res = await fetchAPI('/api/admin/crm-settings/global', {
     method: 'PUT',
     headers: { 

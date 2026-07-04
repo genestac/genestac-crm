@@ -1,15 +1,12 @@
 import { fetchAPI } from '@/utils/api'
 import { redirect } from 'next/navigation'
-import { cookies } from 'next/headers'
 
 export default async function Home() {
   const data = await fetchAPI('/api/auth/me').catch(() => null)
   
   if (!data || !data.user) {
     // If we have no user data but they hit the home page, clear any invalid tokens
-    const cookieStore = await cookies()
-    cookieStore.delete('access_token')
-    redirect('/auth')
+    redirect('/auth?clear=1')
   }
   
   const role = data.user.role

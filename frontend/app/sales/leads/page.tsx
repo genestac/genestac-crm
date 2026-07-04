@@ -6,8 +6,16 @@ import { Button } from '@/components/ui/button'
 import { Calendar, Mail, Phone, Settings2 } from 'lucide-react'
 
 export default async function MyLeadsPage() {
-  const response = await fetchAPI('/api/sales/leads?statuses=NEW,UNREAD,ASSIGNED,CONTACT_ATTEMPTED')
-  const leads = response.data
+  let leads: any[] = []
+  let errorMessage: string | null = null
+
+  try {
+    const response = await fetchAPI('/api/sales/leads?statuses=NEW,UNREAD,ASSIGNED,CONTACT_ATTEMPTED')
+    leads = response?.data || []
+  } catch (error: any) {
+    console.error('[sales/leads] Failed to load leads:', error)
+    errorMessage = error?.message || 'Unable to load leads right now.'
+  }
 
   return (
     <div className="space-y-6">
@@ -22,7 +30,12 @@ export default async function MyLeadsPage() {
       </div>
 
       <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
-        {leads && leads.length > 0 ? (
+        {errorMessage ? (
+          <div className="p-10 text-center text-sm text-red-600">
+            <p className="font-medium">We could not load your leads.</p>
+            <p className="mt-1 text-red-500">{errorMessage}</p>
+          </div>
+        ) : leads && leads.length > 0 ? (
           <div className="overflow-x-auto">
             <table className="w-full text-sm text-left whitespace-nowrap">
               <thead className="bg-gray-50 border-b">

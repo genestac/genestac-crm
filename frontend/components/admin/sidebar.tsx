@@ -19,22 +19,47 @@ import {
 } from 'lucide-react'
 import { logout } from '@/app/auth/actions'
 
-const routes = [
-  { name: 'Dashboard', path: '/admin', icon: LayoutDashboard },
-  { name: 'Staff Management', path: '/admin/staffs', icon: Users },
-  { name: 'Roles & Permissions', path: '/admin/roles', icon: ShieldCheck },
-  { name: 'Orders', path: '/admin/orders', icon: ShoppingCart },
-  { name: 'Abandoned Carts', path: '/admin/carts', icon: ShoppingCart },
-  { name: 'Inventory', path: '/admin/inventory', icon: Box },
-  { name: 'Logistics', path: '/admin/logistics', icon: Truck },
-  { name: 'Doctors', path: '/admin/doctors', icon: Stethoscope },
-  { name: 'Analytics', path: '/admin/analytics', icon: BarChart3 },
-  { name: 'Coupons', path: '/admin/coupons', icon: Settings },
-  { name: 'Audit Logs', path: '/admin/logs', icon: Activity },
-  { name: 'Lead Assignment', path: '/admin/lead-assignment', icon: Users },
-  { name: 'Medical Plans', path: '/admin/plans', icon: CreditCard },
-  { name: 'CRM Settings', path: '/admin/crm-settings', icon: Settings },
-  { name: 'Custom Fields', path: '/admin/custom-fields', icon: Settings },
+const modules = [
+  {
+    title: 'Overview',
+    routes: [
+      { name: 'Dashboard', path: '/admin', icon: LayoutDashboard },
+      { name: 'Analytics', path: '/admin/analytics', icon: BarChart3 },
+    ]
+  },
+  {
+    title: 'E-Commerce',
+    routes: [
+      { name: 'Orders', path: '/admin/orders', icon: ShoppingCart },
+      { name: 'Abandoned Carts', path: '/admin/carts', icon: ShoppingCart },
+      { name: 'Inventory', path: '/admin/inventory', icon: Box },
+      { name: 'Logistics', path: '/admin/logistics', icon: Truck },
+    ]
+  },
+  {
+    title: 'CRM & Health',
+    routes: [
+      { name: 'Lead Assignment', path: '/admin/lead-assignment', icon: Users },
+      { name: 'Doctors', path: '/admin/doctors', icon: Stethoscope },
+      { name: 'Medical Plans', path: '/admin/plans', icon: CreditCard },
+    ]
+  },
+  {
+    title: 'System & Security',
+    routes: [
+      { name: 'Staff Management', path: '/admin/staffs', icon: Users },
+      { name: 'Roles & Permissions', path: '/admin/roles', icon: ShieldCheck },
+      { name: 'Audit Logs', path: '/admin/logs', icon: Activity },
+    ]
+  },
+  {
+    title: 'Settings',
+    routes: [
+      { name: 'Coupons', path: '/admin/coupons', icon: Settings },
+      { name: 'CRM Settings', path: '/admin/crm-settings', icon: Settings },
+      { name: 'Custom Fields', path: '/admin/custom-fields', icon: Settings },
+    ]
+  }
 ]
 
 export function AdminSidebar() {
@@ -49,24 +74,33 @@ export function AdminSidebar() {
         <Image src="/genestac.webp" alt="Genestac Logo" width={100} height={28} priority style={{ height: 'auto' }} className="object-contain dark:invert drop-shadow-md" />
       </div>
       
-      <div className="flex flex-col flex-1 overflow-y-auto mt-4 px-3 space-y-1">
-        {routes.map((route) => {
-          const isActive = pathname === route.path
-          return (
-            <Link
-              key={route.path}
-              href={route.path}
-              className={`flex items-center px-4 py-3 rounded-lg transition-all duration-200 ${
-                isActive 
-                  ? 'bg-primary text-primary-foreground font-semibold shadow-sm' 
-                  : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-              }`}
-            >
-              <route.icon className="w-5 h-5 mr-3" />
-              <span>{route.name}</span>
-            </Link>
-          )
-        })}
+      <div className="flex flex-col flex-1 overflow-y-auto mt-4 px-3 space-y-6 pb-6 scrollbar-thin">
+        {modules.map((module) => (
+          <div key={module.title} className="space-y-1">
+            <h4 className="px-4 text-xs font-semibold uppercase tracking-wider text-muted-foreground/60 mb-2">
+              {module.title}
+            </h4>
+            <div className="space-y-1">
+              {module.routes.map((route) => {
+                const isActive = pathname === route.path
+                return (
+                  <Link
+                    key={route.path}
+                    href={route.path}
+                    className={`flex items-center px-4 py-2.5 rounded-lg transition-all duration-200 ${
+                      isActive 
+                        ? 'bg-primary text-primary-foreground font-semibold shadow-sm' 
+                        : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                    }`}
+                  >
+                    <route.icon className="w-5 h-5 mr-3" />
+                    <span className="text-sm">{route.name}</span>
+                  </Link>
+                )
+              })}
+            </div>
+          </div>
+        ))}
       </div>
 
       <div className="p-4 border-t border-border shrink-0">

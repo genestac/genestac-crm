@@ -16,7 +16,7 @@ import {
 import { Button, buttonVariants } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
-export function AdminHeader() {
+export function AdminHeader({ role }: { role?: string }) {
   const router = useRouter()
   const [isRefreshing, setIsRefreshing] = useState(false)
 
@@ -63,6 +63,14 @@ export function AdminHeader() {
               <DropdownMenuSeparator />
               <DropdownMenuItem>Profile Settings</DropdownMenuItem>
               <DropdownMenuItem>Preferences</DropdownMenuItem>
+              {(role === 'SUPER_ADMIN' || role === 'admin' || role === 'master_admin') && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => router.push('/sales')}>
+                    Switch to Sales Dashboard
+                  </DropdownMenuItem>
+                </>
+              )}
             </DropdownMenuGroup>
           </DropdownMenuContent>
         </DropdownMenu>

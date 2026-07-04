@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Form
+from fastapi import APIRouter, Depends, HTTPException, Form, Request
 from supabase import Client
 from db.supabase import get_supabase_client
 from api.deps import get_current_user
@@ -54,6 +54,7 @@ class PlanCreateRequest(BaseModel):
     duration_value: Optional[int] = None
     duration_unit: Optional[str] = None
     price: Optional[float] = None
+    gst_percentage: Optional[float] = 5.0
     variants: Optional[List[VariantRequest]] = []
 
 class PlanUpdateRequest(BaseModel):
@@ -71,6 +72,7 @@ class PlanUpdateRequest(BaseModel):
     duration_value: Optional[int] = None
     duration_unit: Optional[str] = None
     price: Optional[float] = None
+    gst_percentage: Optional[float] = None
     variants: Optional[List[VariantRequest]] = None
 
 @router.post("/plans")
@@ -175,37 +177,109 @@ import json
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data")
 GLOBAL_SETTINGS_FILE = os.path.join(DATA_DIR, "global_settings.json")
 
-def load_global_settings():
-    if not os.path.exists(GLOBAL_SETTINGS_FILE):
-        return {"shared_lead_pool": False}
+def get_global_settings_from_db(supabase: Client):
+    default_settings = {
+        "shared_lead_pool": False,
+        "company_info": {
+            "name": "GENESTAC THERAPEUTICS LLP",
+            "address": "1st Floor, 106 Block-A, Unitech Business Zone,\\nSouth City-2, Gurugram, Haryana, 122018",
+            "gstin": "06AAWFG7278E1ZU",
+            "state_name": "Haryana",
+            "state_code": "06",
+            "logo_text": "[ Company Logo Space ]"
+        },
+        "bank_details": {
+            "bank_name": "Hdfc Bank",
+            "account_no": "50200101417442",
+            "branch_ifsc": "EMAAR MGF EMERALD HILLS & HDFC0006067"
+        },
+        "invoice_settings": {
+            "prefix": "Gen/26-27/",
+            "current_sequence": 2,
+            "declaration": "We declare that this invoice shows the actual price of the goods described and that all particulars are true and correct."
+        }
+    }
+    
     try:
-        with open(GLOBAL_SETTINGS_FILE, "r") as f:
-            return json.load(f)
-    except:
-        return {"shared_lead_pool": False}
+        res = supabase.table("global_settings").select("*").execute()
+        data = default_settings.copy()
+        if res.data:
+            for row in res.data:
+                key = row["settings_key"]
+                val = row["settings_value"]
+                
+                # Merge logic
+                if key in data and isinstance(data[key], dict) and isinstance(val, dict):
+                    data[key].update(val)
+                else:
+                    data[key] = val
+        return data
+    except Exception as e:
+        print(f"Failed to load settings from DB: {e}")
+        return default_settings
 
 @router.get("/global")
 async def get_global_settings(
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
+    supabase: Client = Depends(get_supabase_client)
 ):
-    return {"data": load_global_settings()}
+    return {"data": get_global_settings_from_db(supabase)}
 
 from pydantic import BaseModel
+from typing import Optional, Dict, Any
+
 class GlobalSettingsUpdate(BaseModel):
-    shared_lead_pool: bool
+    shared_lead_pool: Optional[bool] = None
+    company_info: Optional[Dict[str, Any]] = None
+    bank_details: Optional[Dict[str, Any]] = None
+    invoice_settings: Optional[Dict[str, Any]] = None
 
 @router.put("/global")
 async def update_global_settings(
-    settings: GlobalSettingsUpdate,
-    current_user: dict = Depends(get_current_user)
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+    supabase: Client = Depends(get_supabase_client)
 ):
-    if not os.path.exists(DATA_DIR):
-        os.makedirs(DATA_DIR)
+    try:
+        if current_user["role"] != "SUPER_ADMIN":
+            raise HTTPException(status_code=403, detail="Not authorized")
+            
+        data = await request.json()
+        settings = get_global_settings_from_db(supabase)
         
-    current = load_global_settings()
-    current["shared_lead_pool"] = settings.shared_lead_pool
-    
-    with open(GLOBAL_SETTINGS_FILE, "w") as f:
-        json.dump(current, f, indent=2)
+        # Deep merge
+        def deep_update(d, u):
+            for k, v in u.items():
+                if isinstance(v, dict):
+                    d[k] = deep_update(d.get(k, {}), v)
+                else:
+                    d[k] = v
+            return d
+            
+        updated = deep_update(settings, data)
         
-    return {"success": True, "message": "Settings updated", "data": current}
+        # Save to DB
+        for key, val in updated.items():
+            supabase.table("global_settings").upsert({
+                "settings_key": key,
+                "settings_value": val
+            }, on_conflict="settings_key").execute()
+            
+        return {"success": True, "data": updated}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/invoices/{invoice_id}")
+async def delete_proforma_invoice(
+    invoice_id: str,
+    current_user: dict = Depends(get_current_user),
+    supabase: Client = Depends(get_supabase_client)
+):
+    if current_user["role"] != "SUPER_ADMIN":
+        raise HTTPException(status_code=403, detail="Only Super Admins can delete invoices")
+        
+    try:
+        supabase.table("proforma_invoices").delete().eq("id", invoice_id).execute()
+        return {"success": True, "message": "Invoice deleted"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

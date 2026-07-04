@@ -1,8 +1,12 @@
 import { fetchAPI } from '@/utils/api'
 import { Bell } from 'lucide-react'
+import { cookies } from 'next/headers'
 
 export default async function SalesDashboard() {
-  const metrics = await fetchAPI('/api/sales/metrics')
+  const cookieHeader = (await cookies()).toString()
+  const metrics = await fetchAPI('/api/sales/metrics', {
+    headers: { Cookie: cookieHeader }
+  }).catch(() => ({}))
   
   const totalLeads = metrics.totalLeads || 0
   const newLeadsToday = metrics.newLeadsToday || 0

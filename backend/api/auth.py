@@ -31,13 +31,14 @@ async def login_for_access_token(
             subject=user_id, expires_delta=access_token_expires
         )
         
+        is_prod = settings.ENVIRONMENT == "production"
         response.set_cookie(
             key="access_token",
             value=access_token,
             httponly=True,
-            secure=True, # Enforce HTTPS
+            secure=is_prod, # Enforce HTTPS only in prod
             samesite="lax",
-            domain=".genestac.com", # Allow sharing between crm.genestac.com and api.genestac.com
+            domain=".genestac.com" if is_prod else None, # Omit domain locally
             max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         )
         

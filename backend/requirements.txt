@@ -6,3 +6,7 @@ python-jose[cryptography]
 passlib[bcrypt]
 python-multipart
 pydantic-settings
+
+razorpay
+
+reportlab==4.1.0

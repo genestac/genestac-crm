@@ -1,10 +1,31 @@
 import { cookies } from 'next/headers'
+import { getAuthToken } from './cookie-helper'
 
 const API_BASE_URL = process.env.API_BASE_URL || 'http://localhost:8000'
+const REQUEST_TIMEOUT_MS = Number(process.env.API_REQUEST_TIMEOUT_MS || 10000)
+
+export async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+
+  try {
+    return await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    })
+  } catch (error: any) {
+    if (error?.name === 'AbortError') {
+      throw new Error(`Request timed out after ${timeoutMs}ms`)
+    }
+    throw error
+  } finally {
+    clearTimeout(timeoutId)
+  }
+}
 
 export async function fetchAPI(endpoint: string, options: RequestInit = {}) {
   const cookieStore = await cookies()
-  const token = cookieStore.get('access_token')?.value
+  const token = getAuthToken(cookieStore.getAll())
   
   const headers = new Headers(options.headers || {})
   
@@ -14,8 +35,10 @@ export async function fetchAPI(endpoint: string, options: RequestInit = {}) {
     headers.set('Authorization', `Bearer ${token}`)
   }
   
-  console.log(`[fetchAPI] Fetching: ${API_BASE_URL}${endpoint}`)
-  const res = await fetch(`${API_BASE_URL}${endpoint}`, {
+  const url = `${API_BASE_URL}${endpoint}`
+  console.log(`[fetchAPI] Fetching: ${url}`)
+
+  const res = await fetchWithTimeout(url, {
     cache: 'no-store', // Prevent Next.js from caching authenticated API responses
     ...options,
     headers
@@ -24,7 +47,7 @@ export async function fetchAPI(endpoint: string, options: RequestInit = {}) {
   if (!res.ok) {
     let errorStatus = res.status
     let errorText = await res.text().catch(() => 'No response body')
-    const error: any = new Error(`${errorText} (Failed URL: ${API_BASE_URL}${endpoint})`)
+    const error: any = new Error(`${errorText} (Failed URL: ${url})`)
     error.status = errorStatus
     throw error
   }

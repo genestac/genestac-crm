@@ -2,19 +2,19 @@
 
 import { useState, useEffect } from 'react'
 import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetTrigger,
-} from '@/components/ui/sheet'
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGroup, SelectLabel } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
-import { updateLeadDetails, uploadLeadDocument, getLeadDocuments, getUserNotes, addInteractionNote, getDoctors, bookAppointment, getPlans, getSources } from '@/app/sales/actions'
-import { FileUp, FileText, Download, Loader2, CreditCard, ChevronDown, ChevronRight, Check } from 'lucide-react'
+import { updateLeadDetails, uploadLeadDocument, getLeadDocuments, getUserNotes, addInteractionNote, getDoctors, bookAppointment, getPlans, getSources, generateRazorpayLink, getProformaInvoices, deleteProformaInvoice, getCurrentUserRole } from '@/app/sales/actions'
+import { FileUp, FileText, Download, Loader2, CreditCard, ChevronDown, ChevronRight, Check, Calendar, Activity, User, Receipt, CheckCircle2, FileDown } from 'lucide-react'
 
 export function UserManagementSheet({ 
   lead, 
@@ -31,11 +31,11 @@ export function UserManagementSheet({
   const [plans, setPlans] = useState<any[]>([])
   const [sources, setSources] = useState<any[]>([])
   
-  const [sourceId, setSourceId] = useState<string | undefined>(undefined)
-  const [planId, setPlanId] = useState<string | undefined>(undefined)
+  const [sourceId, setSourceId] = useState<string | null>(lead.user_source_id || null)
+  const [planId, setPlanId] = useState<string | null>(lead.interested_plan_id || null)
   const [customFields, setCustomFields] = useState<any[]>([])
   
-  // Tab state: "overview", "pipeline", "files"
+  // Tab state: "overview", "pipeline", "payment", "appointments", "files"
   const [activeTab, setActiveTab] = useState("overview")
   const [addressOpen, setAddressOpen] = useState(false)
   
@@ -43,12 +43,23 @@ export function UserManagementSheet({
   const [notes, setNotes] = useState<any[]>([])
   const [newNote, setNewNote] = useState('')
   const [noteDate, setNoteDate] = useState('')
+  const [noteFields, setNoteFields] = useState([{ key: 'Height', value: '' }, { key: 'Weight', value: '' }, { key: 'Age', value: '' }, { key: 'Symptoms', value: '' }])
   const [savingNote, setSavingNote] = useState(false)
 
   // Appointments state
   const [doctors, setDoctors] = useState<any[]>([])
   const [bookingAppt, setBookingAppt] = useState(false)
   const [apptForm, setApptForm] = useState({ doctorId: '', date: '', time: '', notes: '' })
+  const [shareNotes, setShareNotes] = useState(false)
+  const [shareDocs, setShareDocs] = useState(false)
+
+  // Payment state
+  const [discount, setDiscount] = useState(0)
+  const [generatingPayment, setGeneratingPayment] = useState(false)
+  const [paymentLink, setPaymentLink] = useState('')
+  const [proformaData, setProformaData] = useState<any>(null)
+  const [invoices, setInvoices] = useState<any[]>([])
+  const [currentUserRole, setCurrentUserRole] = useState<string>('USER')
 
   // Form state to make inputs controlled
   const [formData, setFormData] = useState({
@@ -77,9 +88,9 @@ export function UserManagementSheet({
   }
 
   useEffect(() => {
-    if (open) {
-      setSourceId(lead.source_id || undefined)
-      setPlanId(lead.interested_plan_id || undefined)
+    if (open && lead) {
+      setSourceId(lead.user_source_id || null)
+      setPlanId(lead.interested_plan_id || null)
       setFormData({
         name: lead.name || '',
         phone: lead.phone || '',
@@ -95,11 +106,11 @@ export function UserManagementSheet({
       getLeadDocuments(lead.id).then(setDocuments).catch(console.error)
       getUserNotes(lead.id).then(setNotes).catch(console.error)
       getDoctors().then(setDoctors).catch(console.error)
-      // Fetch all sources and plans to resolve IDs correctly (even inactive ones)
+      getProformaInvoices(lead.id).then(setInvoices).catch(console.error)
       getPlans().then(data => setPlans(data || []))
       getSources().then(data => setSources(data || []))
+      getCurrentUserRole().then(setCurrentUserRole).catch(console.error)
       
-      // Fetch custom fields
       import('@/app/sales/actions').then(m => m.getCustomFields()).then(fields => {
         const entity = (lead.record_type || 'USER').toLowerCase()
         setCustomFields(fields.filter((f: any) => f.entity_type === entity))
@@ -122,26 +133,81 @@ export function UserManagementSheet({
       alert("Updated successfully!")
       setOpen(false)
     } catch (err: any) {
-      alert(err.message)
+      alert("Error: " + err.message)
     } finally {
       setLoading(false)
     }
   }
+  
+  async function handleRefreshPayment(invoiceId: string) {
+    if (!confirm("Are you sure you want to refresh the payment link for this invoice? The old link will no longer be tracked here.")) return;
+    try {
+      const res = await generateRazorpayLink(lead.id, "", 0, invoiceId)
+      if (res.success) {
+        setInvoices(prev => prev.map(inv => inv.id === invoiceId ? { ...inv, razorpay_url: res.payment_url, payment_url: res.payment_url } : inv))
+        alert("Payment link refreshed successfully!")
+      } else {
+        alert(res.error || "Failed to refresh link")
+      }
+    } catch (err: any) {
+      alert("Error: " + err.message)
+    }
+  }
+
+  const handleNoteFieldChange = (index: number, field: 'key' | 'value', val: string) => {
+    const updated = [...noteFields]
+    updated[index][field] = val
+    setNoteFields(updated)
+  }
 
   const handleAddNote = async () => {
-    if (!newNote.trim()) return
+    const validFields = noteFields.filter(f => f.key.trim() && f.value.trim())
+    let formattedContent = newNote.trim()
+    
+    if (validFields.length > 0) {
+      const fieldsText = validFields.map(f => `• ${f.key}: ${f.value}`).join('\n')
+      formattedContent = `${fieldsText}\n\n${formattedContent}`.trim()
+    }
+    
+    if (!formattedContent) return
+    
     setSavingNote(true)
     try {
       const formattedDate = noteDate ? new Date(noteDate).toISOString() : undefined;
-      await addInteractionNote(lead.id, newNote, formattedDate)
+      await addInteractionNote(lead.id, formattedContent, formattedDate)
       setNewNote('')
       setNoteDate('')
+      setNoteFields([{ key: 'Height', value: '' }, { key: 'Weight', value: '' }, { key: 'Age', value: '' }, { key: 'Symptoms', value: '' }])
       const updatedNotes = await getUserNotes(lead.id)
       setNotes(updatedNotes)
     } catch (err: any) {
       alert("Failed to save note: " + err.message)
     } finally {
       setSavingNote(false)
+    }
+  }
+
+  const handleGeneratePayment = async () => {
+    if (!planId) {
+      alert("Please select an Interested Plan first.")
+      return
+    }
+    
+    setGeneratingPayment(true)
+    try {
+      const res = await generateRazorpayLink(lead.id, planId, discount)
+      if (res.success) {
+        setPaymentLink(res.payment_url)
+        setProformaData(res)
+        setInvoices(prev => [res, ...prev])
+        alert("Payment link generated successfully!")
+      } else {
+        alert(res.error || "Failed to generate link")
+      }
+    } catch (err: any) {
+      alert(err.message || "Failed to generate link")
+    } finally {
+      setGeneratingPayment(false)
     }
   }
 
@@ -153,12 +219,27 @@ export function UserManagementSheet({
     }
     setBookingAppt(true)
     try {
+      let finalNotes = apptForm.notes
+      
+      if (shareNotes && notes.length > 0) {
+        const notesHistory = notes.map(n => {
+           const d = new Date(n.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+           return `[${d}]\n${n.content}`
+        }).join('\n\n---\n\n')
+        finalNotes += `\n\n=== PAST INTERACTION NOTES ===\n\n${notesHistory}`
+      }
+      
+      if (shareDocs && documents.length > 0) {
+        const docsList = documents.map(d => `- ${d.file_name}: ${d.storage_path || d.file_url}`).join('\n')
+        finalNotes += `\n\n=== ATTACHED DOCUMENTS ===\n\n${docsList}`
+      }
+      
       const formData = new FormData()
       formData.append('lead_id', lead.id)
       formData.append('doctor_id', apptForm.doctorId)
       formData.append('date', apptForm.date)
       formData.append('time', apptForm.time)
-      formData.append('notes', apptForm.notes)
+      formData.append('notes', finalNotes)
       
       await bookAppointment(formData)
       alert("Appointment requested successfully!")
@@ -193,26 +274,12 @@ export function UserManagementSheet({
     }
   }
 
-  const generatePaymentLink = () => {
-    if (!lead.interested_plan_id) {
-      alert("Please select and save an Interested Plan first before generating a payment link.")
-      return
-    }
-    const selectedPlan = plans.find(p => p.id === lead.interested_plan_id)
-    if (!selectedPlan) return
-    
-    const link = `https://checkout.genestac.com/pay/${selectedPlan.id}?uid=${lead.id}`
-    navigator.clipboard.writeText(link)
-    alert(`Payment link for ₹${selectedPlan.price} copied to clipboard!\n\nLink: ${link}`)
-  }
-
   return (
-    <Sheet open={open} onOpenChange={setOpen}>
-      <SheetTrigger render={children as React.ReactElement} />
-      <SheetContent className="sm:max-w-[500px] w-full bg-card p-0 flex flex-col border-l border-border/50 shadow-2xl">
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger render={children as React.ReactElement} />
+      <DialogContent className="sm:max-w-[600px] w-[95vw] bg-card p-0 flex flex-col rounded-2xl shadow-2xl border-border/50 max-h-[90vh] overflow-hidden">
         
-        {/* Minimal Header */}
-        <SheetHeader className="px-8 pt-10 pb-8 bg-card border-b relative overflow-hidden">
+        <DialogHeader className="px-8 pt-10 pb-8 bg-card border-b relative overflow-hidden shrink-0">
           <div className="absolute top-[-50%] right-[-10%] w-64 h-64 bg-gradient-to-br from-[var(--color-brand-green)] to-[var(--color-brand-ocean)] rounded-full blur-[80px] opacity-20 pointer-events-none"></div>
           <div className="flex items-center justify-between mb-4 relative z-10">
             <span className="px-3 py-1 text-[11px] font-bold uppercase tracking-widest bg-gradient-to-r from-[var(--color-brand-teal)] to-[var(--color-brand-ocean)] text-white rounded-full shadow-sm">
@@ -220,7 +287,7 @@ export function UserManagementSheet({
             </span>
             <span className="text-xs text-gray-400 font-mono">ID: {lead.id.substring(0, 8)}</span>
           </div>
-          <SheetTitle className="text-4xl font-extrabold text-foreground tracking-tight relative z-10">{lead.name || 'Unnamed User'}</SheetTitle>
+          <DialogTitle className="text-4xl font-extrabold text-foreground tracking-tight relative z-10">{lead.name || 'Unnamed User'}</DialogTitle>
           <div className="flex items-center gap-4 text-sm text-gray-500 mt-2">
             <span>{lead.phone}</span>
             {lead.email && (
@@ -230,21 +297,21 @@ export function UserManagementSheet({
               </>
             )}
           </div>
-        </SheetHeader>
+        </DialogHeader>
 
-        {/* Custom Minimal Tabs */}
         <div className="flex border-b px-8 bg-muted/30 pt-2 gap-2">
           {[
-            { id: "overview", label: "Overview" },
-            { id: "pipeline", label: "Prospect Lead" },
-            { id: "appointments", label: "Appointments" },
-            { id: "files", label: "Files & Notes" }
+            { id: "overview", label: "Overview", icon: User },
+            { id: "pipeline", label: "Pipeline", icon: Activity },
+            { id: "payment", label: "Payment", icon: CreditCard },
+            { id: "appointments", label: "Appointments", icon: Calendar },
+            { id: "files", label: "Files & Notes", icon: FileText }
           ].map(tab => (
             <button
               key={tab.id}
               type="button"
               onClick={() => setActiveTab(tab.id)}
-              className={`px-5 py-2.5 text-sm font-semibold rounded-t-xl transition-all duration-300 ${
+              className={`px-5 py-2.5 text-sm font-semibold rounded-t-xl transition-all duration-300 flex items-center gap-2 ${
                 activeTab === tab.id 
                   ? 'border-primary text-primary' 
                   : 'border-transparent text-gray-500 hover:text-gray-900'
@@ -396,7 +463,7 @@ export function UserManagementSheet({
                     {sources.length === 0 ? (
                       <div className="h-9 w-full animate-pulse bg-gray-100 rounded-md"></div>
                     ) : (
-                      <Select name="source_id" value={sourceId} onValueChange={(val) => setSourceId(val || undefined)}>
+                      <Select name="source_id" value={sourceId} onValueChange={(val) => setSourceId(val || null)}>
                         <SelectTrigger className="bg-muted/50 rounded-xl border-border/50 transition-all hover:bg-muted focus:bg-card shadow-inner shadow-none overflow-hidden">
                           <span className="truncate">
                             {sourceId 
@@ -424,23 +491,47 @@ export function UserManagementSheet({
                     {plans.length === 0 ? (
                       <div className="h-9 w-full animate-pulse bg-gray-100 rounded-md"></div>
                     ) : (
-                      <Select name="interested_plan_id" value={planId} onValueChange={(val) => setPlanId(val || undefined)}>
+                      <Select name="interested_plan_id" value={planId} onValueChange={(val) => setPlanId(val || null)}>
                         <SelectTrigger className="bg-muted/50 rounded-xl border-border/50 transition-all hover:bg-muted focus:bg-card shadow-inner shadow-none overflow-hidden">
                           <span className="truncate">
-                            {planId 
-                              ? (plans.find(p => p.id === planId)?.name || lead.plans?.name || 'Unknown Plan')
-                              : 'Select Plan'
-                            }
+                            {(() => {
+                              if (!planId) return 'Select Plan'
+                              const plan = plans.find(p => p.id === planId)
+                              if (plan) return plan.name
+                              
+                              for (const p of plans) {
+                                if (p.plan_variants) {
+                                  const variant = p.plan_variants.find((v: any) => `${p.id}|${v.id}` === planId)
+                                  if (variant) return `${p.name} - ${variant.duration_label}`
+                                }
+                              }
+                              
+                              return lead.plans?.name || 'Unknown Plan'
+                            })()}
                           </span>
                         </SelectTrigger>
                         <SelectContent>
-                          {planId && !plans.some(p => p.id === planId) && (
+                          {planId && !plans.some(p => p.id === planId) && !plans.some(p => p.plan_variants?.some((v: any) => `${p.id}|${v.id}` === planId)) && (
                             <SelectItem value={planId}>
                               {lead.plans?.name || 'Unknown Plan'}
                             </SelectItem>
                           )}
                           {plans.map(p => {
-                            if (!p.is_active && p.id !== planId) return null;
+                            if (!p.is_active && p.id !== planId && !p.plan_variants?.some((v: any) => `${p.id}|${v.id}` === planId)) return null;
+                            
+                            if (p.plan_variants && p.plan_variants.length > 0) {
+                              return (
+                                <SelectGroup key={p.id}>
+                                  <SelectLabel className="font-bold text-primary">{p.name}</SelectLabel>
+                                  {p.plan_variants.map((v: any) => (
+                                    <SelectItem key={v.id} value={`${p.id}|${v.id}`} className="pl-6">
+                                      {v.duration_label} (₹{v.discounted_price || v.base_price})
+                                    </SelectItem>
+                                  ))}
+                                </SelectGroup>
+                              )
+                            }
+                            
                             return <SelectItem key={p.id} value={p.id}>{p.name} (₹{p.price}) {!p.is_active && '(Inactive)'}</SelectItem>
                           })}
                         </SelectContent>
@@ -459,6 +550,262 @@ export function UserManagementSheet({
                     className="bg-muted/50 rounded-xl border-border/50 transition-all hover:bg-muted focus:bg-card shadow-inner shadow-none"
                   />
                 </div>
+              </div>
+            )}
+
+            {/* PAYMENT & INVOICE TAB */}
+            {activeTab === "payment" && (
+              <div className="space-y-6">
+                <div className="flex flex-col mb-6 pb-6 border-b border-gray-100">
+                  <h3 className="text-lg font-bold text-gray-900 mb-1">Generate Proforma Invoice</h3>
+                  <p className="text-xs text-gray-500">Create a Razorpay payment link based on the selected plan.</p>
+                </div>
+                
+                <div className="space-y-4 bg-muted/30 p-4 rounded-xl border border-gray-100">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-gray-500 font-medium uppercase tracking-wider">Select Plan for Invoice</Label>
+                    {plans.length === 0 ? (
+                      <div className="h-9 w-full animate-pulse bg-gray-100 rounded-md"></div>
+                    ) : (
+                      <Select name="payment_plan_id" value={planId} onValueChange={(val) => setPlanId(val || null)}>
+                        <SelectTrigger className="bg-white rounded-xl border-border/50 transition-all shadow-none overflow-hidden">
+                          <span className="truncate">
+                            {(() => {
+                              if (!planId) return 'Select Plan'
+                              const plan = plans.find(p => p.id === planId)
+                              if (plan) return plan.name
+                              
+                              for (const p of plans) {
+                                if (p.plan_variants) {
+                                  const variant = p.plan_variants.find((v: any) => `${p.id}|${v.id}` === planId)
+                                  if (variant) return `${p.name} - ${variant.duration_label}`
+                                }
+                              }
+                              
+                              return lead.plans?.name || 'Unknown Plan'
+                            })()}
+                          </span>
+                        </SelectTrigger>
+                        <SelectContent>
+                          {planId && !plans.some(p => p.id === planId) && !plans.some(p => p.plan_variants?.some((v: any) => `${p.id}|${v.id}` === planId)) && (
+                            <SelectItem value={planId}>
+                              {lead.plans?.name || 'Unknown Plan'}
+                            </SelectItem>
+                          )}
+                          {plans.map(p => {
+                            if (!p.is_active && p.id !== planId && !p.plan_variants?.some((v: any) => `${p.id}|${v.id}` === planId)) return null;
+                            
+                            if (p.plan_variants && p.plan_variants.length > 0) {
+                              return (
+                                <SelectGroup key={p.id}>
+                                  <SelectLabel className="font-bold text-primary">{p.name}</SelectLabel>
+                                  {p.plan_variants.map((v: any) => (
+                                    <SelectItem key={v.id} value={`${p.id}|${v.id}`} className="pl-6">
+                                      {v.duration_label} (₹{v.discounted_price || v.base_price})
+                                    </SelectItem>
+                                  ))}
+                                </SelectGroup>
+                              )
+                            }
+                            
+                            return <SelectItem key={p.id} value={p.id}>{p.name} (₹{p.price}) {!p.is_active && '(Inactive)'}</SelectItem>
+                          })}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  </div>
+                  
+                  {planId && (
+                    <>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs text-gray-500 font-medium uppercase tracking-wider">Discount (%)</Label>
+                        <Input 
+                          type="number" 
+                          min="0" 
+                          max="100" 
+                          value={discount} 
+                          onChange={(e) => setDiscount(parseFloat(e.target.value) || 0)}
+                          className="bg-white rounded-xl border-border/50 transition-all shadow-none w-1/3"
+                        />
+                      </div>
+                      
+                      {(() => {
+                        let basePrice = 0;
+                        let gstPercentage = 0;
+                        const plan = plans.find(p => p.id === planId);
+                        if (plan) {
+                          basePrice = plan.price || 0;
+                          gstPercentage = plan.gst_percentage || 0;
+                        } else {
+                          for (const p of plans) {
+                            if (p.plan_variants) {
+                              const variant = p.plan_variants.find((v: any) => `${p.id}|${v.id}` === planId);
+                              if (variant) {
+                                basePrice = variant.discounted_price || variant.base_price || 0;
+                                gstPercentage = p.gst_percentage || 0;
+                                break;
+                              }
+                            }
+                          }
+                        }
+                        
+                        const discountedPrice = basePrice * (1 - discount/100);
+                        const gstAmount = discountedPrice * (gstPercentage/100);
+                        const finalTotal = discountedPrice + gstAmount;
+                        
+                        return (
+                          <div className="bg-indigo-50/50 p-4 rounded-lg border border-indigo-100/50 mt-4">
+                            <div className="flex justify-between items-center text-sm mb-2">
+                              <span className="text-gray-600">Base Price:</span>
+                              <span className="font-semibold">₹{basePrice.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                            </div>
+                            <div className="flex justify-between items-center text-sm mb-2">
+                              <span className="text-gray-600">Discount:</span>
+                              <span className="font-semibold text-green-600">-{discount}% (₹{(basePrice - discountedPrice).toLocaleString('en-IN', { minimumFractionDigits: 2 })})</span>
+                            </div>
+                            {gstPercentage > 0 && (
+                              <div className="flex justify-between items-center text-sm mb-3">
+                                <span className="text-gray-600">Add: GST ({gstPercentage}%):</span>
+                                <span className="font-semibold text-gray-800">₹{gstAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                              </div>
+                            )}
+                            <div className="flex justify-between items-center text-base pt-3 border-t border-indigo-100 font-bold">
+                              <span className="text-gray-900">Total Payable:</span>
+                              <span className="text-indigo-600">
+                                ₹{finalTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })()}
+                      
+                      <div className="pt-4 flex gap-3">
+                        <Button 
+                          onClick={handleGeneratePayment}
+                          disabled={generatingPayment}
+                          className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-none"
+                        >
+                          {generatingPayment ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Receipt className="w-4 h-4 mr-2" />}
+                          Generate Payment Link
+                        </Button>
+                      </div>
+                    </>
+                  )}
+                </div>
+                
+                {paymentLink && proformaData && (
+                  <div className="mt-6 p-5 bg-green-50 border border-green-200 rounded-xl space-y-4">
+                    <div className="flex items-center gap-2 text-green-800 font-bold">
+                      <CheckCircle2 className="w-5 h-5" />
+                      Proforma Invoice & Link Ready!
+                    </div>
+                    
+                    <div className="space-y-2">
+                      <Label className="text-xs text-green-700 uppercase font-bold">Razorpay Link</Label>
+                      <div className="flex gap-2">
+                        <Input readOnly value={paymentLink} className="bg-white border-green-200 text-sm shadow-none" />
+                        <Button 
+                          variant="outline" 
+                          onClick={() => {
+                            navigator.clipboard.writeText(paymentLink)
+                            alert("Link copied!")
+                          }}
+                          className="border-green-200 text-green-700 hover:bg-green-100"
+                        >
+                          Copy
+                        </Button>
+                      </div>
+                    </div>
+                    
+                    <div className="pt-2">
+                      <Button 
+                        variant="ghost" 
+                        onClick={() => {
+                          window.open(`/proforma-invoice/${proformaData.invoice_id}`, '_blank')
+                        }}
+                        className="text-green-700 hover:bg-green-100 bg-white border border-green-200 w-full"
+                      >
+                        <FileText className="w-4 h-4 mr-2" />
+                        Print / View Proforma PDF
+                      </Button>
+                    </div>
+                  </div>
+                )}
+                
+                {invoices.length > 0 && (
+                  <div className="pt-6 border-t border-gray-100">
+                    <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-4">Past Proforma Invoices</h4>
+                    <div className="space-y-3">
+                      {invoices.map((inv, idx) => (
+                        <div key={inv.invoice_id || inv.id || idx} className="p-4 border border-gray-200 rounded-xl bg-white hover:bg-gray-50 transition-colors flex flex-col gap-3">
+                          <div className="flex justify-between items-start">
+                            <div>
+                              <p className="text-sm font-semibold text-gray-900">{inv.plan_name || (inv.plans && inv.plans.name) || 'Plan Subscription'}</p>
+                              <p className="text-xs text-gray-500 mt-0.5">Amount: ₹{inv.amount || inv.total_amount}</p>
+                              <p className="text-[10px] text-gray-400 mt-1">PI: {inv.invoice_number || 'N/A'}</p>
+                            </div>
+                            <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 bg-green-100 text-green-700 rounded border border-green-200">
+                              Ready
+                            </span>
+                          </div>
+                          <div className="flex gap-2 flex-wrap">
+                            <Button 
+                              variant="outline" 
+                              size="sm" 
+                              className="text-xs h-8 flex-1"
+                              onClick={() => {
+                                navigator.clipboard.writeText(inv.payment_url || inv.razorpay_url)
+                                alert("Link copied!")
+                              }}
+                            >
+                              Copy Link
+                            </Button>
+                            <Button 
+                              variant="outline" 
+                              size="sm" 
+                              className="text-xs h-8 flex-1 text-amber-700 border-amber-200 bg-amber-50 hover:bg-amber-100"
+                              onClick={() => handleRefreshPayment(inv.id || inv.invoice_id)}
+                            >
+                              Refresh Link
+                            </Button>
+                            <Button 
+                              variant="outline" 
+                              size="sm" 
+                              className="text-xs h-8 flex-1 text-indigo-700 border-indigo-200 bg-indigo-50 hover:bg-indigo-100"
+                              onClick={() => {
+                                window.open(`/proforma-invoice/${inv.id || inv.invoice_id}`, '_blank')
+                              }}
+                            >
+                              <FileDown className="w-3.5 h-3.5 mr-1.5" />
+                              View PDF
+                            </Button>
+                            {currentUserRole === 'SUPER_ADMIN' && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="text-xs h-8 px-2 text-red-700 border-red-200 bg-red-50 hover:bg-red-100"
+                                title="Super Admin Only: Delete PI"
+                                onClick={async () => {
+                                  if (confirm("Are you sure you want to delete this Proforma Invoice? Only Super Admins can perform this action.")) {
+                                    try {
+                                      await deleteProformaInvoice(inv.id || inv.invoice_id);
+                                      setInvoices(invoices.filter(i => (i.id || i.invoice_id) !== (inv.id || inv.invoice_id)));
+                                      alert("Invoice deleted.");
+                                    } catch (err: any) {
+                                      alert(err.message || "Failed to delete invoice (Only Super Admins are allowed)");
+                                    }
+                                  }
+                                }}
+                              >
+                                Delete
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -533,6 +880,17 @@ export function UserManagementSheet({
                     />
                   </div>
 
+                  <div className="flex flex-col gap-2 pt-2 pb-2">
+                    <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                      <input type="checkbox" className="rounded border-gray-300 text-primary focus:ring-primary h-4 w-4" checked={shareNotes} onChange={(e) => setShareNotes(e.target.checked)} />
+                      Share all previous interaction notes with doctor
+                    </label>
+                    <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                      <input type="checkbox" className="rounded border-gray-300 text-primary focus:ring-primary h-4 w-4" checked={shareDocs} onChange={(e) => setShareDocs(e.target.checked)} />
+                      Share all user documents with doctor
+                    </label>
+                  </div>
+
                   <div className="pt-4">
                     <Button 
                       type="button" 
@@ -555,28 +913,56 @@ export function UserManagementSheet({
                   <Label className="text-xs text-gray-500 font-medium uppercase tracking-wider">Interaction Timeline</Label>
                   
                   {/* Add Note */}
-                  <div className="space-y-2">
-                    <div className="flex gap-2">
+                  <div className="space-y-3 bg-muted/30 p-4 rounded-xl border border-gray-100">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-xs font-semibold text-gray-700 uppercase">New Interaction Note</Label>
                       <Input 
                         type="datetime-local" 
                         value={noteDate}
                         onChange={(e) => setNoteDate(e.target.value)}
-                        className="w-48 bg-muted/50 rounded-xl border-border/50 transition-all hover:bg-muted focus:bg-card shadow-inner shadow-none"
+                        className="w-44 h-8 text-xs bg-white rounded-lg border-border/50 transition-all hover:bg-gray-50 focus:bg-white shadow-none"
                       />
                     </div>
-                    <Textarea 
-                      value={newNote}
-                      onChange={(e) => setNewNote(e.target.value)}
-                      placeholder="Add a new interaction note..." 
-                      className="h-20 resize-none bg-muted/50 rounded-xl border-border/50 transition-all hover:bg-muted focus:bg-card shadow-inner shadow-none border-gray-200"
-                    />
-                    <div className="flex justify-end">
+                    
+                    <div className="space-y-2">
+                      <Label className="text-[10px] text-gray-500 font-medium uppercase tracking-wider">Structured Fields</Label>
+                      <div className="grid grid-cols-2 gap-2">
+                        {noteFields.map((field, idx) => (
+                          <div key={idx} className="flex gap-1.5">
+                            <Input 
+                              value={field.key} 
+                              onChange={(e) => handleNoteFieldChange(idx, 'key', e.target.value)}
+                              placeholder="Key"
+                              className="h-8 text-xs bg-white border-border/50 shadow-none w-1/3 font-medium"
+                            />
+                            <Input 
+                              value={field.value} 
+                              onChange={(e) => handleNoteFieldChange(idx, 'value', e.target.value)}
+                              placeholder="Value"
+                              className="h-8 text-xs bg-white border-border/50 shadow-none flex-1"
+                            />
+                          </div>
+                        ))}
+                      </div>
+                      <button type="button" onClick={() => setNoteFields([...noteFields, { key: '', value: '' }])} className="text-xs text-primary font-medium hover:underline mt-1">+ Add Custom Field</button>
+                    </div>
+
+                    <div className="space-y-2 pt-2">
+                      <Label className="text-[10px] text-gray-500 font-medium uppercase tracking-wider">Detailed Notes</Label>
+                      <Textarea 
+                        value={newNote}
+                        onChange={(e) => setNewNote(e.target.value)}
+                        placeholder="Add additional details, observations, or context..." 
+                        className="h-24 resize-none bg-white rounded-xl border-border/50 transition-all hover:bg-gray-50 focus:bg-white shadow-none border-gray-200"
+                      />
+                    </div>
+                    <div className="flex justify-end pt-1">
                       <Button 
                         type="button" 
                         size="sm" 
                         onClick={handleAddNote}
-                        disabled={savingNote || !newNote.trim()}
-                        className="bg-primary hover:bg-primary text-white shadow-none"
+                        disabled={savingNote || (!newNote.trim() && !noteFields.some(f => f.key.trim() && f.value.trim()))}
+                        className="bg-primary hover:bg-primary/90 text-white shadow-sm rounded-full px-5"
                       >
                         {savingNote ? <Loader2 className="w-3 h-3 animate-spin mr-2" /> : null}
                         Post Note
@@ -652,7 +1038,7 @@ export function UserManagementSheet({
           <div className="px-8 py-5 bg-card border-t border-border/50 flex items-center justify-between mt-auto shrink-0 z-10 relative">
             <button 
               type="button" 
-              onClick={generatePaymentLink}
+              onClick={() => setActiveTab('payment')}
               className="text-sm font-medium text-primary hover:text-primary/90 flex items-center"
             >
               <CreditCard className="w-4 h-4 mr-1.5" />
@@ -664,7 +1050,7 @@ export function UserManagementSheet({
             </Button>
           </div>
         </form>
-      </SheetContent>
-    </Sheet>
+      </DialogContent>
+    </Dialog>
   )
 }

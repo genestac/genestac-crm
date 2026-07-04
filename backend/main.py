@@ -17,8 +17,9 @@ app = FastAPI(title=settings.PROJECT_NAME)
 
 # Trust proxy headers (e.g., from Nginx)
 app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=["*"])
-# Force HTTPS context
-app.add_middleware(ForceHTTPSMiddleware)
+# Force HTTPS context only in production
+if settings.ENVIRONMENT == "production":
+    app.add_middleware(ForceHTTPSMiddleware)
 origins = [o.strip() for o in settings.ALLOWED_ORIGINS.split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,

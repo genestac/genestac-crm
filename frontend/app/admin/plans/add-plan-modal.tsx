@@ -38,6 +38,7 @@ export function AddPlanModal() {
       cta: (formData.get('cta') as string) || null,
       note: (formData.get('note') as string) || null,
       features: features.filter(f => f.trim() !== ''),
+      gst_percentage: formData.get('gst_percentage') ? Number(formData.get('gst_percentage')) : 0,
       is_featured: isFeatured,
       is_entry_level: isEntryLevel,
       variants: variants.map(v => {
@@ -124,9 +125,15 @@ export function AddPlanModal() {
               <div className="lg:col-span-5 space-y-6">
                 <div className="space-y-4">
                   <h3 className="text-sm font-semibold text-gray-900 uppercase tracking-wider mb-2">General Details</h3>
-                  <div className="space-y-2">
-                    <Label className="text-gray-700">Plan Name *</Label>
-                    <Input name="name" required placeholder="e.g. Basic Plan" className="bg-gray-50/50" />
+                  <div className="grid grid-cols-3 gap-4">
+                    <div className="space-y-2 col-span-2">
+                      <Label className="text-gray-700">Plan Name *</Label>
+                      <Input name="name" required placeholder="e.g. Basic Plan" className="bg-gray-50/50" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-gray-700">GST %</Label>
+                      <Input name="gst_percentage" type="number" step="0.01" defaultValue="5" className="bg-gray-50/50" />
+                    </div>
                   </div>
                   <div className="space-y-2">
                     <Label className="text-gray-700">Description</Label>

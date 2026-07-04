@@ -4,12 +4,18 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { addSource } from './actions'
-
 import { SharedPoolToggle } from './shared-pool-toggle'
+import { InvoiceSettingsForm } from './invoice-settings-form'
+import { cookies } from 'next/headers'
 
 export default async function CRMSettingsPage() {
-  const { data: sources } = await fetchAPI('/api/admin/crm-settings/sources').catch(() => ({ data: [] }))
-  const { data: globalSettings } = await fetchAPI('/api/admin/crm-settings/global').catch(() => ({ data: { shared_lead_pool: false } }))
+  const cookieHeader = (await cookies()).toString()
+  const { data: sources } = await fetchAPI('/api/admin/crm-settings/sources', {
+    headers: { Cookie: cookieHeader }
+  }).catch(() => ({ data: [] }))
+  const { data: globalSettings } = await fetchAPI('/api/admin/crm-settings/global', {
+    headers: { Cookie: cookieHeader }
+  }).catch(() => ({ data: { shared_lead_pool: false } }))
 
   return (
     <div className="space-y-8">
@@ -28,7 +34,8 @@ export default async function CRMSettingsPage() {
         </Card>
       </div>
 
-      <div className="grid md:grid-cols-2 gap-8">        {/* Sources Management */}
+      <div className="grid md:grid-cols-2 gap-8">
+        {/* Sources Management */}
         <Card>
           <CardHeader>
             <CardTitle>Lead Sources</CardTitle>
@@ -51,6 +58,11 @@ export default async function CRMSettingsPage() {
             </div>
           </CardContent>
         </Card>
+
+        {/* Invoice Settings */}
+        <div className="space-y-8">
+          <InvoiceSettingsForm initialSettings={globalSettings} />
+        </div>
       </div>
     </div>
   )

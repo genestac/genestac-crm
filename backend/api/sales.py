@@ -43,8 +43,32 @@ async def create_lead(
         if v is not None and v != "":
             payload[k] = v
             
-    response = supabase.table("users").insert(payload).execute()
-    return {"message": "Lead created successfully", "data": response.data}
+    # Check for existing user by phone or email
+    res = None
+    if email and phone:
+        res = supabase.table("users").select("*").or_(f"email.eq.{email},phone.eq.{phone}").execute()
+    elif email:
+        res = supabase.table("users").select("*").eq("email", email).execute()
+    else:
+        res = supabase.table("users").select("*").eq("phone", phone).execute()
+        
+    if res and res.data:
+        existing_user = res.data[0]
+        # Preserve new submission details as a note
+        import json
+        details_str = json.dumps(payload, indent=2)
+        note_content = f"**Duplicate Submission Received**\n\nWe received a new lead submission with these details but matching this existing record:\n```json\n{details_str}\n```"
+        
+        supabase.table("user_notes").insert({
+            "user_id": existing_user["id"],
+            "author_id": current_user["id"],
+            "content": note_content
+        }).execute()
+        
+        return {"message": "Duplicate submission added as note", "data": [existing_user]}
+    else:
+        response = supabase.table("users").insert(payload).execute()
+        return {"message": "Lead created successfully", "data": response.data}
 
 @router.put("/leads/{lead_id}")
 async def update_lead_details(
@@ -141,17 +165,9 @@ async def get_metrics(
     today = datetime.datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
     tomorrow = today + datetime.timedelta(days=1)
     
-    import json, os
-    DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
-    GLOBAL_SETTINGS_FILE = os.path.join(DATA_DIR, "global_settings.json")
-    shared_pool_enabled = False
-    if os.path.exists(GLOBAL_SETTINGS_FILE):
-        try:
-            with open(GLOBAL_SETTINGS_FILE, "r") as f:
-                shared_pool_enabled = json.load(f).get("shared_lead_pool", False)
-        except:
-            pass
-
+    settings = get_global_settings_from_db(supabase)
+    shared_pool_enabled = settings.get("shared_lead_pool", False)
+    is_admin = current_user.get("role") in ["SUPER_ADMIN", "admin", "master_admin"]
     # 1. Helper function to fetch and count
     def fetch_and_combine(table1, table2, select_str, eq_filters=None, gte_filters=None, lt_filters=None, is_count=False):
         def build_query(t):
@@ -169,7 +185,9 @@ async def get_metrics(
                         q = q.eq(k, v)
                         
             if has_assigned_filter:
-                if shared_pool_enabled:
+                if is_admin:
+                    pass # Admin sees all
+                elif shared_pool_enabled:
                     q = q.or_(f"assigned_sales_rep_id.eq.{assigned_val},assigned_sales_rep_id.is.null")
                 else:
                     q = q.eq("assigned_sales_rep_id", assigned_val)
@@ -203,7 +221,10 @@ async def get_metrics(
     _, followUpsToday = fetch_and_combine("users", "leads", "id, name, phone, status, priority, followup_notes, next_followup_date", eq_filters={"assigned_sales_rep_id": user_id}, gte_filters={"next_followup_date": today.isoformat()}, lt_filters={"next_followup_date": tomorrow.isoformat()})
     followUpsDueCount = len(followUpsToday)
     
-    appointments_res = supabase.table("appointments").select("id", count="exact").eq("sales_rep_id", user_id).execute()
+    if is_admin:
+        appointments_res = supabase.table("appointments").select("id", count="exact").execute()
+    else:
+        appointments_res = supabase.table("appointments").select("id", count="exact").eq("sales_rep_id", user_id).execute()
     appointmentsBooked = appointments_res.count or 0
     
     convertedCount, _ = fetch_and_combine("users", "leads", "id", eq_filters={"assigned_sales_rep_id": user_id, "status": "CONVERTED"}, is_count=True)
@@ -296,7 +317,10 @@ async def get_metrics(
                 })
             except: pass
                 
-    today_appointments = supabase.table("appointments").select("*, patients:users!patient_id(name)").eq("sales_rep_id", user_id).gte("scheduled_at", today.isoformat()).lt("scheduled_at", tomorrow.isoformat()).execute()
+    today_appointments_q = supabase.table("appointments").select("*, patients:users!patient_id(name)").gte("scheduled_at", today.isoformat()).lt("scheduled_at", tomorrow.isoformat())
+    if not is_admin:
+        today_appointments_q = today_appointments_q.eq("sales_rep_id", user_id)
+    today_appointments = today_appointments_q.execute()
     for a in today_appointments.data:
         if a.get("scheduled_at"):
             try:
@@ -343,24 +367,18 @@ async def get_leads(
 ):
     try:
         user_id = current_user["id"]
+        is_admin = current_user.get("role") in ["SUPER_ADMIN", "admin", "master_admin"]
         
-        import json, os
-        DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
-        GLOBAL_SETTINGS_FILE = os.path.join(DATA_DIR, "global_settings.json")
-        shared_pool_enabled = False
-        if os.path.exists(GLOBAL_SETTINGS_FILE):
-            try:
-                with open(GLOBAL_SETTINGS_FILE, "r") as f:
-                    shared_pool_enabled = json.load(f).get("shared_lead_pool", False)
-            except:
-                pass
+        settings = get_global_settings_from_db(supabase)
+        shared_pool_enabled = settings.get("shared_lead_pool", False)
         
         # 1. Fetch Users
         u_query = supabase.table("users").select("*, user_sources(name), plans(name, price)")
-        if shared_pool_enabled:
-            u_query = u_query.or_(f"assigned_sales_rep_id.eq.{user_id},assigned_sales_rep_id.is.null")
-        else:
-            u_query = u_query.eq("assigned_sales_rep_id", user_id)
+        if not is_admin:
+            if shared_pool_enabled:
+                u_query = u_query.or_(f"assigned_sales_rep_id.eq.{user_id},assigned_sales_rep_id.is.null")
+            else:
+                u_query = u_query.eq("assigned_sales_rep_id", user_id)
             
         if statuses:
             u_query = u_query.in_("status", statuses.split(","))
@@ -379,10 +397,11 @@ async def get_leads(
         leads_data = []
         try:
             l_query = supabase.table("leads").select("*, user_sources(name), plans(name, price)")
-            if shared_pool_enabled:
-                l_query = l_query.or_(f"assigned_sales_rep_id.eq.{user_id},assigned_sales_rep_id.is.null")
-            else:
-                l_query = l_query.eq("assigned_sales_rep_id", user_id)
+            if not is_admin:
+                if shared_pool_enabled:
+                    l_query = l_query.or_(f"assigned_sales_rep_id.eq.{user_id},assigned_sales_rep_id.is.null")
+                else:
+                    l_query = l_query.eq("assigned_sales_rep_id", user_id)
                 
             if statuses:
                 l_query = l_query.in_("status", statuses.split(","))
@@ -596,3 +615,404 @@ async def list_carts(
                 pass
                 
     return {"data": carts_data}
+
+import razorpay
+import uuid
+import os
+
+from api.admin.crm_settings import get_global_settings_from_db
+import json
+from datetime import datetime
+
+@router.post("/leads/{lead_id}/generate-payment")
+async def generate_payment_link(
+    lead_id: str,
+    plan_id: Optional[str] = Form(None),
+    discount: float = Form(0),
+    invoice_id: Optional[str] = Form(None),
+    current_user: dict = Depends(get_current_user),
+    supabase: Client = Depends(get_supabase_client)
+):
+    try:
+        if invoice_id:
+            # Refreshing existing invoice
+            inv_res = supabase.table("proforma_invoices").select("*").eq("id", invoice_id).execute()
+            if not inv_res.data:
+                raise HTTPException(status_code=404, detail="Invoice not found")
+            
+            existing_inv = inv_res.data[0]
+            plan_id = existing_inv["plan_id"]
+            base_price = existing_inv["base_price"]
+            discount = existing_inv["discount_percentage"]
+            total_amount = existing_inv["total_amount"]
+            
+            plan_res = supabase.table("plans").select("*").eq("id", plan_id).execute()
+            plan = plan_res.data[0] if plan_res.data else {"name": "Subscription"}
+            
+        else:
+            if not plan_id:
+                raise HTTPException(status_code=400, detail="plan_id is required for new invoices")
+            
+            variant_id = None
+            if "|" in plan_id:
+                plan_id, variant_id = plan_id.split("|")
+                
+            # 1. Fetch plan
+            plan_res = supabase.table("plans").select("*").eq("id", plan_id).execute()
+            if not plan_res.data:
+                raise HTTPException(status_code=404, detail="Plan not found")
+            plan = plan_res.data[0]
+            
+            base_price = float(plan["price"])
+            gst_percentage = float(plan.get("gst_percentage") or 0)
+            
+            if variant_id:
+                var_res = supabase.table("plan_variants").select("*").eq("id", variant_id).execute()
+                if var_res.data:
+                    variant = var_res.data[0]
+                    base_price = float(variant.get("discounted_price") or variant.get("base_price") or plan["price"])
+                    plan["name"] = f"{plan['name']} - {variant.get('duration_label', '')}"
+            
+            discount_amount = base_price * (discount / 100.0)
+            discounted_base = base_price - discount_amount
+            gst_amount = discounted_base * (gst_percentage / 100.0)
+            total_amount = discounted_base + gst_amount
+        
+        # 2. Setup razorpay client
+        key_id = os.environ.get("RAZORPAY_KEY_ID")
+        key_secret = os.environ.get("RAZORPAY_KEY_SECRET")
+        if not key_id or not key_secret:
+            raise HTTPException(status_code=500, detail="Razorpay keys not configured on server")
+            
+        client = razorpay.Client(auth=(key_id, key_secret))
+        
+        # 3. Create Razorpay Payment Link
+        amount_in_paise = int(total_amount * 100)
+        reference_id = invoice_id if invoice_id else str(uuid.uuid4())
+        
+        payment_link_data = {
+            "amount": amount_in_paise,
+            "currency": "INR",
+            "accept_partial": False,
+            "description": f"Payment for {plan['name']} (Proforma Invoice)",
+            "reference_id": reference_id + ("_ref" if invoice_id else ""),
+            "reminder_enable": True
+        }
+        
+        # Fetch user details
+        user_res = supabase.table("users").select("name, email, phone").eq("id", lead_id).execute()
+        if user_res.data:
+            user = user_res.data[0]
+            payment_link_data["customer"] = {
+                "name": user.get("name") or "Customer"
+            }
+            if user.get("email"):
+                payment_link_data["customer"]["email"] = user.get("email")
+            if user.get("phone"):
+                import re
+                phone_clean = re.sub(r'[^\d+]', '', user.get("phone"))
+                if phone_clean:
+                    payment_link_data["customer"]["contact"] = phone_clean
+            
+        payment_link = client.payment_link.create(payment_link_data)
+        
+        # 4. Store in proforma_invoices
+        if invoice_id:
+            supabase.table("proforma_invoices").update({
+                "razorpay_link_id": payment_link["id"],
+                "razorpay_url": payment_link["short_url"]
+            }).eq("id", invoice_id).execute()
+            
+            return {
+                "success": True, 
+                "invoice_id": invoice_id,
+                "payment_url": payment_link["short_url"]
+            }
+        else:
+            # Generate new PI number
+            settings = get_global_settings_from_db(supabase)
+            inv_settings = settings.get("invoice_settings", {})
+            prefix = inv_settings.get("prefix", "Gen/26-27/")
+            seq = inv_settings.get("current_sequence", 1)
+            
+            invoice_number = f"{prefix}{str(seq).zfill(3)}"
+            
+            # Increment and save
+            inv_settings["current_sequence"] = seq + 1
+            settings["invoice_settings"] = inv_settings
+            try:
+                supabase.table("global_settings").upsert({
+                    "settings_key": "invoice_settings",
+                    "settings_value": inv_settings
+                }, on_conflict="settings_key").execute()
+            except Exception as e:
+                print(f"Failed to save sequence to DB: {e}")
+            
+            invoice_data = {
+                "id": reference_id,
+                "user_id": lead_id,
+                "sales_rep_id": current_user["id"],
+                "plan_id": plan_id,
+                "base_price": base_price,
+                "discount_percentage": discount,
+                "gst_percentage": gst_percentage,
+                "gst_amount": gst_amount,
+                "total_amount": total_amount,
+                "razorpay_link_id": payment_link["id"],
+                "razorpay_url": payment_link["short_url"],
+                "status": "PENDING",
+                "invoice_number": invoice_number,
+                "invoice_date": datetime.now().strftime("%Y-%m-%d")
+            }
+            
+            try:
+                supabase.table("proforma_invoices").insert(invoice_data).execute()
+            except Exception as db_err:
+                print(f"Failed to insert proforma_invoices: {db_err}")
+                raise HTTPException(status_code=500, detail=f"Database insert failed: {str(db_err)}. Please run the SQL script if you haven't.")
+                
+            return {
+                "success": True, 
+                "invoice_id": reference_id, 
+                "payment_url": payment_link["short_url"], 
+                "amount": total_amount,
+                "base_price": base_price,
+                "discount_percentage": discount,
+                "plan_name": plan["name"],
+                "invoice_number": invoice_number
+            }
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/leads/{lead_id}/invoices")
+async def get_proforma_invoices(
+    lead_id: str,
+    current_user: dict = Depends(get_current_user),
+    supabase: Client = Depends(get_supabase_client)
+):
+    try:
+        # Fetch invoices and join with plan details if possible
+        # Since we use Supabase, we can select plan details using foreign keys
+        res = supabase.table("proforma_invoices").select("*, plans:plan_id(name)").eq("user_id", lead_id).order("created_at", desc=True).execute()
+        return {"success": True, "data": res.data or []}
+    except Exception as e:
+        print(f"Error fetching invoices: {e}")
+        return {"success": False, "data": []}
+
+@router.get("/invoices/{invoice_id}")
+async def get_invoice_by_id(
+    invoice_id: str,
+    supabase: Client = Depends(get_supabase_client)
+):
+    try:
+        # Fetch invoice
+        inv_res = supabase.table("proforma_invoices").select("*").eq("id", invoice_id).execute()
+        if not inv_res.data:
+            raise HTTPException(status_code=404, detail="Invoice not found")
+            
+        invoice_data = inv_res.data[0]
+        
+        # Fetch plan manually
+        plan_id = invoice_data.get("plan_id")
+        if plan_id:
+            plan_res = supabase.table("plans").select("*").eq("id", plan_id).execute()
+            invoice_data["plans"] = plan_res.data[0] if plan_res.data else None
+            
+        # Fetch user/lead manually
+        user_id = invoice_data.get("user_id")
+        if user_id:
+            user_res = supabase.table("users").select("*").eq("id", user_id).execute()
+            if not user_res.data:
+                user_res = supabase.table("leads").select("*").eq("id", user_id).execute()
+            invoice_data["users"] = user_res.data[0] if user_res.data else None
+        
+        # Fetch global settings
+        settings = get_global_settings_from_db(supabase)
+        
+        return {
+            "success": True, 
+            "data": invoice_data,
+            "settings": settings
+        }
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+from fastapi.responses import Response
+from io import BytesIO
+from pathlib import Path
+
+@router.get("/invoices/{invoice_id}/pdf")
+async def get_invoice_pdf(
+    invoice_id: str,
+    supabase: Client = Depends(get_supabase_client)
+):
+    try:
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import A4
+        from reportlab.pdfgen import canvas
+
+        inv_res = supabase.table("proforma_invoices").select("*").eq("id", invoice_id).execute()
+        if not inv_res.data:
+            raise HTTPException(status_code=404, detail="Invoice not found")
+        invoice_data = inv_res.data[0]
+
+        plan_id = invoice_data.get("plan_id")
+        if plan_id:
+            plan_res = supabase.table("plans").select("*").eq("id", plan_id).execute()
+            invoice_data["plans"] = plan_res.data[0] if plan_res.data else None
+
+        user_id = invoice_data.get("user_id")
+        if user_id:
+            user_res = supabase.table("users").select("*").eq("id", user_id).execute()
+            if not user_res.data:
+                user_res = supabase.table("leads").select("*").eq("id", user_id).execute()
+            invoice_data["users"] = user_res.data[0] if user_res.data else {}
+
+        settings = get_global_settings_from_db(supabase)
+
+        user = invoice_data.get("users", {})
+        plan = invoice_data.get("plans", {})
+        company_info = settings.get("company_info", {})
+        bank_details = settings.get("bank_details", {})
+        invoice_settings = settings.get("invoice_settings", {})
+
+        buffer = BytesIO()
+        c = canvas.Canvas(buffer, pagesize=A4)
+        width, height = A4
+
+        primary = colors.HexColor("#0f4c81")
+        border = colors.HexColor("#e2e8f0")
+        muted = colors.HexColor("#64748b")
+        soft = colors.HexColor("#f8fafc")
+        dark = colors.HexColor("#1e293b")
+
+        c.setFillColor(primary)
+        c.rect(0, height - 8, width, 8, fill=1, stroke=0)
+
+        c.setFillColor(soft)
+        c.rect(40, height - 118, width - 80, 86, fill=1, stroke=0)
+        c.setStrokeColor(border)
+        c.rect(40, height - 118, width - 80, 86, fill=0, stroke=1)
+
+        logo_path = Path(__file__).resolve().parents[2] / "frontend" / "public" / "logo.jpeg"
+        if logo_path.exists():
+            try:
+                c.drawImage(str(logo_path), 55, height - 103, width=120, height=48, preserveAspectRatio=True)
+            except Exception:
+                pass
+        else:
+            c.setFillColor(colors.HexColor("#cbd5e1"))
+            c.rect(55, height - 103, 120, 48, fill=0, stroke=1)
+            c.setFont("Helvetica", 9)
+            c.setFillColor(muted)
+            c.drawCentredString(115, height - 82, "Logo")
+
+        c.setFillColor(primary)
+        c.setFont("Helvetica-Bold", 18)
+        c.drawRightString(width - 55, height - 72, "PROFORMA INVOICE")
+        c.setFont("Helvetica", 9)
+        c.setFillColor(muted)
+        c.drawRightString(width - 55, height - 92, invoice_data.get("invoice_number", ""))
+
+        c.setFillColor(dark)
+        c.setFont("Helvetica-Bold", 11)
+        c.drawString(40, height - 150, company_info.get("name", "Genestac"))
+        c.setFont("Helvetica", 9)
+        c.drawString(40, height - 164, company_info.get("address", ""))
+        c.drawString(40, height - 178, f"GSTIN/UIN: {company_info.get('gstin', '')}")
+        c.drawString(40, height - 192, f"Email: {company_info.get('email', '')}")
+        c.drawString(40, height - 206, f"Phone: {company_info.get('phone', '')}")
+
+        c.setFont("Helvetica-Bold", 10)
+        c.drawString(width / 2 + 15, height - 150, "Invoice Details")
+        c.setFont("Helvetica", 9)
+        c.drawString(width / 2 + 15, height - 165, f"Invoice No.: {invoice_data.get('invoice_number', '')}")
+        inv_date_str = invoice_data.get("invoice_date", invoice_data.get("created_at", ""))
+        c.drawString(width / 2 + 15, height - 180, f"Date: {str(inv_date_str)[:10]}")
+        c.drawString(width / 2 + 15, height - 195, f"Reference: {str(invoice_data.get('id', ''))[:8].upper()}")
+        c.drawString(width / 2 + 15, height - 210, f"Bill To: {user.get('name', '')}")
+
+        c.setStrokeColor(border)
+        c.line(40, height - 232, width - 40, height - 232)
+
+        c.setFillColor(primary)
+        c.setFont("Helvetica-Bold", 9)
+        c.drawString(50, height - 252, "ITEM DESCRIPTION")
+        c.drawRightString(width - 50, height - 252, "AMOUNT")
+
+        c.setFillColor(dark)
+        c.setFont("Helvetica", 9)
+        c.drawString(50, height - 272, plan.get("name", "Medical Plan"))
+        c.drawRightString(width - 50, height - 272, f"INR {invoice_data.get('total_amount', 0)}")
+
+        c.line(40, height - 292, width - 40, height - 292)
+
+        y = height - 320
+        c.setFont("Helvetica", 9)
+        c.drawString(width / 2 + 50, y, "Base Price:")
+        c.drawRightString(width - 50, y, f"INR {invoice_data.get('base_price', 0)}")
+        y -= 15
+
+        if invoice_data.get("discount_percentage", 0) > 0:
+            c.drawString(width / 2 + 50, y, f"Discount ({invoice_data.get('discount_percentage')}%)")
+            discount_amount = invoice_data.get('base_price', 0) * invoice_data.get('discount_percentage', 0) / 100
+            c.drawRightString(width - 50, y, f"- INR {int(discount_amount)}")
+            y -= 15
+
+        c.drawString(width / 2 + 50, y, f"GST ({invoice_data.get('gst_percentage', 0)}%):")
+        c.drawRightString(width - 50, y, f"INR {invoice_data.get('gst_amount', 0)}")
+        y -= 20
+
+        c.setFillColor(soft)
+        c.rect(width / 2 + 40, y - 20, width / 2 - 80, 24, fill=1, stroke=0)
+        c.setFillColor(dark)
+        c.setFont("Helvetica-Bold", 9)
+        c.drawString(width / 2 + 50, y - 13, "Total Amount:")
+        c.drawRightString(width - 50, y - 13, f"INR {invoice_data.get('total_amount', 0)}")
+
+        y -= 70
+        c.setFillColor(soft)
+        c.rect(40, y - 70, width / 2 - 60, 70, fill=1, stroke=0)
+        c.setFillColor(dark)
+        c.setFont("Helvetica-Bold", 8)
+        c.drawString(50, y - 15, "BANK DETAILS")
+        c.setFont("Helvetica", 8)
+        c.drawString(50, y - 30, f"Account Name: {bank_details.get('account_name', '')}")
+        c.drawString(50, y - 42, f"Bank Name: {bank_details.get('bank_name', '')}")
+        c.drawString(50, y - 54, f"A/c No: {bank_details.get('account_no', '')}")
+        c.drawString(50, y - 66, f"IFSC: {bank_details.get('branch_ifsc', '')}")
+
+        y -= 55
+        c.setFont("Helvetica-Oblique", 8)
+        c.setFillColor(muted)
+        c.drawString(40, y, "Declaration: " + invoice_settings.get("declaration", ""))
+
+        y -= 45
+        c.setFont("Helvetica", 8)
+        c.setFillColor(dark)
+        c.drawRightString(width - 40, y + 20, f"for {company_info.get('name', '')}")
+        c.line(width - 150, y, width - 40, y)
+        c.drawRightString(width - 40, y - 10, "Authorised Signatory")
+
+        c.save()
+        buffer.seek(0)
+
+        safe_filename = str(invoice_data.get('invoice_number', 'Invoice')).replace("/", "-")
+        return Response(
+            content=buffer.getvalue(),
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f'attachment; filename="PI_{safe_filename}.pdf"'
+            },
+        )
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))

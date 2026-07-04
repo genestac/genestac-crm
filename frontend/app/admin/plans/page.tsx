@@ -59,6 +59,7 @@ export default async function PlansPage() {
                 <TableHead>Plan Name</TableHead>
                 <TableHead>Pricing & Durations</TableHead>
                 <TableHead>Features</TableHead>
+                <TableHead>GST</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
@@ -94,6 +95,9 @@ export default async function PlansPage() {
                     </TableCell>
                     <TableCell className="text-sm text-gray-500">
                       {plan.features?.length || 0} features
+                    </TableCell>
+                    <TableCell className="text-sm text-gray-500 font-medium">
+                      {plan.gst_percentage || 0}%
                     </TableCell>
                     <TableCell>
                       <PlanToggle plan={plan} />
