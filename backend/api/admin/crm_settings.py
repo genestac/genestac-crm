@@ -241,7 +241,7 @@ async def update_global_settings(
     supabase: Client = Depends(get_supabase_client)
 ):
     try:
-        if current_user["role"] != "SUPER_ADMIN":
+        if current_user.get("role") not in ["SUPER_ADMIN", "superadmin", "master_admin"]:
             raise HTTPException(status_code=403, detail="Not authorized")
             
         data = await request.json()
@@ -275,7 +275,7 @@ async def delete_proforma_invoice(
     current_user: dict = Depends(get_current_user),
     supabase: Client = Depends(get_supabase_client)
 ):
-    if current_user["role"] != "SUPER_ADMIN":
+    if current_user.get("role") not in ["SUPER_ADMIN", "superadmin", "master_admin"]:
         raise HTTPException(status_code=403, detail="Only Super Admins can delete invoices")
         
     try:

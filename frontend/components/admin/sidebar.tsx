@@ -15,7 +15,8 @@ import {
   Settings,
   Activity,
   CreditCard,
-  ShoppingCart
+  ShoppingCart,
+  FileText
 } from 'lucide-react'
 import { logout } from '@/app/auth/actions'
 
@@ -39,7 +40,9 @@ const modules = [
   {
     title: 'CRM & Health',
     routes: [
+      { name: 'Lead Settings', path: '/admin/lead-settings', icon: Settings },
       { name: 'Lead Assignment', path: '/admin/lead-assignment', icon: Users },
+      { name: 'Proforma Invoices', path: '/admin/proforma-invoices', icon: FileText },
       { name: 'Doctors', path: '/admin/doctors', icon: Stethoscope },
       { name: 'Medical Plans', path: '/admin/plans', icon: CreditCard },
     ]
@@ -56,7 +59,7 @@ const modules = [
     title: 'Settings',
     routes: [
       { name: 'Coupons', path: '/admin/coupons', icon: Settings },
-      { name: 'CRM Settings', path: '/admin/crm-settings', icon: Settings },
+      { name: 'Invoice Settings', path: '/admin/invoice-settings', icon: Settings },
       { name: 'Custom Fields', path: '/admin/custom-fields', icon: Settings },
     ]
   }

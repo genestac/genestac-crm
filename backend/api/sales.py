@@ -167,7 +167,7 @@ async def get_metrics(
     
     settings = get_global_settings_from_db(supabase)
     shared_pool_enabled = settings.get("shared_lead_pool", False)
-    is_admin = current_user.get("role") in ["SUPER_ADMIN", "admin", "master_admin"]
+    is_admin = current_user.get("role") in ["SUPER_ADMIN", "superadmin", "admin", "master_admin"]
     # 1. Helper function to fetch and count
     def fetch_and_combine(table1, table2, select_str, eq_filters=None, gte_filters=None, lt_filters=None, is_count=False):
         def build_query(t):
@@ -367,7 +367,7 @@ async def get_leads(
 ):
     try:
         user_id = current_user["id"]
-        is_admin = current_user.get("role") in ["SUPER_ADMIN", "admin", "master_admin"]
+        is_admin = current_user.get("role") in ["SUPER_ADMIN", "superadmin", "admin", "master_admin"]
         
         settings = get_global_settings_from_db(supabase)
         shared_pool_enabled = settings.get("shared_lead_pool", False)
@@ -843,9 +843,9 @@ async def get_invoice_by_id(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+
 from fastapi.responses import Response
-from io import BytesIO
-from pathlib import Path
+from api.pdf_generator import generate_invoice_pdf
 
 @router.get("/invoices/{invoice_id}/pdf")
 async def get_invoice_pdf(
@@ -853,10 +853,6 @@ async def get_invoice_pdf(
     supabase: Client = Depends(get_supabase_client)
 ):
     try:
-        from reportlab.lib import colors
-        from reportlab.lib.pagesizes import A4
-        from reportlab.pdfgen import canvas
-
         inv_res = supabase.table("proforma_invoices").select("*").eq("id", invoice_id).execute()
         if not inv_res.data:
             raise HTTPException(status_code=404, detail="Invoice not found")
@@ -865,7 +861,7 @@ async def get_invoice_pdf(
         plan_id = invoice_data.get("plan_id")
         if plan_id:
             plan_res = supabase.table("plans").select("*").eq("id", plan_id).execute()
-            invoice_data["plans"] = plan_res.data[0] if plan_res.data else None
+            invoice_data["plans"] = plan_res.data[0] if plan_res.data else {}
 
         user_id = invoice_data.get("user_id")
         if user_id:
@@ -874,142 +870,23 @@ async def get_invoice_pdf(
                 user_res = supabase.table("leads").select("*").eq("id", user_id).execute()
             invoice_data["users"] = user_res.data[0] if user_res.data else {}
 
-        settings = get_global_settings_from_db(supabase)
-
-        user = invoice_data.get("users", {})
-        plan = invoice_data.get("plans", {})
+        settings     = get_global_settings_from_db(supabase)
+        user         = invoice_data.get("users", {})
+        plan         = invoice_data.get("plans", {})
         company_info = settings.get("company_info", {})
         bank_details = settings.get("bank_details", {})
-        invoice_settings = settings.get("invoice_settings", {})
+        inv_settings = settings.get("invoice_settings", {})
 
-        buffer = BytesIO()
-        c = canvas.Canvas(buffer, pagesize=A4)
-        width, height = A4
+        pdf_bytes = generate_invoice_pdf(
+            invoice_data, user, plan,
+            company_info, bank_details, inv_settings,
+        )
 
-        primary = colors.HexColor("#0f4c81")
-        border = colors.HexColor("#e2e8f0")
-        muted = colors.HexColor("#64748b")
-        soft = colors.HexColor("#f8fafc")
-        dark = colors.HexColor("#1e293b")
-
-        c.setFillColor(primary)
-        c.rect(0, height - 8, width, 8, fill=1, stroke=0)
-
-        c.setFillColor(soft)
-        c.rect(40, height - 118, width - 80, 86, fill=1, stroke=0)
-        c.setStrokeColor(border)
-        c.rect(40, height - 118, width - 80, 86, fill=0, stroke=1)
-
-        logo_path = Path(__file__).resolve().parents[2] / "frontend" / "public" / "logo.jpeg"
-        if logo_path.exists():
-            try:
-                c.drawImage(str(logo_path), 55, height - 103, width=120, height=48, preserveAspectRatio=True)
-            except Exception:
-                pass
-        else:
-            c.setFillColor(colors.HexColor("#cbd5e1"))
-            c.rect(55, height - 103, 120, 48, fill=0, stroke=1)
-            c.setFont("Helvetica", 9)
-            c.setFillColor(muted)
-            c.drawCentredString(115, height - 82, "Logo")
-
-        c.setFillColor(primary)
-        c.setFont("Helvetica-Bold", 18)
-        c.drawRightString(width - 55, height - 72, "PROFORMA INVOICE")
-        c.setFont("Helvetica", 9)
-        c.setFillColor(muted)
-        c.drawRightString(width - 55, height - 92, invoice_data.get("invoice_number", ""))
-
-        c.setFillColor(dark)
-        c.setFont("Helvetica-Bold", 11)
-        c.drawString(40, height - 150, company_info.get("name", "Genestac"))
-        c.setFont("Helvetica", 9)
-        c.drawString(40, height - 164, company_info.get("address", ""))
-        c.drawString(40, height - 178, f"GSTIN/UIN: {company_info.get('gstin', '')}")
-        c.drawString(40, height - 192, f"Email: {company_info.get('email', '')}")
-        c.drawString(40, height - 206, f"Phone: {company_info.get('phone', '')}")
-
-        c.setFont("Helvetica-Bold", 10)
-        c.drawString(width / 2 + 15, height - 150, "Invoice Details")
-        c.setFont("Helvetica", 9)
-        c.drawString(width / 2 + 15, height - 165, f"Invoice No.: {invoice_data.get('invoice_number', '')}")
-        inv_date_str = invoice_data.get("invoice_date", invoice_data.get("created_at", ""))
-        c.drawString(width / 2 + 15, height - 180, f"Date: {str(inv_date_str)[:10]}")
-        c.drawString(width / 2 + 15, height - 195, f"Reference: {str(invoice_data.get('id', ''))[:8].upper()}")
-        c.drawString(width / 2 + 15, height - 210, f"Bill To: {user.get('name', '')}")
-
-        c.setStrokeColor(border)
-        c.line(40, height - 232, width - 40, height - 232)
-
-        c.setFillColor(primary)
-        c.setFont("Helvetica-Bold", 9)
-        c.drawString(50, height - 252, "ITEM DESCRIPTION")
-        c.drawRightString(width - 50, height - 252, "AMOUNT")
-
-        c.setFillColor(dark)
-        c.setFont("Helvetica", 9)
-        c.drawString(50, height - 272, plan.get("name", "Medical Plan"))
-        c.drawRightString(width - 50, height - 272, f"INR {invoice_data.get('total_amount', 0)}")
-
-        c.line(40, height - 292, width - 40, height - 292)
-
-        y = height - 320
-        c.setFont("Helvetica", 9)
-        c.drawString(width / 2 + 50, y, "Base Price:")
-        c.drawRightString(width - 50, y, f"INR {invoice_data.get('base_price', 0)}")
-        y -= 15
-
-        if invoice_data.get("discount_percentage", 0) > 0:
-            c.drawString(width / 2 + 50, y, f"Discount ({invoice_data.get('discount_percentage')}%)")
-            discount_amount = invoice_data.get('base_price', 0) * invoice_data.get('discount_percentage', 0) / 100
-            c.drawRightString(width - 50, y, f"- INR {int(discount_amount)}")
-            y -= 15
-
-        c.drawString(width / 2 + 50, y, f"GST ({invoice_data.get('gst_percentage', 0)}%):")
-        c.drawRightString(width - 50, y, f"INR {invoice_data.get('gst_amount', 0)}")
-        y -= 20
-
-        c.setFillColor(soft)
-        c.rect(width / 2 + 40, y - 20, width / 2 - 80, 24, fill=1, stroke=0)
-        c.setFillColor(dark)
-        c.setFont("Helvetica-Bold", 9)
-        c.drawString(width / 2 + 50, y - 13, "Total Amount:")
-        c.drawRightString(width - 50, y - 13, f"INR {invoice_data.get('total_amount', 0)}")
-
-        y -= 70
-        c.setFillColor(soft)
-        c.rect(40, y - 70, width / 2 - 60, 70, fill=1, stroke=0)
-        c.setFillColor(dark)
-        c.setFont("Helvetica-Bold", 8)
-        c.drawString(50, y - 15, "BANK DETAILS")
-        c.setFont("Helvetica", 8)
-        c.drawString(50, y - 30, f"Account Name: {bank_details.get('account_name', '')}")
-        c.drawString(50, y - 42, f"Bank Name: {bank_details.get('bank_name', '')}")
-        c.drawString(50, y - 54, f"A/c No: {bank_details.get('account_no', '')}")
-        c.drawString(50, y - 66, f"IFSC: {bank_details.get('branch_ifsc', '')}")
-
-        y -= 55
-        c.setFont("Helvetica-Oblique", 8)
-        c.setFillColor(muted)
-        c.drawString(40, y, "Declaration: " + invoice_settings.get("declaration", ""))
-
-        y -= 45
-        c.setFont("Helvetica", 8)
-        c.setFillColor(dark)
-        c.drawRightString(width - 40, y + 20, f"for {company_info.get('name', '')}")
-        c.line(width - 150, y, width - 40, y)
-        c.drawRightString(width - 40, y - 10, "Authorised Signatory")
-
-        c.save()
-        buffer.seek(0)
-
-        safe_filename = str(invoice_data.get('invoice_number', 'Invoice')).replace("/", "-")
+        safe_name = str(invoice_data.get("invoice_number", "Invoice")).replace("/", "-")
         return Response(
-            content=buffer.getvalue(),
+            content=pdf_bytes,
             media_type="application/pdf",
-            headers={
-                "Content-Disposition": f'attachment; filename="PI_{safe_filename}.pdf"'
-            },
+            headers={"Content-Disposition": f'attachment; filename="PI_{safe_name}.pdf"'},
         )
 
     except Exception as e:

@@ -1,29 +1,29 @@
 import { fetchAPI } from '@/utils/api'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { addSource } from './actions'
 import { SharedPoolToggle } from './shared-pool-toggle'
-import { InvoiceSettingsForm } from './invoice-settings-form'
 import { cookies } from 'next/headers'
 
-export default async function CRMSettingsPage() {
+export default async function LeadSettingsPage() {
   const cookieHeader = (await cookies()).toString()
+  
   const { data: sources } = await fetchAPI('/api/admin/crm-settings/sources', {
     headers: { Cookie: cookieHeader }
   }).catch(() => ({ data: [] }))
+  
   const { data: globalSettings } = await fetchAPI('/api/admin/crm-settings/global', {
     headers: { Cookie: cookieHeader }
   }).catch(() => ({ data: { shared_lead_pool: false } }))
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 p-6 max-w-5xl mx-auto">
       <div className="flex justify-between items-start">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight text-gray-900">CRM Settings</h1>
+          <h1 className="text-3xl font-bold tracking-tight text-gray-900">Lead Settings</h1>
           <p className="text-muted-foreground mt-2">
-            Manage global configurations and User Sources.
+            Manage global lead configurations and User Sources.
           </p>
         </div>
         
@@ -34,8 +34,7 @@ export default async function CRMSettingsPage() {
         </Card>
       </div>
 
-      <div className="grid md:grid-cols-2 gap-8">
-        {/* Sources Management */}
+      <div className="grid md:grid-cols-1 gap-8 max-w-2xl">
         <Card>
           <CardHeader>
             <CardTitle>Lead Sources</CardTitle>
@@ -43,7 +42,7 @@ export default async function CRMSettingsPage() {
           <CardContent>
             <form action={addSource} className="flex gap-2 mb-6">
               <Input name="name" placeholder="Source Name (e.g. Google Ads)" required />
-              <Button type="submit">Add</Button>
+              <Button type="submit">Add Source</Button>
             </form>
 
             <div className="space-y-3">
@@ -55,14 +54,12 @@ export default async function CRMSettingsPage() {
                   </span>
                 </div>
               ))}
+              {(!sources || sources.length === 0) && (
+                <p className="text-sm text-gray-500 text-center py-4">No lead sources found.</p>
+              )}
             </div>
           </CardContent>
         </Card>
-
-        {/* Invoice Settings */}
-        <div className="space-y-8">
-          <InvoiceSettingsForm initialSettings={globalSettings} />
-        </div>
       </div>
     </div>
   )

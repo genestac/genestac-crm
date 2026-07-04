@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Bell, User, RefreshCw } from 'lucide-react'
+import { Bell, User, RefreshCw, LayoutDashboard, ChevronDown, ShoppingBag, Settings } from 'lucide-react'
 import { ThemeToggle } from '@/components/theme-toggle'
 import {
   DropdownMenu,
@@ -16,6 +16,8 @@ import {
 import { Button, buttonVariants } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
+const ADMIN_ROLES = ['superadmin', 'master_admin', 'admin', 'SUPER_ADMIN']
+
 export function SalesHeader({ role }: { role?: string }) {
   const router = useRouter()
   const [isRefreshing, setIsRefreshing] = useState(false)
@@ -28,10 +30,47 @@ export function SalesHeader({ role }: { role?: string }) {
     }, 800)
   }
 
+  const isAdminRole = ADMIN_ROLES.includes(role || '')
+
   return (
     <header className="sticky top-0 z-10 flex items-center justify-between h-20 px-8 bg-card/80 backdrop-blur-xl border-b border-border/50 shrink-0 shadow-sm">
-      <div className="flex items-center">
-        <h2 className="text-2xl font-bold bg-gradient-to-r from-[var(--color-brand-teal)] to-[var(--color-brand-ocean)] bg-clip-text text-transparent tracking-tight">Sales Hub</h2>
+      <div className="flex items-center gap-3">
+        {isAdminRole ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              className={cn(
+                buttonVariants({ variant: "outline" }),
+                "flex items-center gap-2 h-9 px-4 rounded-full border-primary/30 bg-primary/5 hover:bg-primary/10 text-primary font-medium text-sm shadow-sm transition-all"
+              )}
+            >
+              <ShoppingBag className="w-4 h-4" />
+              Sales Dashboard
+              <ChevronDown className="w-3 h-3 opacity-60" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-52">
+              <DropdownMenuGroup>
+                <DropdownMenuLabel className="text-xs text-muted-foreground">Switch Dashboard</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  className="flex items-center gap-2 font-medium text-primary bg-primary/5"
+                  onClick={() => router.push('/sales')}
+                >
+                  <ShoppingBag className="w-4 h-4" />
+                  Sales Dashboard
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className="flex items-center gap-2"
+                  onClick={() => router.push('/admin')}
+                >
+                  <Settings className="w-4 h-4" />
+                  Admin Dashboard
+                </DropdownMenuItem>
+              </DropdownMenuGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : (
+          <h2 className="text-2xl font-bold bg-gradient-to-r from-[var(--color-brand-teal)] to-[var(--color-brand-ocean)] bg-clip-text text-transparent tracking-tight">Sales Hub</h2>
+        )}
       </div>
 
       <div className="flex items-center space-x-6">
@@ -59,21 +98,15 @@ export function SalesHeader({ role }: { role?: string }) {
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-56">
             <DropdownMenuGroup>
-              <DropdownMenuLabel>Sales Account</DropdownMenuLabel>
+              <DropdownMenuLabel>My Account</DropdownMenuLabel>
               <DropdownMenuSeparator />
               <DropdownMenuItem>Profile Settings</DropdownMenuItem>
-              <DropdownMenuItem>Sales Preferences</DropdownMenuItem>
-              {(role === 'SUPER_ADMIN' || role === 'admin' || role === 'master_admin') && (
-                <>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={() => router.push('/admin')}>
-                    Switch to Admin Dashboard
-                  </DropdownMenuItem>
-                </>
-              )}            </DropdownMenuGroup>
+              <DropdownMenuItem>Preferences</DropdownMenuItem>
+            </DropdownMenuGroup>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
     </header>
   )
 }
+

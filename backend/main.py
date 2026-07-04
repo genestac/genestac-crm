@@ -39,9 +39,13 @@ app.include_router(logs.router, prefix="/api/admin/logs", tags=["admin-logs"])
 app.include_router(lead_assignment.router, prefix="/api/admin/lead-assignment", tags=["admin-lead-assignment"])
 app.include_router(coupons.router, prefix="/api/admin/coupons", tags=["admin-coupons"])
 from api import templates, custom_fields
+from app.routes import admin_proforma_routes, invoice_settings_routes
+
 app.include_router(templates.router, prefix="/api/templates", tags=["templates"])
 app.include_router(custom_fields.router, prefix="/api/admin/custom-fields", tags=["admin-custom-fields"])
 app.include_router(public.router, prefix="/api/public", tags=["public"])
+app.include_router(admin_proforma_routes.router, prefix="/api/v2/admin/proforma-invoices", tags=["admin-proformas"])
+app.include_router(invoice_settings_routes.router, prefix="/api/v2/admin/invoice-settings", tags=["admin-invoice-settings"])
 # Production deployment health check endpoint
 @app.get("/")
 def read_root():

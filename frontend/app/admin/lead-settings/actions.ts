@@ -10,7 +10,7 @@ export async function addSource(formData: FormData) {
       headers: { 'Cookie': (await cookies()).toString() },
       body: formData
     })
-    revalidatePath('/admin/crm-settings')
+    revalidatePath('/admin/lead-settings')
   } catch (error: any) {
     throw new Error(error.message)
   }
@@ -25,7 +25,7 @@ export async function toggleSource(id: string, isActive: boolean) {
       headers: { 'Cookie': (await cookies()).toString() },
       body: formData
     })
-    revalidatePath('/admin/crm-settings')
+    revalidatePath('/admin/lead-settings')
   } catch (error: any) {
     throw new Error(error.message)
   }
@@ -42,5 +42,5 @@ export async function updateGlobalSettings(settings: any) {
     },
     body: JSON.stringify(settings)
   })
-  revalidatePath('/admin/crm-settings')
+  revalidatePath('/admin/lead-settings')
 }

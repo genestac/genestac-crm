@@ -22,7 +22,14 @@ export default async function ProformaInvoicePage({ params }: { params: Promise<
     settings = res.settings
   } catch (e) {
     console.error(`[ProformaPage] Caught error:`, e);
-    notFound()
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <h1 className="text-4xl font-bold text-gray-800 mb-4">Invoice Not Found</h1>
+          <p className="text-gray-500">The requested invoice does not exist or has been deleted.</p>
+        </div>
+      </div>
+    )
   }
 
   const user = invoice.users || {}
@@ -279,12 +286,12 @@ export default async function ProformaInvoicePage({ params }: { params: Promise<
               <table className="inv-table">
                   <thead>
                       <tr>
-                          <th width="5%">Sl No.</th>
-                          <th width="45%">Description of Services</th>
-                          <th width="10%">HSN/SAC</th>
-                          <th width="10%">Quantity</th>
-                          <th width="10%">Rate</th>
-                          <th width="20%">Amount (INR)</th>
+                          <th style={{ width: '5%' }}>Sl No.</th>
+                          <th style={{ width: '45%' }}>Description of Services</th>
+                          <th style={{ width: '10%' }}>HSN/SAC</th>
+                          <th style={{ width: '10%' }}>Quantity</th>
+                          <th style={{ width: '10%' }}>Rate</th>
+                          <th style={{ width: '20%' }}>Amount (INR)</th>
                       </tr>
                   </thead>
                   <tbody>
