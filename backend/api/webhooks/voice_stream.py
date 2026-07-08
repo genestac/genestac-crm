@@ -288,18 +288,65 @@ async def voice_stream(websocket: WebSocket):
         # Step 6: Save transcript and memory when call ends
         # -----------------------------------------------------------------------
         try:
-            messages = context.messages
-            conversation = [m for m in messages if m.get("role") in ("user", "assistant")]
-            full_transcript = "\n".join([
-                f"{m['role']}: {m['content']}"
-                for m in conversation
-                if isinstance(m.get("content"), str)
-            ])
+            raw_messages = context.messages
+            logger.warning(f"[Transcript] context.messages count: {len(raw_messages)}")
+
+            conversation_lines = []
+            for m in raw_messages:
+                # Handle both plain dict {role, content} and Gemini Content objects
+                if isinstance(m, dict):
+                    role = m.get("role", "")
+                    content = m.get("content", "")
+                else:
+                    # Gemini Content object: .role and .parts[].text
+                    role = getattr(m, "role", "")
+                    parts = getattr(m, "parts", [])
+                    content = " ".join(
+                        getattr(p, "text", "") for p in parts if hasattr(p, "text")
+                    )
+
+                if role in ("user", "model", "assistant") and content:
+                    display_role = "assistant" if role == "model" else role
+                    conversation_lines.append(f"{display_role}: {content}")
+
+            full_transcript = "\n".join(conversation_lines)
+            logger.warning(f"[Transcript] full_transcript length: {len(full_transcript)}, lead_id: {lead_id}")
 
             if full_transcript and lead_id:
-                summary = f"AI Call with {lead_name}. " + full_transcript[:150] + "..."
+                # -----------------------------------------------------------
+                # Generate an intelligent summary using Gemini
+                # -----------------------------------------------------------
+                summary = f"AI Call with {lead_name}."  # fallback
+                try:
+                    from google import genai as gai
+                    from google.genai import types as gai_types
+                    gai_client = gai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+                    summary_prompt = f"""You are a CRM assistant. Summarize this AI sales call in 3-4 concise bullet points for a sales rep.
+
+Focus on:
+- What the lead was interested in (products/plans/concerns)
+- Key information shared by the lead (health goals, constraints, objections)
+- What was offered or discussed
+- Outcome / next steps (booked appointment, declined, asked for follow-up, etc.)
+
+Call transcript:
+{full_transcript}
+
+Return ONLY the bullet points, no intro text. Use plain text bullets starting with •"""
+                    resp = gai_client.models.generate_content(
+                        model="gemini-2.0-flash",
+                        contents=summary_prompt,
+                    )
+                    summary = resp.text.strip()
+                    logger.warning(f"[Transcript] AI summary generated: {summary[:100]}...")
+                except Exception as sum_err:
+                    logger.warning(f"[Transcript] Summary generation failed, using fallback: {sum_err}")
+                    # Fallback: extract just user lines
+                    user_lines = [l for l in conversation_lines if l.startswith("user:")]
+                    summary = f"Lead interested in: {'; '.join(user_lines[:3])}"
 
                 log_res = supabase.table("ai_call_logs").select("id").eq("lead_id", lead_id).order("created_at", desc=True).limit(1).execute()
+                log_id = None
                 if log_res.data:
                     log_id = log_res.data[0]["id"]
                     supabase.table("ai_call_logs").update({
@@ -307,11 +354,24 @@ async def voice_stream(websocket: WebSocket):
                         "summary": summary,
                         "status": "completed",
                     }).eq("id", log_id).execute()
-
-                    supabase.table("lead_context_memory").insert({
+                    logger.warning(f"[Transcript] Updated existing log {log_id}")
+                else:
+                    new_log = supabase.table("ai_call_logs").insert({
                         "lead_id": lead_id,
-                        "memory_text": f"Discussed: {summary}",
-                        "source_call_id": log_id,
+                        "transcript": full_transcript,
+                        "summary": summary,
+                        "status": "completed",
                     }).execute()
+                    log_id = new_log.data[0]["id"]
+                    logger.warning(f"[Transcript] Created new log {log_id}")
+
+                supabase.table("lead_context_memory").insert({
+                    "lead_id": lead_id,
+                    "memory_text": f"Call summary:\n{summary}",
+                    "source_call_id": log_id,
+                }).execute()
+                logger.warning(f"[Transcript] Memory saved for lead {lead_id}")
+            else:
+                logger.warning(f"[Transcript] Skipped saving — transcript empty or no lead_id")
         except Exception as e:
             logger.error(f"Failed to save transcript/memory: {e}", exc_info=True)

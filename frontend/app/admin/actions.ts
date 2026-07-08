@@ -79,3 +79,15 @@ export async function deleteKnowledgeBaseItem(id: string) {
     throw error
   }
 }
+
+export async function getCallLogs() {
+  try {
+    const response = await fetchAPI('/api/admin/ai-settings/call-logs?limit=50', {
+      headers: { 'Cookie': (await cookies()).toString() }
+    })
+    return response.data || []
+  } catch (error) {
+    console.error('Failed to fetch call logs:', error)
+    return []
+  }
+}

@@ -98,3 +98,41 @@ async def delete_knowledge_base_item(
         return {"success": True}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/call-logs")
+async def get_all_call_logs(
+    limit: int = 50,
+    current_user: dict = Depends(get_current_user),
+    supabase: Client = Depends(get_supabase_client)
+):
+    """Get all AI call logs across all leads for admin dashboard."""
+    try:
+        logs_res = (
+            supabase.table("ai_call_logs")
+            .select("*")
+            .order("created_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        logs = logs_res.data or []
+
+        # Batch-fetch lead names for all unique lead_ids
+        lead_ids = list({l["lead_id"] for l in logs if l.get("lead_id")})
+        lead_map: dict = {}
+        if lead_ids:
+            leads_res = (
+                supabase.table("leads")
+                .select("id, name, phone_number")
+                .in_("id", lead_ids)
+                .execute()
+            )
+            lead_map = {l["id"]: l for l in (leads_res.data or [])}
+
+        # Attach lead info to each log
+        for log in logs:
+            lead = lead_map.get(log.get("lead_id"), {})
+            log["leads"] = {"name": lead.get("name"), "phone": lead.get("phone_number")}
+
+        return {"data": logs}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
