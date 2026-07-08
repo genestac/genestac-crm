@@ -239,6 +239,9 @@ async def voice_stream(websocket: WebSocket):
                     "role": "user",
                     "content": f"Hi, my name is {lead_name}. Please greet me warmly and ask how you can help.",
                 }])
+                # CRITICAL: _create_single_response does NOT set this flag.
+                # Without it, _send_user_audio silently drops ALL user audio.
+                self._ready_for_realtime_input = True
 
         llm = GreetingGeminiService(
             api_key=os.getenv("GEMINI_API_KEY"),
