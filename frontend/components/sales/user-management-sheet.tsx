@@ -14,8 +14,8 @@ import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGroup, SelectLabel } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
-import { updateLeadDetails, uploadLeadDocument, getLeadDocuments, getUserNotes, addInteractionNote, getDoctors, bookAppointment, getPlans, getSources, generateRazorpayLink, getProformaInvoices, deleteProformaInvoice, getCurrentUserRole } from '@/app/sales/actions'
-import { FileUp, FileText, Download, Loader2, CreditCard, ChevronDown, ChevronRight, Check, Calendar, Activity, User, Receipt, CheckCircle2, FileDown } from 'lucide-react'
+import { updateLeadDetails, uploadLeadDocument, getLeadDocuments, getUserNotes, addInteractionNote, getDoctors, bookAppointment, getPlans, getSources, generateRazorpayLink, getProformaInvoices, deleteProformaInvoice, getCurrentUserRole, getAICallLogs, triggerAICall } from '@/app/sales/actions'
+import { FileUp, FileText, Download, Loader2, CreditCard, ChevronDown, ChevronRight, Check, Calendar, Activity, User, Receipt, CheckCircle2, FileDown, Phone, Mic, Bot } from 'lucide-react'
 
 export function UserManagementSheet({ 
   lead, 
@@ -63,6 +63,8 @@ export function UserManagementSheet({
   const [proformaData, setProformaData] = useState<any>(null)
   const [invoices, setInvoices] = useState<any[]>([])
   const [currentUserRole, setCurrentUserRole] = useState<string>('USER')
+  const [aiCallLogs, setAiCallLogs] = useState<any[]>([])
+  const [initiatingCall, setInitiatingCall] = useState(false)
 
   // Form state to make inputs controlled
   const [formData, setFormData] = useState({
@@ -113,6 +115,7 @@ export function UserManagementSheet({
       getPlans().then(data => setPlans(data || []))
       getSources().then(data => setSources(data || []))
       getCurrentUserRole().then(setCurrentUserRole).catch(console.error)
+      getAICallLogs(lead.id).then(setAiCallLogs).catch(console.error)
       
       import('@/app/sales/actions').then(m => m.getCustomFields()).then(fields => {
         const entity = (lead.record_type || 'USER').toLowerCase()
@@ -154,6 +157,19 @@ export function UserManagementSheet({
       }
     } catch (err: any) {
       toast.error("Error: " + err.message)
+    }
+  }
+
+  const handleTriggerAICall = async () => {
+    setInitiatingCall(true)
+    try {
+      await triggerAICall(lead.id)
+      toast.success("AI is now calling the user via Exotel!")
+      getAICallLogs(lead.id).then(setAiCallLogs).catch(console.error)
+    } catch (err: any) {
+      toast.error("Error: " + err.message)
+    } finally {
+      setInitiatingCall(false)
     }
   }
 
@@ -308,7 +324,8 @@ export function UserManagementSheet({
             { id: "pipeline", label: "Pipeline", icon: Activity },
             { id: "payment", label: "Payment", icon: CreditCard },
             { id: "appointments", label: "Appointments", icon: Calendar },
-            { id: "files", label: "Files & Notes", icon: FileText }
+            { id: "files", label: "Files & Notes", icon: FileText },
+            { id: "call_logs", label: "AI Calls", icon: Phone }
           ].map(tab => (
             <button
               key={tab.id}
@@ -451,7 +468,7 @@ export function UserManagementSheet({
                           <>
                             <SelectItem value="NEW">New (Raw)</SelectItem>
                             <SelectItem value="UNREAD">Unread</SelectItem>
-                            <SelectItem value="ASSIGNED">Assigned</SelectItem>
+
                             <SelectItem value="CONTACT_ATTEMPTED">Contact Attempted</SelectItem>
                             <SelectItem value="CONTACTED">Contacted</SelectItem>
                             <SelectItem value="QUALIFIED">Qualified</SelectItem>
@@ -1051,6 +1068,84 @@ export function UserManagementSheet({
                         </div>
                       ))}
                     </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {activeTab === "call_logs" && (
+              <div className="space-y-6">
+                <div className="flex items-center justify-between pb-4 border-b">
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-900">AI Call Logs</h3>
+                    <p className="text-sm text-gray-500">History of automated AI voice interactions with this lead.</p>
+                  </div>
+                  {['admin', 'superadmin', 'master_admin', 'SUPER_ADMIN'].includes(currentUserRole.toLowerCase()) && (
+                    <Button 
+                      onClick={handleTriggerAICall} 
+                      disabled={initiatingCall}
+                      variant="outline"
+                      className="border-primary text-primary hover:bg-primary/5"
+                    >
+                      {initiatingCall ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Bot className="w-4 h-4 mr-2" />}
+                      Call via AI Now
+                    </Button>
+                  )}
+                </div>
+
+                <div className="space-y-4">
+                  {aiCallLogs.length === 0 ? (
+                    <div className="text-center py-10 bg-gray-50 rounded-xl border border-dashed">
+                      <Phone className="w-8 h-8 text-gray-300 mx-auto mb-2" />
+                      <p className="text-sm text-gray-500">No AI calls have been made to this lead yet.</p>
+                    </div>
+                  ) : (
+                    aiCallLogs.map((log) => (
+                      <div key={log.id} className="bg-white border rounded-xl p-5 space-y-4 shadow-sm">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <div className={`p-1.5 rounded-full ${log.status === 'completed' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+                              <Phone className="w-4 h-4" />
+                            </div>
+                            <span className="font-medium text-sm capitalize">{log.status}</span>
+                            <span className="text-xs text-gray-500">• {new Date(log.created_at).toLocaleString()}</span>
+                          </div>
+                          <div className="text-xs font-mono bg-gray-100 px-2 py-1 rounded text-gray-600">
+                            {log.duration ? `${Math.floor(log.duration / 60)}m ${log.duration % 60}s` : 'Unknown duration'}
+                          </div>
+                        </div>
+
+                        {log.recording_url && (
+                          <div className="bg-gray-50 p-3 rounded-lg border">
+                            <audio controls className="w-full h-8" src={log.recording_url}>
+                              Your browser does not support the audio element.
+                            </audio>
+                          </div>
+                        )}
+
+                        {log.summary && (
+                          <div className="bg-indigo-50/50 p-4 rounded-lg border border-indigo-100">
+                            <h4 className="text-xs font-bold text-indigo-900 uppercase tracking-wider mb-2 flex items-center">
+                              <Bot className="w-3.5 h-3.5 mr-1" />
+                              AI Summary
+                            </h4>
+                            <p className="text-sm text-indigo-900 leading-relaxed">{log.summary}</p>
+                          </div>
+                        )}
+
+                        {log.transcript && (
+                          <details className="text-sm border-t pt-3 group">
+                            <summary className="cursor-pointer text-gray-600 font-medium hover:text-gray-900 flex items-center">
+                              <ChevronRight className="w-4 h-4 mr-1 transition-transform group-open:rotate-90" />
+                              View Raw Transcript
+                            </summary>
+                            <div className="mt-3 p-4 bg-gray-50 rounded-lg text-gray-700 whitespace-pre-wrap max-h-64 overflow-y-auto font-mono text-xs border">
+                              {log.transcript}
+                            </div>
+                          </details>
+                        )}
+                      </div>
+                    ))
                   )}
                 </div>
               </div>

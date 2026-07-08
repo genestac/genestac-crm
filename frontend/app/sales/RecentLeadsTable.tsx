@@ -4,7 +4,9 @@ import { useState, useEffect, useRef } from 'react'
 import { getPaginatedLeads } from './actions'
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuCheckboxItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuGroup } from '@/components/ui/dropdown-menu'
 import { buttonVariants } from '@/components/ui/button'
-import { ChevronDown, Filter } from 'lucide-react'
+import { ChevronDown, Filter, Settings2 } from 'lucide-react'
+import { UserManagementSheet } from '@/components/sales/user-management-sheet'
+import { AICallButton } from '@/components/sales/ai-call-button'
 
 export default function RecentLeadsTable({ initialLeads }: { initialLeads: any[] }) {
   const [leads, setLeads] = useState(initialLeads)
@@ -70,7 +72,7 @@ export default function RecentLeadsTable({ initialLeads }: { initialLeads: any[]
   const STATUS_OPTIONS = [
     { value: 'NEW', label: 'New' },
     { value: 'QUALIFIED', label: 'Qualified' },
-    { value: 'ASSIGNED', label: 'Assigned' },
+
     { value: 'CONSULTATION_SCHEDULED', label: 'Scheduled' }
   ]
 
@@ -144,6 +146,7 @@ export default function RecentLeadsTable({ initialLeads }: { initialLeads: any[]
               <th className="py-3 text-[#1a1d20] font-semibold border-b border-[#e5e7eb]">Source</th>
               <th className="py-3 text-[#1a1d20] font-semibold border-b border-[#e5e7eb]">Status</th>
               <th className="py-3 text-[#1a1d20] font-semibold border-b border-[#e5e7eb]">Next Follow-up</th>
+              <th className="py-3 text-[#1a1d20] font-semibold border-b border-[#e5e7eb] text-right">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -157,9 +160,7 @@ export default function RecentLeadsTable({ initialLeads }: { initialLeads: any[]
               } else if (lead.status === "QUALIFIED") {
                 badgeColor = "bg-[#dcfce7] text-[#16a34a]"
                 displayStatus = "Interested"
-              } else if (lead.status === "ASSIGNED") {
-                badgeColor = "bg-[#fef3c7] text-[#d97706]"
-                displayStatus = "Follow-up required"
+
               } else if (lead.status === "CONSULTATION_SCHEDULED") {
                 badgeColor = "bg-[#dbeafe] text-[#2563eb]"
                 displayStatus = "Scheduled"
@@ -197,6 +198,16 @@ export default function RecentLeadsTable({ initialLeads }: { initialLeads: any[]
                   </td>
                   <td className="py-[15px] border-b border-gray-100 text-[#1a1d20]">
                     {lead.next_followup_date ? new Date(lead.next_followup_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '-'}
+                  </td>
+                  <td className="py-[15px] border-b border-gray-100 text-right">
+                    <div className="flex items-center justify-end gap-2">
+                      <AICallButton leadId={lead.id} compact={true} />
+                      <UserManagementSheet lead={lead}>
+                        <button className="text-xs font-medium bg-gray-100 hover:bg-gray-200 text-gray-900 py-1.5 px-3 rounded-md transition-colors inline-flex items-center gap-1">
+                          <Settings2 className="w-3.5 h-3.5" /> Manage
+                        </button>
+                      </UserManagementSheet>
+                    </div>
                   </td>
                 </tr>
               )

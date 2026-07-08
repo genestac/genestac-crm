@@ -145,3 +145,17 @@ export async function getPaginatedLeads(page: number, limit: number, sortBy: str
   })
   return data
 }
+
+export async function getAICallLogs(leadId: string) {
+  const response = await fetchAPI(`/api/sales/leads/${leadId}/ai-calls`)
+  return response.data || []
+}
+
+
+export async function triggerAICall(leadId: string) {
+  const response = await fetchAPI(`/api/sales/leads/${leadId}/trigger-ai-call`, {
+    method: 'POST',
+    headers: { 'Cookie': (await cookies()).toString() }
+  })
+  return response
+}

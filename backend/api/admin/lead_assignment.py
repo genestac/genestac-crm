@@ -64,10 +64,9 @@ async def assign_lead(
     
     table = "leads" if request.record_type == "LEAD" else "users"
     
-    # Assign it and also update status to ASSIGNED if it's new
+    # Assign it
     response = supabase.table(table).update({
-        "assigned_sales_rep_id": request.sales_rep_id,
-        "status": "ASSIGNED"
+        "assigned_sales_rep_id": request.sales_rep_id
     }).eq("id", request.lead_id).execute()
     
     return {"success": True, "message": "Lead assigned successfully", "data": response.data}
@@ -99,15 +98,13 @@ async def assign_leads_bulk(
     # Update leads table
     if lead_ids:
         supabase.table("leads").update({
-            "assigned_sales_rep_id": request.sales_rep_id,
-            "status": "ASSIGNED"
+            "assigned_sales_rep_id": request.sales_rep_id
         }).in_("id", lead_ids).execute()
         
     # Update users table
     if user_ids:
         supabase.table("users").update({
-            "assigned_sales_rep_id": request.sales_rep_id,
-            "status": "ASSIGNED"
+            "assigned_sales_rep_id": request.sales_rep_id
         }).in_("id", user_ids).execute()
         
     return {"success": True, "message": f"Successfully assigned {len(request.leads)} leads"}

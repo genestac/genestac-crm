@@ -5,8 +5,13 @@ cloudinary
 python-jose[cryptography]
 passlib[bcrypt]
 python-multipart
-pydantic-settings
+pydantic-settings>=2.0.0
 
 razorpay
 
 reportlab==4.1.0
+APScheduler==3.10.4
+websockets
+pipecat-ai[google]
+openai
+google-genai

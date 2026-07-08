@@ -4,8 +4,10 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from core.config import settings
 from api import sales, auth, doctor
-from api.admin import staffs, roles, crm_settings, logs, lead_assignment, coupons, metrics
+from api.admin import staffs, roles, crm_settings, logs, lead_assignment, coupons, metrics, ai_settings
 from api import public
+
+from core.scheduler import start_scheduler
 
 class ForceHTTPSMiddleware(BaseHTTPMiddleware):
     """Force HTTPS scheme in FastAPI for proper URL generation behind proxies."""
@@ -13,17 +15,24 @@ class ForceHTTPSMiddleware(BaseHTTPMiddleware):
         request.scope["scheme"] = "https"
         return await call_next(request)
 
-app = FastAPI(title=settings.PROJECT_NAME)
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    start_scheduler()
+    yield
+    # Shutdown logic if needed
+
+app = FastAPI(title=settings.PROJECT_NAME, lifespan=lifespan)
 
 # Trust proxy headers (e.g., from Nginx)
 app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=["*"])
 # Force HTTPS context only in production
 if settings.ENVIRONMENT == "production":
     app.add_middleware(ForceHTTPSMiddleware)
-origins = [o.strip() for o in settings.ALLOWED_ORIGINS.split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -39,6 +48,11 @@ app.include_router(logs.router, prefix="/api/admin/logs", tags=["admin-logs"])
 app.include_router(lead_assignment.router, prefix="/api/admin/lead-assignment", tags=["admin-lead-assignment"])
 app.include_router(coupons.router, prefix="/api/admin/coupons", tags=["admin-coupons"])
 app.include_router(metrics.router, prefix="/api/admin/metrics", tags=["admin-metrics"])
+app.include_router(ai_settings.router, prefix="/api/admin/ai-settings", tags=["admin-ai-settings"])
+
+from api.webhooks import voice_stream
+app.include_router(voice_stream.router, prefix="/api/webhooks/exotel", tags=["webhooks-exotel"])
+
 from api import templates, custom_fields
 from app.routes import admin_proforma_routes, invoice_settings_routes
 

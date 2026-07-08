@@ -101,8 +101,8 @@ async def get_metrics(current_user: dict=Depends(get_current_user), supabase: Cl
     monthlyTarget = 1000000
     achievementPercentage = round(revenueGenerated / monthlyTarget * 100, 1) if monthlyTarget > 0 else 0
     _, all_leads_data = fetch_and_combine('users', 'leads', 'id, status, source_id, user_sources(name)', eq_filters={'assigned_sales_rep_id': user_id})
-    leadsSummary = {'New Lead': 0, 'Contacted': 0, 'Interested': 0, 'Follow-up Required': 0, 'Consultation Scheduled': 0, 'Others': 0}
-    status_mapping = {'NEW': 'New Lead', 'UNREAD': 'New Lead', 'CONTACT_ATTEMPTED': 'Contacted', 'CONTACTED': 'Contacted', 'QUALIFIED': 'Interested', 'ASSIGNED': 'Follow-up Required', 'CONSULTATION_SCHEDULED': 'Consultation Scheduled', 'CONSULTATION_COMPLETED': 'Others', 'ON_HOLD': 'Others', 'LOST': 'Others', 'CONVERTED': 'Others'}
+    leadsSummary = {'New Lead': 0, 'Contacted': 0, 'Interested': 0, 'Consultation Scheduled': 0, 'Others': 0}
+    status_mapping = {'NEW': 'New Lead', 'UNREAD': 'New Lead', 'CONTACT_ATTEMPTED': 'Contacted', 'CONTACTED': 'Contacted', 'QUALIFIED': 'Interested', 'CONSULTATION_SCHEDULED': 'Consultation Scheduled', 'CONSULTATION_COMPLETED': 'Others', 'ON_HOLD': 'Others', 'LOST': 'Others', 'CONVERTED': 'Others'}
     for lead in all_leads_data:
         st = lead.get('status')
         if st in status_mapping:

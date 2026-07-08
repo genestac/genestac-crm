@@ -177,3 +177,71 @@ async def get_leads(statuses: Optional[str]=Query(None), exclude_statuses: Optio
         print(f'get_leads error: {err}')
         sys.stdout.flush()
         raise HTTPException(status_code=500, detail=f'get_leads error: {str(e)}')
+
+@router.get('/leads/{lead_id}/ai-calls')
+async def get_lead_ai_calls(lead_id: str, current_user: dict=Depends(get_current_user), supabase: Client=Depends(get_supabase_client)):
+    try:
+        res = supabase.table('ai_call_logs').select('*').eq('lead_id', lead_id).order('created_at', desc=True).execute()
+        return {'data': res.data}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post('/leads/{lead_id}/trigger-ai-call')
+async def trigger_ai_call(lead_id: str, current_user: dict=Depends(get_current_user), supabase: Client=Depends(get_supabase_client)):
+    from services.exotel_service import initiate_ai_call
+    
+    # Check if admin
+    is_admin = current_user.get('role') in ['SUPER_ADMIN', 'superadmin', 'admin', 'master_admin']
+    if not is_admin:
+        # Also check staffs table just in case
+        profile = supabase.table("staffs").select("roles(name)").eq("id", current_user["id"]).single().execute()
+        role_name = profile.data.get("roles", {}).get("name") if profile.data and profile.data.get("roles") else None
+        if role_name not in ["superadmin", "master_admin", "admin"]:
+            raise HTTPException(status_code=403, detail="Only admins can manually trigger AI calls.")
+            
+    try:
+        # Get lead phone (check users table first, then leads table)
+        phone = None
+        user_res = supabase.table("users").select("phone").eq("id", lead_id).execute()
+        if user_res.data and user_res.data[0].get("phone"):
+            phone = user_res.data[0]["phone"]
+        else:
+            lead_res = supabase.table("leads").select("phone_number").eq("id", lead_id).execute()
+            if lead_res.data and lead_res.data[0].get("phone_number"):
+                phone = lead_res.data[0]["phone_number"]
+                
+        if not phone:
+            raise HTTPException(status_code=404, detail="Lead/User phone not found")
+        
+        # Get AI exotel number
+        settings_res = supabase.table("global_settings").select("settings_value").eq("settings_key", "ai_call_settings").execute()
+        if not settings_res.data:
+            raise HTTPException(status_code=400, detail="AI Settings not configured")
+        
+        ai_settings = settings_res.data[0]["settings_value"]
+        exotel_number = ai_settings.get("exotel_caller_id") or ai_settings.get("exotel_number")
+        if not exotel_number:
+            raise HTTPException(status_code=400, detail="Exotel caller ID not configured in AI settings")
+            
+        # Create log
+        log_res = supabase.table("ai_call_logs").insert({
+            "lead_id": lead_id,
+            "status": "initiating"
+        }).execute()
+        call_log_id = log_res.data[0]["id"]
+        
+        # Trigger
+        exotel_res = initiate_ai_call(from_number=exotel_number, to_number=phone, lead_id=lead_id)
+        
+        if exotel_res and "Call" in exotel_res:
+            call_sid = exotel_res["Call"].get("Sid")
+            supabase.table("ai_call_logs").update({"call_sid": call_sid, "status": "ringing"}).eq("id", call_log_id).execute()
+            return {"success": True, "message": "Call initiated"}
+        else:
+            supabase.table("ai_call_logs").update({"status": "failed_to_initiate"}).eq("id", call_log_id).execute()
+            raise HTTPException(status_code=500, detail="Failed to initiate Exotel call")
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

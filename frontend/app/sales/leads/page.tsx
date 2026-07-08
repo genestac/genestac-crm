@@ -11,7 +11,7 @@ export default async function MyLeadsPage() {
 
   try {
     const cookieHeader = (await cookies()).toString()
-    const response = await fetchAPI('/api/sales/leads?statuses=NEW,UNREAD,ASSIGNED,CONTACT_ATTEMPTED', {
+    const response = await fetchAPI('/api/sales/leads?statuses=NEW,UNREAD,CONTACT_ATTEMPTED', {
       headers: { Cookie: cookieHeader }
     })
     leads = response?.data || []
@@ -28,7 +28,7 @@ export default async function MyLeadsPage() {
         { value: 'NEW', label: 'New' },
         { value: 'UNREAD', label: 'Unread' },
         { value: 'CONTACT_ATTEMPTED', label: 'Contact Attempted' },
-        { value: 'ASSIGNED', label: 'Assigned' },
+
         { value: 'QUALIFIED', label: 'Qualified' },
         { value: 'CONSULTATION_SCHEDULED', label: 'Consultation Scheduled' },
         { value: 'SPAM', label: 'Spam' },

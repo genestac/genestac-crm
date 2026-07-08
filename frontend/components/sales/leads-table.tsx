@@ -6,6 +6,7 @@ import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuChe
 import { UserStatusUpdater } from '@/components/sales/user-status-updater'
 import { UserManagementSheet } from '@/components/sales/user-management-sheet'
 import { Button, buttonVariants } from '@/components/ui/button'
+import { AICallButton } from '@/components/sales/ai-call-button'
 import { useRouter } from 'next/navigation'
 import { getPaginatedLeads, bulkUpdateLeadsStatus } from '@/app/sales/actions'
 import { toast } from 'sonner'
@@ -29,7 +30,7 @@ export function LeadsTable({ initialLeads, initialTotal, statusOptions }: { init
   const [search, setSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
   // Default matches the server-side fetch in page.tsx
-  const [selectedStatuses, setSelectedStatuses] = useState<string[]>(['NEW', 'UNREAD', 'ASSIGNED', 'CONTACT_ATTEMPTED'])
+  const [selectedStatuses, setSelectedStatuses] = useState<string[]>(['NEW', 'UNREAD', 'CONTACT_ATTEMPTED'])
   const isInitialMount = useRef(true)
 
   // Debounce search
@@ -342,6 +343,8 @@ export function LeadsTable({ initialLeads, initialTotal, statusOptions }: { init
                         </svg>
                       </a>
                     )}
+                    
+                    <AICallButton leadId={lead.id} compact={true} />
                     
                     <UserManagementSheet lead={lead} statusOptions={statusOptions}>
                       <Button variant="secondary" size="sm" className="bg-gray-100 hover:bg-gray-200 text-gray-900">

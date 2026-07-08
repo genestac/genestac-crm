@@ -5,11 +5,11 @@ import { updateLeadDetails } from '@/app/sales/actions'
 import { UserManagementSheet } from '@/components/sales/user-management-sheet'
 import { Card, CardContent } from '@/components/ui/card'
 import { Phone, Calendar, Clock, AlertCircle } from 'lucide-react'
+import { AICallButton } from '@/components/sales/ai-call-button'
 
 const PIPELINE_STAGES = [
   'NEW',
   'UNREAD',
-  'ASSIGNED',
   'CONTACT_ATTEMPTED',
   'CONTACTED',
   'QUALIFIED',
@@ -24,7 +24,6 @@ const PIPELINE_STAGES = [
 const STAGE_COLORS: Record<string, string> = {
   'NEW': 'bg-blue-500',
   'UNREAD': 'bg-purple-500',
-  'ASSIGNED': 'bg-indigo-500',
   'CONTACT_ATTEMPTED': 'bg-yellow-500',
   'CONTACTED': 'bg-orange-500',
   'QUALIFIED': 'bg-teal-500',
@@ -124,11 +123,14 @@ export function ProspectLeadsBoard({ initialLeads }: { initialLeads: any[] }) {
                             </p>
                             {u.name && <p className="text-[11px] text-gray-500 font-medium mt-0.5 truncate">{u.phone}</p>}
                           </div>
-                          {u.priority === 'HIGH' && (
-                            <span className="bg-red-50 text-red-600 text-[9px] font-bold px-1.5 py-0.5 rounded border border-red-100 flex items-center gap-1 shrink-0 shadow-sm">
-                              <AlertCircle className="w-2.5 h-2.5" /> HIGH
-                            </span>
-                          )}
+                          <div className="flex gap-1 items-center">
+                            {u.priority === 'HIGH' && (
+                              <span className="bg-red-50 text-red-600 text-[9px] font-bold px-1.5 py-0.5 rounded border border-red-100 flex items-center gap-1 shrink-0 shadow-sm">
+                                <AlertCircle className="w-2.5 h-2.5" /> HIGH
+                              </span>
+                            )}
+                            <AICallButton leadId={u.id} compact={true} />
+                          </div>
                         </div>
                         
                         {(u.plans || u.next_followup_date) && (

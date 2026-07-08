@@ -63,6 +63,7 @@ const modules = [
       { name: 'Coupons', path: '/admin/coupons', icon: Settings },
       { name: 'Invoice Settings', path: '/admin/invoice-settings', icon: Settings },
       { name: 'Custom Fields', path: '/admin/custom-fields', icon: Settings },
+      { name: 'AI Voice Calling', path: '/admin/ai-calling', icon: Activity },
     ]
   }
 ]
