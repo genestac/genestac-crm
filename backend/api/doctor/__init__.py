@@ -1,0 +1,14 @@
+from fastapi import APIRouter
+from . import appointments
+from . import patients
+from . import prescriptions
+from . import assessments
+from . import inventory
+from . import metrics
+router = APIRouter()
+router.include_router(appointments.router)
+router.include_router(patients.router)
+router.include_router(prescriptions.router)
+router.include_router(assessments.router)
+router.include_router(inventory.router)
+router.include_router(metrics.router)

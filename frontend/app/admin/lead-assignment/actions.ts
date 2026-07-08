@@ -37,3 +37,20 @@ export async function assignLead(formData: FormData) {
   revalidatePath('/admin/lead-assignment')
   return data
 }
+
+export async function assignLeadsBulk(leads: { lead_id: string, record_type: string }[], salesRepId: string) {
+  if (!salesRepId) throw new Error("Please select a sales representative")
+  if (!leads || leads.length === 0) throw new Error("No leads selected")
+  
+  const data = await fetchAPI('/api/admin/lead-assignment/assign-bulk', {
+    method: 'POST',
+    headers: { 
+      'Cookie': (await cookies()).toString(),
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ leads, sales_rep_id: salesRepId })
+  })
+  
+  revalidatePath('/admin/lead-assignment')
+  return data
+}

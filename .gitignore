@@ -1,0 +1,17 @@
+# Python Cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environment Variables
+.env
+.env.*
+
+# Node
+node_modules/
+.next/
+
+# IDE
+.vscode/
+.idea/
+.windsurf/

@@ -1,1 +1,0 @@
-ALTER TABLE public.users ALTER COLUMN source DROP NOT NULL;

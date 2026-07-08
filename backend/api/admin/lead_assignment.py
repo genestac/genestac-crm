@@ -71,3 +71,43 @@ async def assign_lead(
     }).eq("id", request.lead_id).execute()
     
     return {"success": True, "message": "Lead assigned successfully", "data": response.data}
+
+from typing import List
+
+class LeadIdentifier(BaseModel):
+    lead_id: str
+    record_type: str
+
+class AssignBulkRequest(BaseModel):
+    leads: List[LeadIdentifier]
+    sales_rep_id: str
+
+@router.post("/assign-bulk")
+async def assign_leads_bulk(
+    request: AssignBulkRequest,
+    current_user: dict = Depends(get_current_user),
+    supabase: Client = Depends(get_supabase_client)
+):
+    verify_admin(current_user, supabase)
+    
+    if not request.leads:
+        raise HTTPException(status_code=400, detail="No leads provided")
+        
+    lead_ids = [L.lead_id for L in request.leads if L.record_type == "LEAD"]
+    user_ids = [L.lead_id for L in request.leads if L.record_type == "USER"]
+    
+    # Update leads table
+    if lead_ids:
+        supabase.table("leads").update({
+            "assigned_sales_rep_id": request.sales_rep_id,
+            "status": "ASSIGNED"
+        }).in_("id", lead_ids).execute()
+        
+    # Update users table
+    if user_ids:
+        supabase.table("users").update({
+            "assigned_sales_rep_id": request.sales_rep_id,
+            "status": "ASSIGNED"
+        }).in_("id", user_ids).execute()
+        
+    return {"success": True, "message": f"Successfully assigned {len(request.leads)} leads"}

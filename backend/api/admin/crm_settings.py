@@ -197,7 +197,17 @@ def get_global_settings_from_db(supabase: Client):
             "prefix": "Gen/26-27/",
             "current_sequence": 2,
             "declaration": "We declare that this invoice shows the actual price of the goods described and that all particulars are true and correct."
-        }
+        },
+        "lead_statuses": [
+            {"value": "NEW", "label": "New"},
+            {"value": "UNREAD", "label": "Unread"},
+            {"value": "CONTACT_ATTEMPTED", "label": "Contact Attempted"},
+            {"value": "ASSIGNED", "label": "Assigned"},
+            {"value": "QUALIFIED", "label": "Qualified"},
+            {"value": "CONSULTATION_SCHEDULED", "label": "Consultation Scheduled"},
+            {"value": "SPAM", "label": "Spam"},
+            {"value": "DEAD", "label": "Dead"}
+        ]
     }
     
     try:
@@ -226,13 +236,14 @@ async def get_global_settings(
     return {"data": get_global_settings_from_db(supabase)}
 
 from pydantic import BaseModel
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 class GlobalSettingsUpdate(BaseModel):
     shared_lead_pool: Optional[bool] = None
     company_info: Optional[Dict[str, Any]] = None
     bank_details: Optional[Dict[str, Any]] = None
     invoice_settings: Optional[Dict[str, Any]] = None
+    lead_statuses: Optional[List[Dict[str, Any]]] = None
 
 @router.put("/global")
 async def update_global_settings(

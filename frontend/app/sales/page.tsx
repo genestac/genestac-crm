@@ -1,7 +1,7 @@
 import { fetchAPI } from '@/utils/api'
 import { Bell } from 'lucide-react'
 import { cookies } from 'next/headers'
-
+import RecentLeadsTable from './RecentLeadsTable'
 export default async function SalesDashboard() {
   const cookieHeader = (await cookies()).toString()
   const metrics = await fetchAPI('/api/sales/metrics', {
@@ -133,79 +133,7 @@ export default async function SalesDashboard() {
       </section>
 
       {/* Table Section */}
-      <section className="bg-white border border-[#e5e7eb] rounded-xl p-5 shadow-sm">
-        <div className="text-base font-semibold mb-5">My Recent Leads</div>
-        <table className="w-full border-collapse text-left text-[13px]">
-          <thead>
-            <tr>
-              <th className="py-3 text-[#1a1d20] font-semibold border-b border-[#e5e7eb]">Lead ID</th>
-              <th className="py-3 text-[#1a1d20] font-semibold border-b border-[#e5e7eb]">Name</th>
-              <th className="py-3 text-[#1a1d20] font-semibold border-b border-[#e5e7eb]">Mobile</th>
-              <th className="py-3 text-[#1a1d20] font-semibold border-b border-[#e5e7eb]">Source</th>
-              <th className="py-3 text-[#1a1d20] font-semibold border-b border-[#e5e7eb]">Status</th>
-              <th className="py-3 text-[#1a1d20] font-semibold border-b border-[#e5e7eb]">Next Follow-up</th>
-            </tr>
-          </thead>
-          <tbody>
-            {recentLeads.map((lead: any) => {
-              let badgeColor = "bg-[#f3f4f6] text-[#4b5563]" // default
-              let displayStatus = lead.status
-              
-              if (lead.status === "NEW" || lead.status === "UNREAD") {
-                badgeColor = "bg-[#f3e8ff] text-[#9333ea]"
-                displayStatus = "New Lead"
-              } else if (lead.status === "QUALIFIED") {
-                badgeColor = "bg-[#dcfce7] text-[#16a34a]"
-                displayStatus = "Interested"
-              } else if (lead.status === "ASSIGNED") {
-                badgeColor = "bg-[#fef3c7] text-[#d97706]"
-                displayStatus = "Follow-up required"
-              } else if (lead.status === "CONSULTATION_SCHEDULED") {
-                badgeColor = "bg-[#dbeafe] text-[#2563eb]"
-                displayStatus = "Scheduled"
-              }
-
-              return (
-                <tr key={lead.id}>
-                  <td className="py-[15px] border-b border-gray-100 text-[#1a1d20] font-mono text-xs">{(lead.id || "").substring(0,8)}</td>
-                  <td className="py-[15px] border-b border-gray-100 text-[#1a1d20]">{lead.name || '-'}</td>
-                  <td className="py-[15px] border-b border-gray-100 text-[#6b7280]">
-                    <div className="flex items-center gap-2">
-                      <span>{lead.phone}</span>
-                      {lead.phone && (
-                        <a 
-                          href={`https://wa.me/${lead.phone.replace(/\D/g, '')}`} 
-                          target="_blank" 
-                          rel="noopener noreferrer"
-                          className="w-6 h-6 rounded-full bg-[#22c55e] text-white flex items-center justify-center hover:opacity-80 transition-opacity"
-                          title="Chat on WhatsApp"
-                        >
-                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5">
-                            <path d="M16.6 14c-.2-.1-1.5-.7-1.7-.8-.2-.1-.4-.1-.6.1-.2.2-.6.8-.8 1-.1.2-.3.2-.5.1-.7-.3-1.4-.7-2-1.2-.5-.5-1-1.1-1.4-1.7-.1-.2 0-.4.1-.5.1-.1.2-.3.4-.4.1-.1.2-.3.2-.4.1-.2 0-.4 0-.5C10 9.4 9.4 8 9.3 7.8c-.1-.2-.3-.2-.5-.2h-.4c-.2 0-.5.1-.7.3-.2.2-.7.7-.7 1.6 0 .9.8 1.8 1 2 .1.2 1.3 2.1 3.2 2.9 1.9.8 2.6.8 3.1.8.5 0 1.5-.6 1.7-1.2.2-.6.2-1.1.1-1.2-.1-.1-.3-.2-.5-.3z"/>
-                            <path d="M12 2C6.5 2 2 6.5 2 12c0 1.8.5 3.5 1.4 5l-1.3 4.8 4.9-1.3c1.4.8 3 1.3 4.8 1.3 5.5 0 10-4.5 10-10S17.5 2 12 2zm0 18.2c-1.5 0-2.9-.4-4.2-1.1l-.3-.2-3.1.8.8-3-.2-.3C4.4 15 4 13.5 4 12c0-4.4 3.6-8 8-8s8 3.6 8-8 8z"/>
-                          </svg>
-                        </a>
-                      )}
-                    </div>
-                  </td>
-                  <td className="py-[15px] border-b border-gray-100 text-[#6b7280]">{lead.user_sources?.name || 'Others'}</td>
-                  <td className="py-[15px] border-b border-gray-100 text-[#6b7280]">
-                    <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${badgeColor}`}>{displayStatus}</span>
-                  </td>
-                  <td className="py-[15px] border-b border-gray-100 text-[#1a1d20]">
-                    {lead.next_followup_date ? new Date(lead.next_followup_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '-'}
-                  </td>
-                </tr>
-              )
-            })}
-            {recentLeads.length === 0 && (
-              <tr>
-                <td colSpan={6} className="py-[30px] text-center text-gray-400">No recent leads found.</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </section>
+      <RecentLeadsTable initialLeads={recentLeads} />
 
       {/* Bottom Section */}
       <section className="grid grid-cols-2 gap-5 mb-8">

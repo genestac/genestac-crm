@@ -1,0 +1,179 @@
+from fastapi import APIRouter, Depends, HTTPException, Form, UploadFile, File
+from supabase import Client
+from db.supabase import get_supabase_client
+from api.deps import get_current_user
+from services.cloudinary_service import upload_file_to_cloudinary
+from typing import Optional
+router = APIRouter()
+from fastapi import Query
+from pydantic import BaseModel
+import razorpay
+import uuid
+import os
+from api.admin.crm_settings import get_global_settings_from_db
+import json
+from datetime import datetime
+from fastapi.responses import Response
+from api.pdf_generator import generate_invoice_pdf
+
+class NoteCreate(BaseModel):
+    content: str
+    created_at: Optional[str] = None
+
+class BulkStatusUpdate(BaseModel):
+    lead_ids: list[str]
+    status: str
+
+def is_admin(user: dict, supabase: Client) -> bool:
+    res = supabase.table('staffs').select('roles(name)').eq('id', user['id']).execute()
+    if not res.data:
+        return False
+    role_name = res.data[0].get('roles', {}).get('name', '')
+    return role_name in ('superadmin', 'master_admin', 'admin')
+
+@router.post('/leads')
+async def create_lead(phone: str=Form(...), name: Optional[str]=Form(None), source_id: Optional[str]=Form(None), email: Optional[str]=Form(None), street_address: Optional[str]=Form(None), city: Optional[str]=Form(None), state: Optional[str]=Form(None), postal_code: Optional[str]=Form(None), country: Optional[str]=Form(None), interested_plan_id: Optional[str]=Form(None), priority: Optional[str]=Form(None), followup_notes: Optional[str]=Form(None), current_user: dict=Depends(get_current_user), supabase: Client=Depends(get_supabase_client)):
+    payload = {'phone': phone, 'name': name, 'source_id': source_id, 'status': 'NEW', 'assigned_sales_rep_id': current_user['id']}
+    optional_fields = {'email': email, 'street_address': street_address, 'city': city, 'state': state, 'postal_code': postal_code, 'country': country, 'interested_plan_id': interested_plan_id, 'priority': priority, 'followup_notes': followup_notes}
+    for k, v in optional_fields.items():
+        if v is not None and v != '':
+            payload[k] = v
+    res = None
+    if email and phone:
+        res = supabase.table('users').select('*').or_(f'email.eq.{email},phone.eq.{phone}').execute()
+    elif email:
+        res = supabase.table('users').select('*').eq('email', email).execute()
+    else:
+        res = supabase.table('users').select('*').eq('phone', phone).execute()
+    if res and res.data:
+        existing_user = res.data[0]
+        import json
+        details_str = json.dumps(payload, indent=2)
+        note_content = f'**Duplicate Submission Received**\n\nWe received a new lead submission with these details but matching this existing record:\n```json\n{details_str}\n```'
+        supabase.table('user_notes').insert({'user_id': existing_user['id'], 'author_id': current_user['id'], 'content': note_content}).execute()
+        return {'message': 'Duplicate submission added as note', 'data': [existing_user]}
+    else:
+        response = supabase.table('users').insert(payload).execute()
+        return {'message': 'Lead created successfully', 'data': response.data}
+
+@router.put('/leads/bulk-status')
+async def bulk_update_status(payload: BulkStatusUpdate, current_user: dict=Depends(get_current_user), supabase: Client=Depends(get_supabase_client)):
+    if not payload.lead_ids:
+        return {'message': 'No lead IDs provided'}
+    
+    # Try updating in both tables since IDs are unique
+    try:
+        supabase.table('users').update({'status': payload.status}).in_('id', payload.lead_ids).execute()
+    except Exception as e:
+        pass
+        
+    try:
+        supabase.table('leads').update({'status': payload.status}).in_('id', payload.lead_ids).execute()
+    except Exception as e:
+        pass
+        
+    return {'message': f'Status updated to {payload.status} for {len(payload.lead_ids)} leads'}
+
+@router.put('/leads/{lead_id}')
+async def update_lead_details(lead_id: str, status: Optional[str]=Form(None), priority: Optional[str]=Form(None), next_followup_date: Optional[str]=Form(None), followup_notes: Optional[str]=Form(None), name: Optional[str]=Form(None), email: Optional[str]=Form(None), street_address: Optional[str]=Form(None), city: Optional[str]=Form(None), state: Optional[str]=Form(None), postal_code: Optional[str]=Form(None), country: Optional[str]=Form(None), source_id: Optional[str]=Form(None), interested_plan_id: Optional[str]=Form(None), metadata_json: Optional[str]=Form(None), record_type: Optional[str]=Form('USER'), current_user: dict=Depends(get_current_user), supabase: Client=Depends(get_supabase_client)):
+    payload = {}
+    fields = {'status': status, 'priority': priority, 'next_followup_date': next_followup_date, 'followup_notes': followup_notes, 'name': name, 'email': email, 'street_address': street_address, 'city': city, 'state': state, 'postal_code': postal_code, 'country': country, 'source_id': source_id, 'interested_plan_id': interested_plan_id}
+    for k, v in fields.items():
+        if v is not None:
+            if v == '':
+                payload[k] = None
+            else:
+                payload[k] = v
+    if metadata_json:
+        import json
+        try:
+            payload['metadata'] = json.loads(metadata_json)
+        except Exception:
+            pass
+    table = 'leads' if record_type == 'LEAD' else 'users'
+    try:
+        response = supabase.table(table).update(payload).eq('id', lead_id).execute()
+        return {'message': 'Lead updated successfully', 'data': response.data}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+@router.get('/leads')
+async def get_leads(statuses: Optional[str]=Query(None), exclude_statuses: Optional[str]=Query(None), require_followup: Optional[bool]=Query(False), page: int=Query(1), limit: int=Query(50), sort_by: str=Query('created_at'), sort_order: str=Query('desc'), search: Optional[str]=Query(None), source_id: Optional[str]=Query(None), current_user: dict=Depends(get_current_user), supabase: Client=Depends(get_supabase_client)):
+    try:
+        user_id = current_user['id']
+        is_admin = current_user.get('role') in ['SUPER_ADMIN', 'superadmin', 'admin', 'master_admin']
+        settings = get_global_settings_from_db(supabase)
+        shared_pool_enabled = settings.get('shared_lead_pool', False)
+        u_query = supabase.table('users').select('*, user_sources(name), plans(name, price)')
+        if not is_admin:
+            if shared_pool_enabled:
+                u_query = u_query.or_(f'assigned_sales_rep_id.eq.{user_id},assigned_sales_rep_id.is.null')
+            else:
+                u_query = u_query.eq('assigned_sales_rep_id', user_id)
+        if statuses:
+            u_query = u_query.in_('status', statuses.split(','))
+        if exclude_statuses:
+            for st in exclude_statuses.split(','):
+                u_query = u_query.neq('status', st)
+        if require_followup:
+            u_query = u_query.not_.is_('next_followup_date', 'null')
+        if source_id:
+            u_query = u_query.eq('source_id', source_id)
+        if search:
+            u_query = u_query.or_(f'name.ilike.%{search}%,phone.ilike.%{search}%')
+        u_res = u_query.execute()
+        users_data = u_res.data or []
+        for u in users_data:
+            u['record_type'] = 'USER'
+        leads_data = []
+        try:
+            l_query = supabase.table('leads').select('*, user_sources(name), plans(name, price)')
+            if not is_admin:
+                if shared_pool_enabled:
+                    l_query = l_query.or_(f'assigned_sales_rep_id.eq.{user_id},assigned_sales_rep_id.is.null')
+                else:
+                    l_query = l_query.eq('assigned_sales_rep_id', user_id)
+            if statuses:
+                l_query = l_query.in_('status', statuses.split(','))
+            if exclude_statuses:
+                for st in exclude_statuses.split(','):
+                    l_query = l_query.neq('status', st)
+            if require_followup:
+                l_query = l_query.not_.is_('next_followup_date', 'null')
+            if source_id:
+                l_query = l_query.eq('source_id', source_id)
+            if search:
+                l_query = l_query.or_(f'name.ilike.%{search}%,phone_number.ilike.%{search}%')
+            l_res = l_query.execute()
+            leads_data = l_res.data or []
+            for l in leads_data:
+                l['record_type'] = 'LEAD'
+                if 'phone_number' in l:
+                    l['phone'] = l.pop('phone_number', None)
+                if 'metadata' not in l or not l['metadata']:
+                    l['metadata'] = {}
+        except Exception as e:
+            print(f'Skipping leads table fetch (may not exist): {e}')
+        combined = users_data + leads_data
+        
+        # Dynamic sorting
+        sort_key = sort_by if sort_by else 'created_at'
+        is_reverse = True if sort_order.lower() == 'desc' else False
+        combined.sort(key=lambda x: x.get(sort_key, '') or '', reverse=is_reverse)
+        
+        total_count = len(combined)
+        start_idx = (page - 1) * limit
+        end_idx = start_idx + limit
+        paginated_data = combined[start_idx:end_idx]
+        
+        return {
+            'data': paginated_data,
+            'total': total_count,
+            'page': page,
+            'limit': limit
+        }
+    except Exception as e:
+        import traceback, sys
+        err = traceback.format_exc()
+        print(f'get_leads error: {err}')
+        sys.stdout.flush()
+        raise HTTPException(status_code=500, detail=f'get_leads error: {str(e)}')

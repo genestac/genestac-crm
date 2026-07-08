@@ -4,6 +4,7 @@ import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { addSource } from './actions'
 import { SharedPoolToggle } from './shared-pool-toggle'
+import { LeadStatusManager } from './lead-status-manager'
 import { cookies } from 'next/headers'
 
 export default async function LeadSettingsPage() {
@@ -34,7 +35,7 @@ export default async function LeadSettingsPage() {
         </Card>
       </div>
 
-      <div className="grid md:grid-cols-1 gap-8 max-w-2xl">
+      <div className="grid md:grid-cols-2 gap-8 max-w-5xl">
         <Card>
           <CardHeader>
             <CardTitle>Lead Sources</CardTitle>
@@ -60,6 +61,9 @@ export default async function LeadSettingsPage() {
             </div>
           </CardContent>
         </Card>
+        
+        {/* Lead Status Manager */}
+        <LeadStatusManager initialStatuses={globalSettings?.lead_statuses || []} />
       </div>
     </div>
   )

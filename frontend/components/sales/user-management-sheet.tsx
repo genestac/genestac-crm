@@ -13,14 +13,17 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGroup, SelectLabel } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
+import { toast } from 'sonner'
 import { updateLeadDetails, uploadLeadDocument, getLeadDocuments, getUserNotes, addInteractionNote, getDoctors, bookAppointment, getPlans, getSources, generateRazorpayLink, getProformaInvoices, deleteProformaInvoice, getCurrentUserRole } from '@/app/sales/actions'
 import { FileUp, FileText, Download, Loader2, CreditCard, ChevronDown, ChevronRight, Check, Calendar, Activity, User, Receipt, CheckCircle2, FileDown } from 'lucide-react'
 
 export function UserManagementSheet({ 
   lead, 
+  statusOptions,
   children 
 }: { 
   lead: any, 
+  statusOptions?: {value: string, label: string}[],
   children: React.ReactNode 
 }) {
   const [open, setOpen] = useState(false)
@@ -130,10 +133,10 @@ export function UserManagementSheet({
     
     try {
       await updateLeadDetails(submitData)
-      alert("Updated successfully!")
+      toast.success("Updated successfully!")
       setOpen(false)
     } catch (err: any) {
-      alert("Error: " + err.message)
+      toast.error("Error: " + err.message)
     } finally {
       setLoading(false)
     }
@@ -145,12 +148,12 @@ export function UserManagementSheet({
       const res = await generateRazorpayLink(lead.id, "", 0, invoiceId)
       if (res.success) {
         setInvoices(prev => prev.map(inv => inv.id === invoiceId ? { ...inv, razorpay_url: res.payment_url, payment_url: res.payment_url } : inv))
-        alert("Payment link refreshed successfully!")
+        toast.success("Payment link refreshed successfully!")
       } else {
-        alert(res.error || "Failed to refresh link")
+        toast.error(res.error || "Failed to refresh link")
       }
     } catch (err: any) {
-      alert("Error: " + err.message)
+      toast.error("Error: " + err.message)
     }
   }
 
@@ -181,7 +184,7 @@ export function UserManagementSheet({
       const updatedNotes = await getUserNotes(lead.id)
       setNotes(updatedNotes)
     } catch (err: any) {
-      alert("Failed to save note: " + err.message)
+      toast.error("Failed to save note: " + err.message)
     } finally {
       setSavingNote(false)
     }
@@ -189,7 +192,7 @@ export function UserManagementSheet({
 
   const handleGeneratePayment = async () => {
     if (!planId) {
-      alert("Please select an Interested Plan first.")
+      toast.error("Please select an Interested Plan first.")
       return
     }
     
@@ -200,12 +203,12 @@ export function UserManagementSheet({
         setPaymentLink(res.payment_url)
         setProformaData(res)
         setInvoices(prev => [res, ...prev])
-        alert("Payment link generated successfully!")
+        toast.success("Payment link generated successfully!")
       } else {
-        alert(res.error || "Failed to generate link")
+        toast.error(res.error || "Failed to generate link")
       }
     } catch (err: any) {
-      alert(err.message || "Failed to generate link")
+      toast.error(err.message || "Failed to generate link")
     } finally {
       setGeneratingPayment(false)
     }
@@ -214,7 +217,7 @@ export function UserManagementSheet({
   const handleBookAppointment = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!apptForm.doctorId || !apptForm.date || !apptForm.time) {
-      alert("Please select doctor, date and time")
+      toast.error("Please select doctor, date and time")
       return
     }
     setBookingAppt(true)
@@ -242,11 +245,11 @@ export function UserManagementSheet({
       formData.append('notes', finalNotes)
       
       await bookAppointment(formData)
-      alert("Appointment requested successfully!")
+      toast.success("Appointment requested successfully!")
       setApptForm({ doctorId: '', date: '', time: '', notes: '' })
       setActiveTab('overview')
     } catch (err: any) {
-      alert("Failed to book appointment: " + err.message)
+      toast.error("Failed to book appointment: " + err.message)
     } finally {
       setBookingAppt(false)
     }
@@ -268,7 +271,7 @@ export function UserManagementSheet({
         setDocuments(docs)
       }
     } catch (err: any) {
-      alert("Upload failed: " + err.message)
+      toast.error("Upload failed: " + err.message)
     } finally {
       setUploading(false)
     }
@@ -378,7 +381,7 @@ export function UserManagementSheet({
                   )}
                 </div>
 
-                {customFields.length > 0 && (
+                {(customFields.length > 0 || Object.keys(metaData || {}).filter(k => !customFields.find(f => f.name === k)).length > 0) && (
                   <div className="pt-4 border-t border-gray-100">
                     <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-4">Additional Details</h4>
                     <div className="grid grid-cols-2 gap-4">
@@ -411,6 +414,20 @@ export function UserManagementSheet({
                           )}
                         </div>
                       ))}
+
+                      {/* Render unmapped metadata properties pushed from webhook */}
+                      {Object.keys(metaData || {})
+                        .filter(key => !customFields.find(f => f.name === key))
+                        .map((key) => (
+                        <div key={key} className="space-y-1.5">
+                          <Label className="text-xs text-gray-500 font-medium capitalize">{key.replace(/_/g, ' ')}</Label>
+                          <Input 
+                            value={String(metaData[key] || '')}
+                            readOnly
+                            className="bg-gray-100 text-gray-500 border-gray-200 shadow-none"
+                          />
+                        </div>
+                      ))}
                     </div>
                   </div>
                 )}
@@ -428,17 +445,23 @@ export function UserManagementSheet({
                         <SelectValue placeholder="Status" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="NEW">New (Raw)</SelectItem>
-                        <SelectItem value="UNREAD">Unread</SelectItem>
-                        <SelectItem value="ASSIGNED">Assigned</SelectItem>
-                        <SelectItem value="CONTACT_ATTEMPTED">Contact Attempted</SelectItem>
-                        <SelectItem value="CONTACTED">Contacted</SelectItem>
-                        <SelectItem value="QUALIFIED">Qualified</SelectItem>
-                        <SelectItem value="CONSULTATION_SCHEDULED">Consultation Scheduled</SelectItem>
-                        <SelectItem value="CONSULTATION_COMPLETED">Consultation Completed</SelectItem>
-                        <SelectItem value="CONVERTED">Converted</SelectItem>
-                        <SelectItem value="ON_HOLD">On Hold</SelectItem>
-                        <SelectItem value="LOST">Lost</SelectItem>
+                        {statusOptions ? statusOptions.map(opt => (
+                          <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                        )) : (
+                          <>
+                            <SelectItem value="NEW">New (Raw)</SelectItem>
+                            <SelectItem value="UNREAD">Unread</SelectItem>
+                            <SelectItem value="ASSIGNED">Assigned</SelectItem>
+                            <SelectItem value="CONTACT_ATTEMPTED">Contact Attempted</SelectItem>
+                            <SelectItem value="CONTACTED">Contacted</SelectItem>
+                            <SelectItem value="QUALIFIED">Qualified</SelectItem>
+                            <SelectItem value="CONSULTATION_SCHEDULED">Consultation Scheduled</SelectItem>
+                            <SelectItem value="CONSULTATION_COMPLETED">Consultation Completed</SelectItem>
+                            <SelectItem value="CONVERTED">Converted</SelectItem>
+                            <SelectItem value="ON_HOLD">On Hold</SelectItem>
+                            <SelectItem value="LOST">Lost</SelectItem>
+                          </>
+                        )}
                       </SelectContent>
                     </Select>
                   </div>
@@ -708,7 +731,7 @@ export function UserManagementSheet({
                           variant="outline" 
                           onClick={() => {
                             navigator.clipboard.writeText(paymentLink)
-                            alert("Link copied!")
+                            toast.success("Link copied!")
                           }}
                           className="border-green-200 text-green-700 hover:bg-green-100"
                         >
@@ -755,7 +778,7 @@ export function UserManagementSheet({
                               className="text-xs h-8 flex-1"
                               onClick={() => {
                                 navigator.clipboard.writeText(inv.payment_url || inv.razorpay_url)
-                                alert("Link copied!")
+                                toast.success("Link copied!")
                               }}
                             >
                               Copy Link
@@ -790,9 +813,9 @@ export function UserManagementSheet({
                                     try {
                                       await deleteProformaInvoice(inv.id || inv.invoice_id);
                                       setInvoices(invoices.filter(i => (i.id || i.invoice_id) !== (inv.id || inv.invoice_id)));
-                                      alert("Invoice deleted.");
+                                      toast.success("Invoice deleted.");
                                     } catch (err: any) {
-                                      alert(err.message || "Failed to delete invoice (Only Super Admins are allowed)");
+                                      toast.error(err.message || "Failed to delete invoice (Only Super Admins are allowed)");
                                     }
                                   }
                                 }}

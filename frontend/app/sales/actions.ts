@@ -43,6 +43,18 @@ export async function updateLeadDetails(formData: FormData) {
   revalidatePath('/sales/leads')
 }
 
+export async function bulkUpdateLeadsStatus(leadIds: string[], status: string) {
+  await fetchAPI('/api/sales/leads/bulk-status', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      lead_ids: leadIds,
+      status: status
+    })
+  })
+  revalidatePath('/sales/leads')
+}
+
 export async function uploadLeadDocument(formData: FormData) {
   const leadId = formData.get('lead_id') as string
   await fetchAPI(`/api/sales/leads/${leadId}/documents`, {
@@ -116,4 +128,20 @@ export async function getCurrentUserRole() {
     headers: { 'Cookie': (await cookies()).toString() }
   })
   return data?.user?.role || data?.role || 'USER'
+}
+
+export async function getPaginatedLeads(page: number, limit: number, sortBy: string, sortOrder: string, search: string, sourceId: string, status: string) {
+  const query = new URLSearchParams()
+  query.append('page', page.toString())
+  query.append('limit', limit.toString())
+  query.append('sort_by', sortBy)
+  query.append('sort_order', sortOrder)
+  if (search) query.append('search', search)
+  if (sourceId) query.append('source_id', sourceId)
+  if (status) query.append('statuses', status)
+
+  const data = await fetchAPI(`/api/sales/leads?${query.toString()}`, {
+    headers: { 'Cookie': (await cookies()).toString() }
+  })
+  return data
 }

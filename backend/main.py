@@ -4,7 +4,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from core.config import settings
 from api import sales, auth, doctor
-from api.admin import staffs, roles, crm_settings, logs, lead_assignment, coupons
+from api.admin import staffs, roles, crm_settings, logs, lead_assignment, coupons, metrics
 from api import public
 
 class ForceHTTPSMiddleware(BaseHTTPMiddleware):
@@ -38,6 +38,7 @@ app.include_router(crm_settings.router, prefix="/api/admin/crm-settings", tags=[
 app.include_router(logs.router, prefix="/api/admin/logs", tags=["admin-logs"])
 app.include_router(lead_assignment.router, prefix="/api/admin/lead-assignment", tags=["admin-lead-assignment"])
 app.include_router(coupons.router, prefix="/api/admin/coupons", tags=["admin-coupons"])
+app.include_router(metrics.router, prefix="/api/admin/metrics", tags=["admin-metrics"])
 from api import templates, custom_fields
 from app.routes import admin_proforma_routes, invoice_settings_routes
 
