@@ -76,6 +76,42 @@ class CustomExotelSerializer(ExotelFrameSerializer):
         return None
 
 
+from datetime import datetime
+import pytz
+
+def is_doctor_available(doc: dict, current_time: datetime) -> bool:
+    if doc.get("is_active"):
+        return True
+    
+    start_time_str = doc.get("start_time")
+    end_time_str = doc.get("end_time")
+    available_days = doc.get("available_days") or []
+    
+    if not start_time_str or not end_time_str or not available_days:
+        return False
+        
+    current_day = current_time.strftime("%A")
+    if current_day not in available_days:
+        return False
+        
+    try:
+        start_time = datetime.strptime(start_time_str, "%H:%M:%S").time()
+    except ValueError:
+        try:
+            start_time = datetime.strptime(start_time_str, "%H:%M").time()
+        except Exception:
+            return False
+            
+    try:
+        end_time = datetime.strptime(end_time_str, "%H:%M:%S").time()
+    except ValueError:
+        try:
+            end_time = datetime.strptime(end_time_str, "%H:%M").time()
+        except Exception:
+            return False
+            
+    return start_time <= current_time.time() <= end_time
+
 # ---------------------------------------------------------------------------
 # RAG context builder
 # ---------------------------------------------------------------------------
@@ -90,22 +126,28 @@ async def build_rag_context(lead_id: str, supabase: Client):
     base_prompt = settings.get("base_prompt", "You are a helpful AI assistant.")
 
     # 3. Get Active Doctors
-    doc_res = supabase.table("doctor_schedules").select("*, staffs(full_name)").eq("is_active", True).execute()
+    ist = pytz.timezone("Asia/Kolkata")
+    current_dt_ist = datetime.now(ist)
+    current_time_ist = current_dt_ist.strftime("%A, %d %B %Y, %I:%M %p IST")
+
+    doc_res = supabase.table("doctor_schedules").select("*, staffs(full_name)").not_.is_("exotel_number", "null").execute()
+    
+    available_docs = []
+    if doc_res.data:
+        for d in doc_res.data:
+            if is_doctor_available(d, current_dt_ist):
+                available_docs.append(d)
+
     doc_data = "\n".join([
         f"Dr. {d['staffs']['full_name']} (Phone: {d['exotel_number']}) - Available {d['start_time']} to {d['end_time']} on {', '.join(d['available_days'] or [])}"
-        for d in doc_res.data
-    ]) if doc_res.data else "No doctors currently active."
+        for d in available_docs
+    ]) if available_docs else "No doctors currently active."
 
     # 4. Get Lead Context Memory (last 5 interactions)
     mem_res = supabase.table("lead_context_memory").select("memory_text").eq("lead_id", lead_id).order("created_at", desc=True).limit(5).execute()
     mem_data = "\n".join([m["memory_text"] for m in mem_res.data]) if mem_res.data else "No past memory available."
 
     lead_name = lead.get("name", "the customer")
-
-    from datetime import datetime
-    import pytz
-    ist = pytz.timezone("Asia/Kolkata")
-    current_time_ist = datetime.now(ist).strftime("%A, %d %B %Y, %I:%M %p IST")
 
     system_instruction = f"""{base_prompt}
 
@@ -123,17 +165,19 @@ AVAILABLE DOCTORS:
 {doc_data}
 
 INSTRUCTIONS:
-You are speaking to {lead_name} on a live phone call via Exotel.
-Speak naturally, briefly, and confidently.
+You are an AI Sales Representative calling from Genestac. You are speaking to {lead_name} on a live phone call via Exotel.
+Your primary goal is to actively pitch and sell Genestac's doctor-guided weight loss plans and health programs. Do not act like a generic customer support agent waiting for questions; proactively guide the conversation toward enrollment and purchasing.
+You MUST speak with an energetic, engaging, persuasive, and professional tone.
+CRITICAL LANGUAGE INSTRUCTION: If the user speaks in Hindi or Hinglish, YOU MUST REPLY IN HINDI. Never reply in English if the user speaks Hindi. This is a strict requirement. Always match the user's spoken language.
+CRITICAL LIMIT: Keep general conversational responses very brief (1-2 sentences). However, if the user asks for specific details about plans, pricing, or programs, you may explain in normal depth to persuade them, but avoid rambling.
 If they want to book an appointment or transfer to a doctor, refer to the available doctors listed above.
-Start by greeting {lead_name} warmly and asking how you can help them today.
-Keep responses short and conversational — this is a phone call, not a chat.
+Start the call by warmly greeting {lead_name}, introducing yourself as an AI Sales Representative from Genestac, and asking if they are ready to achieve their health and weight loss goals with our plans. Do not repeat this introduction later in the call.
 
 CRITICAL TOOL RULES:
 - NEVER call connect_to_doctor automatically or based on past call summaries/memories.
 - ONLY call connect_to_doctor when the CURRENT caller explicitly asks to speak with a doctor RIGHT NOW in this active conversation.
 - Past memories are context only — they do NOT require you to take action unless the user repeats the request in this call.
-- For ANY question about the company, services, pricing, programs, or procedures, ALWAYS call search_knowledge_base first. Never make up or guess company information."""
+- Use the information provided in your instructions above first. If the user asks for pricing, programs, or details NOT covered in your instructions, ONLY THEN call search_knowledge_base."""
 
     return system_instruction, lead_name
 
@@ -320,8 +364,8 @@ async def voice_stream(websocket: WebSocket):
         "type": "function",
         "name": "schedule_call",
         "description": (
-            "Schedule a future callback or appointment for the user. "
-            "Call this function when the user explicitly asks to schedule a call for a later date or time."
+            "Schedule a future consultation appointment for the user with a doctor. "
+            "Call this function ONLY when the user explicitly asks to schedule a consultation with a doctor."
         ),
         "parameters": {
             "type": "object",
@@ -339,6 +383,25 @@ async def voice_stream(websocket: WebSocket):
         }
     }
 
+    schedule_callback_tool = {
+        "type": "function",
+        "name": "schedule_callback",
+        "description": (
+            "Schedule an automated exact time callback if the user says they are busy right now, asks to be called later, or wants to postpone the conversation. "
+            "Do NOT use this for doctor consultations, only for general call-backs."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "callback_datetime": {
+                    "type": "string",
+                    "description": "The exact ISO 8601 datetime for the callback (e.g. '2026-07-10T15:00:00+05:30'). Calculate this relative to the CURRENT DATE & TIME provided in your instructions."
+                }
+            },
+            "required": ["callback_datetime"],
+        }
+    }
+
     # ---------------------------------------------------------------------------
     # OpenAI Realtime LLM — used for both development and production
     # (Gemini voice path commented out below for reference)
@@ -348,9 +411,16 @@ async def voice_stream(websocket: WebSocket):
 
     session_properties = events.SessionProperties(
         instructions=system_instruction,
-        tools=[doctor_connect_tool, search_kb_tool, schedule_call_tool],
+        tools=[doctor_connect_tool, search_kb_tool, schedule_call_tool, schedule_callback_tool],
         audio=events.AudioConfiguration(
-            output=events.AudioOutput(voice="shimmer")
+            input=events.AudioInput(
+                transcription=events.InputAudioTranscription(model="gpt-realtime-whisper", language="hi", prompt="Namaste, hello."),
+                turn_detection=events.TurnDetection(
+                    threshold=0.8,
+                    silence_duration_ms=800
+                )
+            ),
+            output=events.AudioOutput(voice="alloy")
         )
     )
 
@@ -416,17 +486,24 @@ async def voice_stream(websocket: WebSocket):
         try:
             doc_res = (
                 supabase.table("doctor_schedules")
-                .select("exotel_number, staffs(full_name)")
-                .eq("is_active", True)
+                .select("*, staffs(full_name)")
                 .not_.is_("exotel_number", "null")
-                .limit(1)
                 .execute()
             )
+            
+            ist = pytz.timezone("Asia/Kolkata")
+            current_dt_ist = datetime.now(ist)
+            
+            available_docs = []
+            if doc_res.data:
+                for d in doc_res.data:
+                    if is_doctor_available(d, current_dt_ist):
+                        available_docs.append(d)
         except Exception as db_err:
             logger.error(f"[Doctor Handoff] DB error fetching doctor: {db_err}")
-            doc_res = type("R", (), {"data": []})()  # empty result
+            available_docs = []
 
-        if not doc_res.data:
+        if not available_docs:
             # No doctors available — tell Gemini to inform the user
             logger.warning("[Doctor Handoff] No active doctors found.")
             await result_callback({
@@ -435,7 +512,7 @@ async def voice_stream(websocket: WebSocket):
             })
             return
 
-        doctor = doc_res.data[0]
+        doctor = available_docs[0]
         doctor_phone = doctor["exotel_number"]
         doctor_name = (
             doctor.get("staffs", {}).get("full_name", "our doctor")
@@ -445,6 +522,14 @@ async def voice_stream(websocket: WebSocket):
         conference_name = f"conf_{stream_sid}"
 
         logger.warning(f"[Doctor Handoff] Connecting {lead_name} with {doctor_name} ({doctor_phone})")
+
+        # Update lead status
+        try:
+            if lead_id:
+                supabase.table("leads").update({"status": "CONSULTATION_SCHEDULED"}).eq("id", lead_id).execute()
+                logger.warning(f"[Doctor Handoff] Lead {lead_id} status updated to CONSULTATION_SCHEDULED")
+        except Exception as e:
+            logger.error(f"[Doctor Handoff] Failed to update lead status: {e}")
 
         # Tell Gemini the doctor's name so it can speak the handoff message
         await result_callback({
@@ -525,8 +610,8 @@ async def voice_stream(websocket: WebSocket):
             else:
                 logger.warning("[RAG Search] No matches found.")
                 await result_callback({
-                    "status": "not_found",
-                    "message": "I couldn't find specific information about that in the knowledge base."
+                    "status": "success",
+                    "message": "No matches found. Gracefully tell the user that you don't have those exact details on hand right now, but offer to connect them with a doctor or schedule a callback to discuss it further."
                 })
         except Exception as e:
             logger.error(f"[RAG Search] Error during vector search: {e}")
@@ -548,20 +633,84 @@ async def voice_stream(websocket: WebSocket):
         
         logger.warning(f"[Schedule Call] Requested for {time_preference}, reason: {reason}")
         
-        # Here we would normally save to the database. For now we will mock success.
+        try:
+            if lead_id:
+                supabase.table("leads").update({"status": "CONSULTATION_SCHEDULED"}).eq("id", lead_id).execute()
+                logger.warning(f"[Schedule Call] Lead {lead_id} status updated to CONSULTATION_SCHEDULED")
+            
+            # Pick a doctor to assign the notification to
+            doc_res = supabase.table("doctor_schedules").select("staff_id").execute()
+            doctor_id = doc_res.data[0]["staff_id"] if doc_res.data else None
+            
+            if doctor_id:
+                supabase.table("system_notifications").insert({
+                    "target_role": "doctor",
+                    "target_id": doctor_id,
+                    "notification_type": "in_app",
+                    "title": "New Appointment Requested (AI)",
+                    "message": f"Lead {lead_name} requested a call for {time_preference}. Reason: {reason}"
+                }).execute()
+                logger.warning(f"[Schedule Call] Notification created for doctor {doctor_id}")
+        except Exception as e:
+            logger.error(f"[Schedule Call] Failed to create notification/update status: {e}")
+        
         await result_callback({
             "status": "success",
-            "message": f"Please inform the user: 'I have scheduled your appointment for {time_preference}. Our team will call you then!'"
+            "message": f"Please inform the user: 'I have noted your request for {time_preference}. Our team will call you then!'"
         })
         
     llm.register_function("schedule_call", handle_schedule_call)
 
+    async def handle_schedule_callback(params: FunctionCallParams):
+        arguments = params.arguments
+        result_callback = params.result_callback
+        callback_time = arguments.get("callback_datetime")
+        
+        logger.warning(f"[Schedule Callback] Requested callback at {callback_time}")
+        if lead_id:
+            try:
+                supabase.table("leads").update({"ai_callback_time": callback_time}).eq("id", lead_id).execute()
+                logger.warning(f"[Schedule Callback] Lead {lead_id} ai_callback_time updated to {callback_time}")
+            except Exception as e:
+                logger.error(f"[Schedule Callback] Failed to update lead: {e}")
+                
+        await result_callback({
+            "status": "success",
+            "message": f"Please inform the user: 'I have noted your request. We will call you back at {callback_time}.'"
+        })
+
+    llm.register_function("schedule_callback", handle_schedule_callback)
+
     # -----------------------------------------------------------------------
     # Step 6: Build and run the pipeline
     # -----------------------------------------------------------------------
+    
+    from pipecat.frames.frames import Frame, TranscriptionFrame
+    from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+
+    class TranscriptCollector(FrameProcessor):
+        def __init__(self):
+            super().__init__()
+            self.user_transcripts = []
+
+        async def process_frame(self, frame: Frame, direction: FrameDirection):
+            # Forward the frame and let Pipecat handle internal lifecycle (StartFrame, etc.)
+            await super().process_frame(frame, direction)
+            
+            # OpenAIRealtimeLLMService emits TranscriptionFrame for user speech
+            if isinstance(frame, TranscriptionFrame):
+                if frame.text and frame.text.strip():
+                    self.user_transcripts.append(f"user: {frame.text}")
+                    logger.warning(f"[STT User] {frame.text}")
+            
+            await self.push_frame(frame, direction)
+
+    transcript_collector = TranscriptCollector()
+
     pipeline = Pipeline([
         transport.input(),
         context_aggregator.user(),
+        transcript_collector,
         llm,
         transport.output(),
         context_aggregator.assistant(),
@@ -574,7 +723,7 @@ async def voice_stream(websocket: WebSocket):
         logger.warning("Exotel client connected — sending greeting trigger")
         context.add_message({
             "role": "user",
-            "content": f"Hi, my name is {lead_name}. Please greet me warmly and ask how you can help."
+            "content": f"Hi, my name is {lead_name}. Please greet me warmly, introduce yourself as an AI Sales Representative from Genestac, and ask if I am looking to achieve my weight loss goals with your plans."
         })
         await task.queue_frames([LLMMessagesAppendFrame(context.get_messages())])
 
@@ -611,12 +760,16 @@ async def voice_stream(websocket: WebSocket):
                         getattr(p, "text", "") for p in parts if hasattr(p, "text")
                     )
 
-                if role in ("user", "model", "assistant") and content:
-                    display_role = "assistant" if role == "model" else role
+                if role in ("model", "assistant") and content:
+                    display_role = "assistant"
                     conversation_lines.append(f"{display_role}: {content}")
+
+            # Mix in the user transcripts at the end (not chronological, but LLM will understand the context)
+            conversation_lines.extend(transcript_collector.user_transcripts)
 
             full_transcript = "\n".join(conversation_lines)
             logger.warning(f"[Transcript] full_transcript length: {len(full_transcript)}, lead_id: {lead_id}")
+            logger.warning(f"[Transcript Content]\n{full_transcript}")
 
             if full_transcript and lead_id:
                 # -----------------------------------------------------------
@@ -638,14 +791,38 @@ Focus on:
 Call transcript:
 {full_transcript}
 
-Return ONLY the bullet points, no intro text. Use plain text bullets starting with •"""
+Return ONLY a valid JSON object matching this exact structure:
+{{
+  "summary": "your bullet point summary here (use plain text bullets starting with •)",
+  "is_not_interested": true or false
+}}
+Ensure `is_not_interested` is true if the lead explicitly states they are not interested in the services in any language (e.g. "not interested", "mujhe interest nahi hai", "mat call karo", etc.). Otherwise false."""
                     resp = oai_client.chat.completions.create(
                         model="gpt-4o-mini",
                         messages=[{"role": "user", "content": summary_prompt}],
                         max_tokens=300,
+                        response_format={"type": "json_object"}
                     )
-                    summary = resp.choices[0].message.content.strip()
-                    logger.warning(f"[Transcript] AI summary generated: {summary[:100]}...")
+                    
+                    response_text = resp.choices[0].message.content.strip()
+                    try:
+                        parsed = json.loads(response_text)
+                        summary = parsed.get("summary", response_text)
+                        is_not_interested = parsed.get("is_not_interested", False)
+                    except Exception as parse_err:
+                        logger.warning(f"[Transcript] JSON parse failed: {parse_err}")
+                        summary = response_text
+                        is_not_interested = False
+                        
+                    logger.warning(f"[Transcript] AI summary generated. Not Interested: {is_not_interested}")
+                    
+                    if is_not_interested:
+                        try:
+                            supabase.table("leads").update({"status": "NOT_INTERESTED"}).eq("id", lead_id).execute()
+                            logger.warning(f"[Transcript] Lead {lead_id} status updated to NOT_INTERESTED")
+                        except Exception as status_err:
+                            logger.error(f"[Transcript] Failed to update lead status: {status_err}")
+                            
                 except Exception as sum_err:
                     logger.warning(f"[Transcript] Summary generation failed, using fallback: {sum_err}")
                     user_lines = [l for l in conversation_lines if l.startswith("user:")]
