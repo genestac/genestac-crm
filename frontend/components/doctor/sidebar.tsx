@@ -17,6 +17,7 @@ import { logout } from '@/app/auth/actions'
 const routes = [
   { name: 'Clinical Dashboard', path: '/doctor', icon: Activity },
   { name: 'Appointments', path: '/doctor/appointments', icon: CalendarCheck },
+  { name: 'Availability', path: '/doctor/availability', icon: Activity },
   { name: 'Patients', path: '/doctor/patients', icon: Users },
   { name: 'Consultations', path: '/doctor/consultations', icon: Stethoscope },
 ]

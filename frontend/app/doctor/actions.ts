@@ -133,7 +133,46 @@ export async function getPlans() {
   return response.data || []
 }
 
+export async function getDoctorInventory() {
+  const response = await fetchAPI('/api/doctor/inventory')
+  if (!response.ok) throw new Error('Failed to fetch inventory')
+  return response.json()
+}
+
+export async function getDoctorAvailability() {
+  const response = await fetchAPI('/api/doctor/availability')
+  return response
+}
+
+export async function updateDoctorAvailability(data: {
+  is_active: boolean
+  start_time: string
+  end_time: string
+  available_days: string[]
+}) {
+  const response = await fetchAPI('/api/doctor/availability', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  revalidatePath('/doctor', 'layout')
+  return response
+}
+
 export async function getInventory() {
   const response = await fetchAPI('/api/doctor/inventory')
   return response || []
+}
+
+export async function getDoctorNotifications() {
+  const response = await fetchAPI('/api/doctor/notifications')
+  return response || []
+}
+
+export async function markNotificationRead(id: string) {
+  const response = await fetchAPI(`/api/doctor/notifications/${id}/read`, {
+    method: 'PUT',
+  })
+  revalidatePath('/doctor', 'layout')
+  return response
 }

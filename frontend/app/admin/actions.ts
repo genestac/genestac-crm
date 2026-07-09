@@ -27,6 +27,18 @@ export async function getAISettings() {
   }
 }
 
+export async function getGlobalSettings() {
+  try {
+    const response = await fetchAPI('/api/admin/crm-settings/global', {
+      headers: { 'Cookie': (await cookies()).toString() }
+    })
+    return response.data || null
+  } catch (error) {
+    console.error('Failed to fetch global settings:', error)
+    return null
+  }
+}
+
 export async function updateAISettings(data: any) {
   try {
     const response = await fetchAPI('/api/admin/ai-settings/', {

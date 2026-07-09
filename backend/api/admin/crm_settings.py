@@ -202,9 +202,9 @@ def get_global_settings_from_db(supabase: Client):
             {"value": "NEW", "label": "New"},
             {"value": "UNREAD", "label": "Unread"},
             {"value": "CONTACT_ATTEMPTED", "label": "Contact Attempted"},
-
             {"value": "QUALIFIED", "label": "Qualified"},
             {"value": "CONSULTATION_SCHEDULED", "label": "Consultation Scheduled"},
+            {"value": "NOT_INTERESTED", "label": "Not Interested"},
             {"value": "SPAM", "label": "Spam"},
             {"value": "DEAD", "label": "Dead"}
         ]

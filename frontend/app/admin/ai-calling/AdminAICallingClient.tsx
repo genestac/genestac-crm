@@ -104,7 +104,7 @@ function CallLogRow({ log }: { log: any }) {
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
-export function AdminAICallingClient({ initialSettings, initialKnowledgeBase }: { initialSettings: any, initialKnowledgeBase: any[] }) {
+export function AdminAICallingClient({ initialSettings, initialKnowledgeBase, initialLeadStatuses = [] }: { initialSettings: any, initialKnowledgeBase: any[], initialLeadStatuses?: any[] }) {
   const [activeTab, setActiveTab] = useState<'settings' | 'logs'>('settings')
 
   const [settings, setSettings] = useState(initialSettings || {
@@ -127,13 +127,15 @@ export function AdminAICallingClient({ initialSettings, initialKnowledgeBase }: 
   const [callLogs, setCallLogs] = useState<any[]>([])
   const [logsLoading, setLogsLoading] = useState(false)
 
-  const leadStatuses = [
-    { value: "NEW", label: "New" },
-    { value: "UNREAD", label: "Unread" },
-    { value: "CONTACT_ATTEMPTED", label: "Contact Attempted" },
-    { value: "CONTACTED", label: "Contacted" },
-    { value: "QUALIFIED", label: "Qualified" },
-  ]
+  const leadStatuses = initialLeadStatuses && initialLeadStatuses.length > 0 
+    ? initialLeadStatuses 
+    : [
+        { value: "NEW", label: "New" },
+        { value: "UNREAD", label: "Unread" },
+        { value: "CONTACT_ATTEMPTED", label: "Contact Attempted" },
+        { value: "CONTACTED", label: "Contacted" },
+        { value: "QUALIFIED", label: "Qualified" },
+      ]
 
   const fetchCallLogs = useCallback(async () => {
     setLogsLoading(true)

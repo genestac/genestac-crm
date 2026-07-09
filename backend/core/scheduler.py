@@ -44,19 +44,39 @@ def sweep_leads_for_auto_call():
         if not enabled_statuses or not exotel_number:
             return
             
+        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        
+        # 2. PRIORITY QUEUE: Process explicit AI callbacks that are due
+        callback_res = supabase.table("leads").select("id, phone").lte("ai_callback_time", now_iso).execute()
+        callback_leads = callback_res.data or []
+        
+        for lead in callback_leads:
+            print(f"[AI Voice Scheduler] Triggering explicitly scheduled callback for lead {lead['id']}")
+            # Clear the callback time immediately to prevent duplicate calls
+            supabase.table("leads").update({"ai_callback_time": None}).eq("id", lead["id"]).execute()
+            initiate_ai_call(lead["phone"], lead["id"])
+            
+        # 3. NORMAL QUEUE: Check if we are inside the allowed global time window
         if not is_within_calling_window(windows):
-            print(f"[AI Voice Scheduler] Outside calling window. Skipping sweep.")
+            print(f"[AI Voice Scheduler] Outside calling window. Skipping normal sweep.")
             return
             
-        # 2. Fetch leads in enabled statuses
-        leads_res = supabase.table("leads").select("id, phone").in_("status", enabled_statuses).execute()
+        # 4. Fetch leads in enabled statuses
+        leads_res = supabase.table("leads").select("id, phone").in_("status", enabled_statuses).is_("ai_callback_time", "null").execute()
         leads = leads_res.data
         
         if not leads:
             return
             
-        # 3. For each lead, check if we already called them today
+        # 3. For each lead, check limits
         for lead in leads:
+            # Check how many times this lead was ever called
+            total_logs_res = supabase.table("ai_call_logs").select("id").eq("lead_id", lead["id"]).execute()
+            if len(total_logs_res.data) >= 3:
+                # Lead has been called 3 times, do not call again
+                print(f"[AI Voice Scheduler] Skipping lead {lead['id']} ({lead['phone']}) - Max 3 calls reached.")
+                continue
+                
             # We don't want to spam. Only 1 AI call per lead per day for now.
             today = datetime.datetime.now().date().isoformat()
             logs_res = supabase.table("ai_call_logs").select("id").eq("lead_id", lead["id"]).gte("created_at", today).execute()
