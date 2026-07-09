@@ -1,7 +1,9 @@
 import os
-import json
+import logging
 import requests
 from db.supabase import get_supabase_client
+
+logger = logging.getLogger(__name__)
 
 
 def _get_exotel_creds() -> dict:
@@ -30,110 +32,167 @@ def _get_exotel_creds() -> dict:
 
 def initiate_ai_call(from_number: str, to_number: str, lead_id: str):
     """
-    Initiates an AI outbound call using Exotel API.
-    The call connects the customer to a custom TwiML/ExoML endpoint for WebSockets.
+    Initiates an AI outbound call using Exotel's connect.json API.
+    - from_number: Exotel virtual number (caller ID)
+    - to_number:   Customer's phone number (who gets called)
+
+    Uses connect.json with the Exotel-hosted applet URL.
+    The applet (configured in Exotel dashboard) streams audio to our
+    WebSocket endpoint at wss://{ngrok}/api/webhooks/exotel/stream.
+
+    NOTE: Calls.json returns 403 on this account — don't use it.
     """
     creds = _get_exotel_creds()
     sid, token, api_key, subdomain = creds["sid"], creds["token"], creds["api_key"], creds["subdomain"]
-    app_id = creds["app_id"]
+    app_id = creds["app_id"] or "1286769"   # Fallback to known working app ID
 
     if not sid or not token or not api_key:
-        print("EXOTEL credentials not found.")
+        logger.error("EXOTEL credentials not found.")
         return None
 
     url = f"https://{api_key}:{token}@{subdomain}/v1/Accounts/{sid}/Calls/connect.json"
     payload = {
-        "From": to_number,
-        "CallerId": from_number,
-        "CustomField": str(lead_id),
+        "From": to_number,             # Customer's number (called first)
+        "CallerId": from_number,        # Exotel virtual number (caller ID)
+        "CustomField": str(lead_id),    # Passed to WebSocket stream's start event
         "Url": f"http://my.exotel.com/{sid}/exoml/start_voice/{app_id}",
         "Record": "true",
     }
 
-    print(f"Initiating Exotel Call with payload: {payload}")
+    logger.warning(f"Initiating Exotel Call with payload: {payload}")
     try:
         response = requests.post(url, data=payload)
         response.raise_for_status()
         return response.json()
     except Exception as e:
-        print(f"Exotel call failed: {e}")
+        logger.error(f"Exotel call failed: {e}")
         if hasattr(e, "response") and e.response is not None:
-            print(f"Exotel response: {e.response.text}")
+            logger.error(f"Exotel response: {e.response.text}")
         return None
 
 
-def call_doctor_into_conference(
+def bridge_doctor_and_customer(
     doctor_phone: str,
-    conference_name: str,
-    base_url: str,
+    customer_phone: str,
 ) -> bool:
     """
-    Calls the doctor's phone number and connects them into a named conference room.
+    Uses Exotel's connect.json click-to-call bridge to connect doctor and customer.
 
-    Exotel will call `doctor_phone` and, when the doctor answers, serve them the
-    conference ExoML from `base_url/api/webhooks/exotel/conference-exoml?room=<name>`.
+    Flow:
+      1. Exotel calls the doctor first (From=doctor_phone)
+      2. When doctor answers, Exotel calls the customer (To=customer_phone)
+      3. Both parties are bridged together
+
+    This is the only transfer mechanism available on this Exotel account since
+    Calls.json and Call Update API both return 403 "Method not allowed".
     """
     creds = _get_exotel_creds()
-    sid, token, api_key, subdomain, number = (
-        creds["sid"], creds["token"], creds["api_key"], creds["subdomain"], creds["number"]
-    )
+    sid       = creds["sid"]
+    token     = creds["token"]
+    api_key   = creds["api_key"]
+    subdomain = creds["subdomain"]
+    number    = creds["number"]
 
     if not all([sid, token, api_key, number]):
-        print("[Doctor Handoff] Exotel credentials incomplete — cannot call doctor.")
+        logger.error("[Doctor Bridge] Missing Exotel credentials — cannot bridge.")
         return False
 
-    conference_exoml_url = f"{base_url}/api/webhooks/exotel/conference-exoml?room={conference_name}"
-    url = f"https://{api_key}:{token}@{subdomain}/v1/Accounts/{sid}/Calls/connect.json"
+    # Ensure phone numbers have country code
+    if customer_phone and not customer_phone.startswith("+"):
+        customer_phone = "+91" + customer_phone.lstrip("0")
 
+    url = f"https://{api_key}:{token}@{subdomain}/v1/Accounts/{sid}/Calls/connect.json"
     payload = {
-        "From": doctor_phone,          # Exotel calls the doctor
-        "CallerId": number,             # Caller ID shown to doctor = our Exotel number
-        "Url": conference_exoml_url,    # ExoML that joins the conference
-        "Record": "false",
+        "From": doctor_phone,      # Exotel calls doctor first
+        "CallerId": number,         # Our Exotel number shown as caller ID to both parties
+        "To": customer_phone,       # After doctor answers, Exotel calls customer & bridges
+        "Record": "true",
+        "StatusCallback": "",       # Optional — can add callback for call events
     }
 
-    print(f"[Doctor Handoff] Calling doctor {doctor_phone} into conference '{conference_name}'")
+    logger.warning(
+        f"[Doctor Bridge] Initiating bridge via connect.json: "
+        f"doctor={doctor_phone}, customer={customer_phone}, callerId={number}"
+    )
     try:
         resp = requests.post(url, data=payload, timeout=10)
+        logger.warning(f"[Doctor Bridge] Response HTTP {resp.status_code}: {resp.text[:500]}")
         resp.raise_for_status()
-        print(f"[Doctor Handoff] Doctor call initiated: {resp.json()}")
+        logger.warning(f"[Doctor Bridge] ✅ Bridge call initiated successfully")
         return True
     except Exception as e:
-        print(f"[Doctor Handoff] Failed to call doctor: {e}")
+        logger.error(f"[Doctor Bridge] ❌ Failed to initiate bridge: {e}")
+        if hasattr(e, "response") and e.response is not None:
+            logger.error(f"[Doctor Bridge] Error body: {e.response.text[:500]}")
         return False
 
 
-def redirect_call_to_conference(
+def redirect_customer_to_doctor(
     call_sid: str,
-    conference_name: str,
+    doctor_phone: str,
     base_url: str,
+    exotel_number: str = "",
 ) -> bool:
     """
-    Redirects the user's live Exotel call to a conference room, removing Gemini from the call.
+    Redirects the customer's live Exotel call directly to the doctor using
+    a simple <Dial><Number> ExoML — no conference room needed.
+
+    Exotel puts the customer on hold, calls the doctor, and bridges them
+    together when the doctor picks up.
 
     Uses Exotel's Call Update API: POST /v1/Accounts/{sid}/Calls/{call_sid}
-    with a new Url pointing to conference ExoML.
+    with a new Url pointing to our dial-doctor ExoML endpoint.
     """
     creds = _get_exotel_creds()
-    sid, token, api_key, subdomain = (
-        creds["sid"], creds["token"], creds["api_key"], creds["subdomain"]
+    sid       = creds["sid"]
+    token     = creds["token"]
+    api_key   = creds["api_key"]
+    subdomain = creds["subdomain"]
+    caller_id = exotel_number or creds.get("number", "")
+
+    logger.warning(
+        f"[Doctor Handoff] redirect_customer_to_doctor called: "
+        f"call_sid={call_sid!r}, doctor={doctor_phone!r}, "
+        f"sid_set={bool(sid)}, token_set={bool(token)}, api_key_set={bool(api_key)}"
     )
 
     if not all([sid, token, api_key, call_sid]):
-        print("[Doctor Handoff] Cannot redirect call — missing call_sid or credentials.")
+        logger.error(
+            f"[Doctor Handoff] Cannot redirect — missing credentials or call_sid. "
+            f"sid={bool(sid)}, token={bool(token)}, api_key={bool(api_key)}, call_sid={bool(call_sid)}"
+        )
         return False
 
-    conference_exoml_url = f"{base_url}/api/webhooks/exotel/conference-exoml?room={conference_name}"
+    dial_exoml_url = (
+        f"{base_url}/api/webhooks/exotel/dial-doctor"
+        f"?phone={doctor_phone}&caller_id={caller_id}"
+    )
     url = f"https://{api_key}:{token}@{subdomain}/v1/Accounts/{sid}/Calls/{call_sid}"
 
-    print(f"[Doctor Handoff] Redirecting call {call_sid} to conference '{conference_name}'")
+    logger.warning(f"[Doctor Handoff] POST {url}")
+    logger.warning(f"[Doctor Handoff] Dial ExoML URL: {dial_exoml_url}")
     try:
-        resp = requests.post(url, data={"Url": conference_exoml_url}, timeout=10)
+        resp = requests.post(url, data={"Url": dial_exoml_url}, timeout=10)
+        logger.warning(f"[Doctor Handoff] Redirect response HTTP {resp.status_code}: {resp.text[:500]}")
         resp.raise_for_status()
-        print(f"[Doctor Handoff] Call redirected successfully: {resp.status_code}")
+        logger.warning(f"[Doctor Handoff] ✅ Customer call redirected to doctor {doctor_phone}")
         return True
     except Exception as e:
-        print(f"[Doctor Handoff] Failed to redirect call: {e}")
+        logger.error(f"[Doctor Handoff] ❌ Redirect API call failed: {e}")
         if hasattr(e, "response") and e.response is not None:
-            print(f"[Doctor Handoff] Exotel response: {e.response.text}")
+            logger.error(f"[Doctor Handoff] Exotel error body: {e.response.text[:500]}")
         return False
+
+
+# ── Legacy aliases — kept so older import sites don't break ──────────────────
+
+def call_doctor_into_conference(doctor_phone: str, conference_name: str, base_url: str) -> bool:
+    """DEPRECATED — now handled by redirect_customer_to_doctor()."""
+    logger.warning("[Doctor Handoff] call_doctor_into_conference is deprecated — skipping.")
+    return True  # No-op: doctor dialing is done via the redirect ExoML itself
+
+
+def redirect_call_to_conference(call_sid: str, conference_name: str, base_url: str) -> bool:
+    """DEPRECATED — use redirect_customer_to_doctor() instead."""
+    logger.warning("[Doctor Handoff] redirect_call_to_conference is deprecated — skipping.")
+    return False

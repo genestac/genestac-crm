@@ -22,6 +22,7 @@ from pipecat.frames.frames import (
     OutputTransportMessageFrame,
     OutputTransportMessageUrgentFrame,
 )
+from pipecat.services.llm_service import FunctionCallParams
 import base64
 import logging
 
@@ -30,6 +31,13 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 ENV = os.getenv("ENVIRONMENT", "development")
+
+
+# ---------------------------------------------------------------------------
+# Per-lead active session guard: prevents double-bot when Exotel opens two
+# call legs (WebSocket connections) for a single connect.json call.
+# ---------------------------------------------------------------------------
+_active_lead_sessions: dict[str, str] = {}  # lead_id -> stream_sid
 
 
 # ---------------------------------------------------------------------------
@@ -97,12 +105,19 @@ async def build_rag_context(lead_id: str, supabase: Client):
 
     lead_name = lead.get("name", "the customer")
 
+    from datetime import datetime
+    import pytz
+    ist = pytz.timezone("Asia/Kolkata")
+    current_time_ist = datetime.now(ist).strftime("%A, %d %B %Y, %I:%M %p IST")
+
     system_instruction = f"""{base_prompt}
 
 LEAD INFORMATION:
 Name: {lead_name}
 Status: {lead.get('status', 'Unknown')}
 Context/Metadata: {json.dumps(lead.get('metadata', {}))}
+
+CURRENT DATE & TIME: {current_time_ist}
 
 PAST MEMORY/INTERACTIONS WITH THIS LEAD:
 {mem_data}
@@ -118,7 +133,12 @@ You are speaking to {lead_name} on a live phone call via Exotel.
 Speak naturally, briefly, and confidently.
 If they want to book an appointment or transfer to a doctor, refer to the available doctors listed above.
 Start by greeting {lead_name} warmly and asking how you can help them today.
-Keep responses short and conversational — this is a phone call, not a chat."""
+Keep responses short and conversational — this is a phone call, not a chat.
+
+CRITICAL TOOL RULES:
+- NEVER call connect_to_doctor automatically or based on past call summaries/memories.
+- ONLY call connect_to_doctor when the CURRENT caller explicitly asks to speak with a doctor RIGHT NOW in this active conversation.
+- Past memories are context only — they do NOT require you to take action unless the user repeats the request in this call."""
 
     return system_instruction, lead_name
 
@@ -128,12 +148,16 @@ Keep responses short and conversational — this is a phone call, not a chat."""
 # ---------------------------------------------------------------------------
 @router.api_route("/twiml", methods=["GET", "POST"])
 async def exotel_twiml(lead_id: str, request: Request):
+    # Build the WebSocket URL — do NOT put lead_id in the path because
+    # our WebSocket route is /stream (no path param). The lead_id is
+    # automatically passed by Exotel via custom_parameters.CustomField
+    # in the start event, which voice_stream.py already reads.
     host = request.url.hostname
-    ws_url = f"wss://{host}/api/webhooks/exotel/stream/{lead_id}"
+    ws_url = f"wss://{host}/api/webhooks/exotel/stream"
     twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Connect>
-        <Stream url="{ws_url}" />
+        <Stream url="{ws_url}" bidirectional="true" />
     </Connect>
 </Response>"""
     return Response(content=twiml, media_type="application/xml")
@@ -150,8 +174,11 @@ async def voice_stream(websocket: WebSocket):
     # Step 1: Parse the Exotel handshake (connected + start events)
     # -----------------------------------------------------------------------
     stream_sid = ""
-    call_sid = ""    # Exotel call SID — needed to redirect live call to conference
+    call_sid = ""    # Exotel call SID (not needed for bridge — kept for session guard)
     lead_id = ""
+    customer_phone = ""       # Customer's actual phone number (from start event)
+    exotel_caller_id = ""     # Our Exotel virtual number (from start event)
+    _session_registered = False  # tracks whether we registered in _active_lead_sessions
 
     for _ in range(10):
         try:
@@ -162,8 +189,11 @@ async def voice_stream(websocket: WebSocket):
             if msg.get("event") == "start":
                 start = msg["start"]
                 stream_sid = start.get("stream_sid", "")
-                # Exotel also exposes the actual call SID in the start message
                 call_sid = start.get("call_sid", stream_sid)
+
+                # Customer's phone number and our caller ID from Exotel
+                customer_phone = start.get("from", "")       # e.g. "08319212779"
+                exotel_caller_id = start.get("to", "")       # e.g. "01141189316"
 
                 # Exotel passes the lead_id as CustomField value OR as a key
                 custom_params = start.get("custom_parameters", {})
@@ -174,11 +204,13 @@ async def voice_stream(websocket: WebSocket):
                     else:
                         # Old format: {"<uuid>": ""}
                         first_key = list(custom_params.keys())[0]
-                        # Validate it looks like a UUID (not "CustomField")
                         if len(first_key) > 10 and first_key != "CustomField":
                             lead_id = first_key
 
-                logger.warning(f"Parsed stream_sid={stream_sid!r}, call_sid={call_sid!r}, lead_id={lead_id!r}")
+                logger.warning(
+                    f"Parsed stream_sid={stream_sid!r}, call_sid={call_sid!r}, "
+                    f"lead_id={lead_id!r}, customer_phone={customer_phone!r}"
+                )
                 break
 
         except asyncio.TimeoutError:
@@ -192,6 +224,25 @@ async def voice_stream(websocket: WebSocket):
         logger.error("Closing WebSocket: stream_sid is missing from Exotel start message")
         await websocket.close()
         return
+
+
+    # -----------------------------------------------------------------------
+    # Double-bot guard: if another WebSocket already owns this lead's session,
+    # close this duplicate leg immediately (Exotel opens two legs per call).
+    # -----------------------------------------------------------------------
+    if lead_id and lead_id in _active_lead_sessions:
+        existing_sid = _active_lead_sessions[lead_id]
+        logger.warning(
+            f"[DuplicateBot] lead_id={lead_id} already has active session "
+            f"{existing_sid}. Rejecting duplicate stream_sid={stream_sid}."
+        )
+        await websocket.close()
+        return
+
+    if lead_id:
+        _active_lead_sessions[lead_id] = stream_sid
+        _session_registered = True
+        logger.warning(f"[Session] Registered lead_id={lead_id} -> stream_sid={stream_sid}")
 
     # -----------------------------------------------------------------------
     # Step 2: Build RAG context from Supabase
@@ -268,6 +319,7 @@ async def voice_stream(websocket: WebSocket):
             api_key=os.getenv("GEMINI_API_KEY"),
             system_instruction=system_instruction,
             tools=[doctor_connect_tool],
+            settings=GeminiLiveLLMService.Settings(voice="Aoede"),  # Warm feminine voice
         )
     else:
         from pipecat.services.openai_realtime import OpenAIRealtimeLLMService
@@ -285,8 +337,7 @@ async def voice_stream(websocket: WebSocket):
     # -----------------------------------------------------------------------
     # Step 5: Doctor handoff handler (registered before pipeline starts)
     # -----------------------------------------------------------------------
-    @llm.register_function("connect_to_doctor")
-    async def handle_connect_to_doctor(function_name, tool_call_id, arguments, llm_obj, ctx, result_callback):
+    async def handle_connect_to_doctor(params: FunctionCallParams):
         """
         Called by Gemini when user wants to connect with a doctor.
         Steps:
@@ -295,6 +346,8 @@ async def voice_stream(websocket: WebSocket):
           3. In background: call doctor + redirect user's call to conference
           4. Cancel Gemini pipeline (AI leaves the call)
         """
+        arguments = params.arguments
+        result_callback = params.result_callback
         reason = arguments.get("reason", "consultation")
         logger.warning(f"[Doctor Handoff] Triggered. Reason: {reason}")
 
@@ -336,37 +389,50 @@ async def voice_stream(websocket: WebSocket):
         await result_callback({
             "status": "connecting",
             "doctor_name": doctor_name,
-            "message": f"Please say: 'Great! I'm connecting you with {doctor_name} right now. Please hold for a moment.'"
+            "message": (
+                f"Please say exactly this: 'Great! I'm arranging a call with {doctor_name} right now. "
+                f"You will receive a call back from our number in just a moment. "
+                f"You can hang up this call now. Thank you!'"
+            )
         })
 
         # After a short delay (give Gemini time to speak the announcement),
-        # trigger the Exotel conference bridge and cancel the AI pipeline.
+        # initiate a fresh Exotel bridge call between doctor and customer.
         async def _do_handoff():
             import asyncio as _asyncio
-            from services.exotel_service import call_doctor_into_conference, redirect_call_to_conference
+            from services.exotel_service import bridge_doctor_and_customer
 
-            # Determine the public base URL for conference ExoML
-            base_url = os.getenv("BACKEND_PUBLIC_URL", "").rstrip("/")
-            if not base_url:
-                # Fallback: derive from ngrok/localtunnel if running locally
-                base_url = "https://my-genestac-voices.loca.lt"
-                # For ngrok, you'd set PUBLIC_URL in .env
+            await _asyncio.sleep(5)  # Let Gemini finish the announcement
 
-            await _asyncio.sleep(4)  # Wait for Gemini to finish speaking the announcement
+            # Use connect.json with From=doctor + To=customer to bridge them.
+            # Exotel calls the doctor first; when doctor answers, Exotel calls
+            # the customer and bridges both parties.
+            # The customer will receive a new call from our Exotel number.
+            if not customer_phone:
+                logger.error("[Doctor Handoff] customer_phone is empty — cannot bridge!")
+                return
 
-            # 1. Call the doctor and put them in the conference room
-            call_doctor_into_conference(doctor_phone, conference_name, base_url)
+            success = bridge_doctor_and_customer(
+                doctor_phone=doctor_phone,
+                customer_phone=customer_phone,
+            )
 
-            # 2. Redirect the user's live call to the same conference room
-            #    (this removes Gemini from the audio path)
-            redirect_call_to_conference(call_sid, conference_name, base_url)
-
-            logger.warning(f"[Doctor Handoff] Conference '{conference_name}' initiated — cancelling AI pipeline.")
-
-            # 3. Cancel Gemini pipeline — AI leaves the call
-            await task.cancel()
+            if success:
+                logger.warning(
+                    f"[Doctor Handoff] ✅ Bridge initiated: "
+                    f"{doctor_phone} ⇔ {customer_phone} — cancelling AI pipeline."
+                )
+                await task.cancel()
+            else:
+                logger.error(
+                    "[Doctor Handoff] ❌ Bridge failed — customer stays on AI call."
+                )
 
         asyncio.create_task(_do_handoff())
+
+
+    # Register the doctor handoff handler with the LLM service
+    llm.register_function("connect_to_doctor", handle_connect_to_doctor)
 
     # -----------------------------------------------------------------------
     # Step 6: Build and run the pipeline
@@ -484,3 +550,8 @@ Return ONLY the bullet points, no intro text. Use plain text bullets starting wi
                 logger.warning(f"[Transcript] Skipped saving — transcript empty or no lead_id")
         except Exception as e:
             logger.error(f"Failed to save transcript/memory: {e}", exc_info=True)
+        finally:
+            # Release the per-lead session lock so a future call can connect
+            if _session_registered and lead_id in _active_lead_sessions:
+                del _active_lead_sessions[lead_id]
+                logger.warning(f"[Session] Released lead_id={lead_id} session lock")
