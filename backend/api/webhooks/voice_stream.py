@@ -205,7 +205,6 @@ async def voice_stream(websocket: WebSocket):
     # -----------------------------------------------------------------------
     # Step 3: Configure transport with Exotel serializer
     # -----------------------------------------------------------------------
-    from pipecat.audio.vad.silero import SileroVADAnalyzer
 
     transport = FastAPIWebsocketTransport(
         websocket=websocket,
@@ -214,8 +213,10 @@ async def voice_stream(websocket: WebSocket):
             audio_out_enabled=True,
             add_wav_header=False,
             sample_rate=16000,
-            vad_enabled=True,
-            vad_analyzer=SileroVADAnalyzer(),
+            # Gemini Live has its own server-side VAD built-in.
+            # Running SileroVAD locally causes double-detection and adds ~300ms
+            # extra silence wait before Gemini receives end-of-turn signal.
+            vad_enabled=False,
             vad_audio_passthrough=True,
             serializer=CustomExotelSerializer(stream_sid=stream_sid),
         )
