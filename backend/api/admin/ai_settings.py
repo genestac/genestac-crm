@@ -74,12 +74,34 @@ async def add_knowledge_base_item(
 ):
     """Add a new knowledge base item."""
     try:
-        # Note: We would ideally generate embeddings here using openai.embeddings, 
-        # but for Iteration 1 we just save the text content.
+        # Generate vector embedding using OpenAI text-embedding-3-small (1536 dims)
+        import openai as _openai
+        import os
+        try:
+            oai_client = _openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+            text_to_embed = f"Title: {data.get('title')}\nContent: {data.get('content')}"
+            embed_res = oai_client.embeddings.create(
+                model="text-embedding-3-small",
+                input=text_to_embed,
+            )
+            embedding = embed_res.data[0].embedding
+        except Exception as embed_err:
+            print(f"Embedding generation failed: {embed_err}")
+            embedding = None
+
+        # ---------------------------------------------------------------------------
+        # COMMENTED OUT: Gemini embedding path
+        # ---------------------------------------------------------------------------
+        # from google import genai
+        # client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+        # embed_res = client.models.embed_content(model="text-embedding-004", contents=text_to_embed)
+        # embedding = embed_res.embeddings[0].values
+
         payload = {
             "category": data.get("category", "FAQ"),
             "title": data.get("title"),
-            "content": data.get("content")
+            "content": data.get("content"),
+            "embedding": embedding
         }
         res = supabase.table("ai_knowledge_base").insert(payload).execute()
         return {"success": True, "data": res.data}

@@ -19,6 +19,7 @@ from pipecat.serializers.exotel import ExotelFrameSerializer
 from pipecat.frames.frames import (
     AudioRawFrame,
     InterruptionFrame,
+    LLMMessagesAppendFrame,
     OutputTransportMessageFrame,
     OutputTransportMessageUrgentFrame,
 )
@@ -88,18 +89,14 @@ async def build_rag_context(lead_id: str, supabase: Client):
     settings = settings_res.data[0]["settings_value"] if settings_res.data else {}
     base_prompt = settings.get("base_prompt", "You are a helpful AI assistant.")
 
-    # 3. Get Knowledge Base (Top 5 items)
-    kb_res = supabase.table("ai_knowledge_base").select("title, content").limit(5).execute()
-    kb_data = "\n".join([f"{item['title']}: {item['content']}" for item in kb_res.data]) if kb_res.data else "No company info available."
-
-    # 4. Get Active Doctors
+    # 3. Get Active Doctors
     doc_res = supabase.table("doctor_schedules").select("*, staffs(full_name)").eq("is_active", True).execute()
     doc_data = "\n".join([
         f"Dr. {d['staffs']['full_name']} (Phone: {d['exotel_number']}) - Available {d['start_time']} to {d['end_time']} on {', '.join(d['available_days'] or [])}"
         for d in doc_res.data
     ]) if doc_res.data else "No doctors currently active."
 
-    # 5. Get Lead Context Memory (last 5 interactions)
+    # 4. Get Lead Context Memory (last 5 interactions)
     mem_res = supabase.table("lead_context_memory").select("memory_text").eq("lead_id", lead_id).order("created_at", desc=True).limit(5).execute()
     mem_data = "\n".join([m["memory_text"] for m in mem_res.data]) if mem_res.data else "No past memory available."
 
@@ -122,9 +119,6 @@ CURRENT DATE & TIME: {current_time_ist}
 PAST MEMORY/INTERACTIONS WITH THIS LEAD:
 {mem_data}
 
-COMPANY KNOWLEDGE BASE:
-{kb_data}
-
 AVAILABLE DOCTORS:
 {doc_data}
 
@@ -138,7 +132,8 @@ Keep responses short and conversational — this is a phone call, not a chat.
 CRITICAL TOOL RULES:
 - NEVER call connect_to_doctor automatically or based on past call summaries/memories.
 - ONLY call connect_to_doctor when the CURRENT caller explicitly asks to speak with a doctor RIGHT NOW in this active conversation.
-- Past memories are context only — they do NOT require you to take action unless the user repeats the request in this call."""
+- Past memories are context only — they do NOT require you to take action unless the user repeats the request in this call.
+- For ANY question about the company, services, pricing, programs, or procedures, ALWAYS call search_knowledge_base first. Never make up or guess company information."""
 
     return system_instruction, lead_name
 
@@ -281,54 +276,120 @@ async def voice_stream(websocket: WebSocket):
     # -----------------------------------------------------------------------
     # Tool definition: Gemini will call this when user wants to connect with a doctor
     doctor_connect_tool = {
-        "function_declarations": [{
-            "name": "connect_to_doctor",
-            "description": (
-                "Connect the user with a real doctor from our staff. "
-                "Call this function when the user asks to speak with a doctor, "
-                "requests a consultation, or wants to be transferred to medical staff. "
-                "Do NOT call this for booking future appointments — only for immediate live connection."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "reason": {
-                        "type": "string",
-                        "description": "Brief reason why the user wants to connect with a doctor"
-                    }
-                },
-                "required": ["reason"],
+        "type": "function",
+        "name": "connect_to_doctor",
+        "description": (
+            "Connect the user with a real doctor from our staff. "
+            "Call this function when the user asks to speak with a doctor, "
+            "requests a consultation, or wants to be transferred to medical staff. "
+            "Do NOT call this for booking future appointments — only for immediate live connection."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "reason": {
+                    "type": "string",
+                    "description": "Brief reason why the user wants to connect with a doctor"
+                }
             },
-        }]
+            "required": ["reason"],
+        }
     }
 
-    if ENV == "development":
-        from pipecat.services.google.gemini_live.llm import GeminiLiveLLMService
+    search_kb_tool = {
+        "type": "function",
+        "name": "search_knowledge_base",
+        "description": (
+            "Search the company knowledge base for answers to user questions. "
+            "Call this function whenever the user asks about our services, pricing, "
+            "address, operating hours, policies, or general company information."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "The specific question or topic to search for"
+                }
+            },
+            "required": ["query"],
+        }
+    }
 
-        class GreetingGeminiService(GeminiLiveLLMService):
-            async def _handle_session_ready(self, session):
-                await super()._handle_session_ready(session)
-                logger.warning("Gemini session ready — sending greeting trigger")
-                await self._create_single_response([{
-                    "role": "user",
-                    "content": f"Hi, my name is {lead_name}. Please greet me warmly and ask how you can help.",
-                }])
-                self._ready_for_realtime_input = True
+    schedule_call_tool = {
+        "type": "function",
+        "name": "schedule_call",
+        "description": (
+            "Schedule a future callback or appointment for the user. "
+            "Call this function when the user explicitly asks to schedule a call for a later date or time."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "time_preference": {
+                    "type": "string",
+                    "description": "The user's preferred date and time for the scheduled call (e.g. 'tomorrow at 3pm')"
+                },
+                "reason": {
+                    "type": "string",
+                    "description": "The reason for the scheduled call"
+                }
+            },
+            "required": ["time_preference", "reason"],
+        }
+    }
 
-        llm = GreetingGeminiService(
-            api_key=os.getenv("GEMINI_API_KEY"),
-            system_instruction=system_instruction,
-            tools=[doctor_connect_tool],
-            settings=GeminiLiveLLMService.Settings(voice="Aoede"),  # Warm feminine voice
+    # ---------------------------------------------------------------------------
+    # OpenAI Realtime LLM — used for both development and production
+    # (Gemini voice path commented out below for reference)
+    # ---------------------------------------------------------------------------
+    from pipecat.services.openai.realtime.llm import OpenAIRealtimeLLMService
+    from pipecat.services.openai.realtime import events
+
+    session_properties = events.SessionProperties(
+        instructions=system_instruction,
+        tools=[doctor_connect_tool, search_kb_tool, schedule_call_tool],
+        audio=events.AudioConfiguration(
+            output=events.AudioOutput(voice="shimmer")
         )
-    else:
-        from pipecat.services.openai_realtime import OpenAIRealtimeLLMService
-        llm = OpenAIRealtimeLLMService(
-            model="gpt-realtime-preview",
-            api_key=os.getenv("OPENAI_API_KEY"),
-            system_instruction=system_instruction,
-            tools=[doctor_connect_tool],
+    )
+
+    llm = OpenAIRealtimeLLMService(
+        api_key=os.getenv("OPENAI_API_KEY"),
+        settings=OpenAIRealtimeLLMService.Settings(
+            model="gpt-realtime-2.1-mini",
+            session_properties=session_properties
         )
+    )
+
+    # ---------------------------------------------------------------------------
+    # COMMENTED OUT: Gemini Live voice path
+    # ---------------------------------------------------------------------------
+    # if ENV == "development":
+    #     from pipecat.services.google.gemini_live.llm import GeminiLiveLLMService
+    #     class GreetingGeminiService(GeminiLiveLLMService):
+    #         async def _handle_session_ready(self, session):
+    #             await super()._handle_session_ready(session)
+    #             logger.warning("Gemini session ready — sending greeting trigger")
+    #             await self._create_single_response([{
+    #                 "role": "user",
+    #                 "content": f"Hi, my name is {lead_name}. Please greet me warmly and ask how you can help.",
+    #             }])
+    #             self._ready_for_realtime_input = True
+    #     llm = GreetingGeminiService(
+    #         api_key=os.getenv("GEMINI_API_KEY"),
+    #         system_instruction=system_instruction,
+    #         tools=[doctor_connect_tool, search_kb_tool],
+    #         settings=GeminiLiveLLMService.Settings(voice="Aoede"),
+    #     )
+    # else:
+    #     from pipecat.services.openai_realtime import OpenAIRealtimeLLMService
+    #     llm = OpenAIRealtimeLLMService(
+    #         model="gpt-realtime-preview",
+    #         api_key=os.getenv("OPENAI_API_KEY"),
+    #         system_instruction=system_instruction,
+    #         tools=[doctor_connect_tool, search_kb_tool],
+    #     )
 
     # Empty context — conversation history accumulates from here
     context = LLMContext(messages=[])
@@ -412,12 +473,11 @@ async def voice_stream(websocket: WebSocket):
                 logger.error("[Doctor Handoff] customer_phone is empty — cannot bridge!")
                 return
 
-            success = bridge_doctor_and_customer(
+            bridge_res = bridge_doctor_and_customer(
                 doctor_phone=doctor_phone,
-                customer_phone=customer_phone,
+                customer_phone=customer_phone
             )
-
-            if success:
+            if bridge_res:
                 logger.warning(
                     f"[Doctor Handoff] ✅ Bridge initiated: "
                     f"{doctor_phone} ⇔ {customer_phone} — cancelling AI pipeline."
@@ -430,9 +490,71 @@ async def voice_stream(websocket: WebSocket):
 
         asyncio.create_task(_do_handoff())
 
+    async def handle_search_kb(params: FunctionCallParams):
+        arguments = params.arguments
+        result_callback = params.result_callback
+        query = arguments.get("query", "")
+        logger.warning(f"[RAG Search] Searching knowledge base for: '{query}'")
 
-    # Register the doctor handoff handler with the LLM service
+        # Use OpenAI text-embedding-3-small (1536 dims) for vector search
+        import openai as _openai
+        try:
+            # 1. Embed the user's query using OpenAI embeddings
+            oai_client = _openai.AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+            embed_res = await oai_client.embeddings.create(
+                model="text-embedding-3-small",
+                input=query,
+            )
+            query_vector = embed_res.data[0].embedding
+
+            # 2. Search Supabase via the RPC match function (pgvector cosine similarity)
+            search_res = supabase.rpc("match_knowledge_base", {
+                "query_embedding": query_vector,
+                "match_threshold": 0.5,
+                "match_count": 3
+            }).execute()
+
+            results = search_res.data
+            if results:
+                formatted_results = "\n\n".join([f"**{r['title']}**\n{r['content']}" for r in results])
+                logger.warning(f"[RAG Search] Found {len(results)} matches.")
+                await result_callback({
+                    "status": "success",
+                    "results": formatted_results
+                })
+            else:
+                logger.warning("[RAG Search] No matches found.")
+                await result_callback({
+                    "status": "not_found",
+                    "message": "I couldn't find specific information about that in the knowledge base."
+                })
+        except Exception as e:
+            logger.error(f"[RAG Search] Error during vector search: {e}")
+            await result_callback({
+                "status": "error",
+                "message": "Sorry, I had trouble searching the knowledge base right now."
+            })
+
+
+    # Register tools with the LLM service
     llm.register_function("connect_to_doctor", handle_connect_to_doctor)
+    llm.register_function("search_knowledge_base", handle_search_kb)
+
+    async def handle_schedule_call(params: FunctionCallParams):
+        arguments = params.arguments
+        result_callback = params.result_callback
+        time_preference = arguments.get("time_preference")
+        reason = arguments.get("reason", "Follow-up consultation")
+        
+        logger.warning(f"[Schedule Call] Requested for {time_preference}, reason: {reason}")
+        
+        # Here we would normally save to the database. For now we will mock success.
+        await result_callback({
+            "status": "success",
+            "message": f"Please inform the user: 'I have scheduled your appointment for {time_preference}. Our team will call you then!'"
+        })
+        
+    llm.register_function("schedule_call", handle_schedule_call)
 
     # -----------------------------------------------------------------------
     # Step 6: Build and run the pipeline
@@ -446,6 +568,15 @@ async def voice_stream(websocket: WebSocket):
     ])
 
     task = PipelineTask(pipeline, params=PipelineParams(allow_interruptions=True))
+
+    @transport.event_handler("on_client_connected")
+    async def on_client_connected(transport, client):
+        logger.warning("Exotel client connected — sending greeting trigger")
+        context.add_message({
+            "role": "user",
+            "content": f"Hi, my name is {lead_name}. Please greet me warmly and ask how you can help."
+        })
+        await task.queue_frames([LLMMessagesAppendFrame(context.get_messages())])
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
@@ -489,14 +620,14 @@ async def voice_stream(websocket: WebSocket):
 
             if full_transcript and lead_id:
                 # -----------------------------------------------------------
-                # Generate an intelligent summary using Gemini
+                # Generate an intelligent summary using OpenAI gpt-4o-mini
+                # (Gemini path commented out)
                 # -----------------------------------------------------------
                 summary = f"AI Call with {lead_name}."  # fallback
                 try:
-                    from google import genai as gai
-                    from google.genai import types as gai_types
-                    gai_client = gai.Client(api_key=os.getenv("GEMINI_API_KEY"))
-                    summary_prompt = f"""You are a CRM assistant. Summarize this AI sales call in 3-4 concise bullet points for a sales rep.
+                    import openai as _openai
+                    oai_client = _openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+                    summary_prompt = f"""You are a helpful assistant. Summarize this AI sales call in 3-4 concise bullet points for a sales rep.
 
 Focus on:
 - What the lead was interested in (products/plans/concerns)
@@ -508,17 +639,28 @@ Call transcript:
 {full_transcript}
 
 Return ONLY the bullet points, no intro text. Use plain text bullets starting with •"""
-                    resp = gai_client.models.generate_content(
-                        model="gemini-2.0-flash",
-                        contents=summary_prompt,
+                    resp = oai_client.chat.completions.create(
+                        model="gpt-4o-mini",
+                        messages=[{"role": "user", "content": summary_prompt}],
+                        max_tokens=300,
                     )
-                    summary = resp.text.strip()
+                    summary = resp.choices[0].message.content.strip()
                     logger.warning(f"[Transcript] AI summary generated: {summary[:100]}...")
                 except Exception as sum_err:
                     logger.warning(f"[Transcript] Summary generation failed, using fallback: {sum_err}")
-                    # Fallback: extract just user lines
                     user_lines = [l for l in conversation_lines if l.startswith("user:")]
                     summary = f"Lead interested in: {'; '.join(user_lines[:3])}"
+
+                # ---------------------------------------------------------------------------
+                # COMMENTED OUT: Gemini transcript summary path
+                # ---------------------------------------------------------------------------
+                # from google import genai as gai
+                # gai_client = gai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+                # resp = gai_client.models.generate_content(
+                #     model="gemini-2.0-flash",
+                #     contents=summary_prompt,
+                # )
+                # summary = resp.text.strip()
 
                 log_res = supabase.table("ai_call_logs").select("id").eq("lead_id", lead_id).order("created_at", desc=True).limit(1).execute()
                 log_id = None
