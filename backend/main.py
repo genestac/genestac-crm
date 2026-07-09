@@ -50,8 +50,9 @@ app.include_router(coupons.router, prefix="/api/admin/coupons", tags=["admin-cou
 app.include_router(metrics.router, prefix="/api/admin/metrics", tags=["admin-metrics"])
 app.include_router(ai_settings.router, prefix="/api/admin/ai-settings", tags=["admin-ai-settings"])
 
-from api.webhooks import voice_stream
+from api.webhooks import voice_stream, conference
 app.include_router(voice_stream.router, prefix="/api/webhooks/exotel", tags=["webhooks-exotel"])
+app.include_router(conference.router, prefix="/api/webhooks/exotel", tags=["webhooks-exotel"])
 
 from api import templates, custom_fields
 from app.routes import admin_proforma_routes, invoice_settings_routes
