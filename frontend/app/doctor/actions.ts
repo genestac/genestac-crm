@@ -29,11 +29,13 @@ export async function getDoctorMetrics() {
 }
 
 export async function getPatientHistory(patientId: string) {
+  if (!patientId || patientId === 'null' || patientId === 'undefined') return []
   const response = await fetchAPI(`/api/doctor/patients/${patientId}/history`)
   return response || []
 }
 
 export async function getRecentPrescriptions(patientId: string) {
+  if (!patientId || patientId === 'null' || patientId === 'undefined') return []
   const response = await fetchAPI(`/api/doctor/patients/${patientId}/prescriptions`)
   return response || []
 }

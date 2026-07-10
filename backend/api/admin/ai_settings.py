@@ -158,3 +158,163 @@ async def get_all_call_logs(
         return {"data": logs}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/queue")
+async def get_ai_call_queue(
+    current_user: dict = Depends(get_current_user),
+    supabase: Client = Depends(get_supabase_client)
+):
+    """Get the AI call queue from global settings."""
+    try:
+        res = supabase.table("global_settings").select("*").eq("settings_key", "ai_call_queue").execute()
+        queue = []
+        if res.data:
+            queue = res.data[0]["settings_value"]
+            
+        # Enrich queue with lead data
+        if queue:
+            lead_ids = [item["lead_id"] for item in queue if "lead_id" in item]
+            if lead_ids:
+                leads_res = supabase.table("leads").select("id, name, phone_number").in_("id", lead_ids).execute()
+                users_res = supabase.table("users").select("id, name, phone").in_("id", lead_ids).execute()
+                
+                lead_map = {l["id"]: l for l in (leads_res.data or [])}
+                for u in (users_res.data or []):
+                    if u["id"] not in lead_map:
+                        lead_map[u["id"]] = {"id": u["id"], "name": u["name"], "phone_number": u.get("phone")}
+                        
+                for item in queue:
+                    lead = lead_map.get(item.get("lead_id"), {})
+                    item["leads"] = {"name": lead.get("name"), "phone": lead.get("phone_number")}
+                    
+        return {"data": queue}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.put("/queue")
+async def update_ai_call_queue(
+    data: List[Dict[str, Any]] = Body(...),
+    current_user: dict = Depends(get_current_user),
+    supabase: Client = Depends(get_supabase_client)
+):
+    """Update the entire AI call queue (for reordering)."""
+    try:
+        supabase.table("global_settings").upsert({
+            "settings_key": "ai_call_queue",
+            "settings_value": data
+        }, on_conflict="settings_key").execute()
+        return {"success": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/queue/enqueue")
+async def enqueue_ai_call(
+    payload: Dict[str, Any] = Body(...),
+    current_user: dict = Depends(get_current_user),
+    supabase: Client = Depends(get_supabase_client)
+):
+    """Manually add a lead to the call queue."""
+    lead_id = payload.get("lead_id")
+    if not lead_id:
+        raise HTTPException(status_code=400, detail="lead_id is required")
+        
+    try:
+        import uuid
+        from datetime import datetime
+        new_item = {
+            "id": str(uuid.uuid4()),
+            "lead_id": lead_id,
+            "status": "pending",
+            "created_at": datetime.now().isoformat()
+        }
+        
+        res = supabase.table("global_settings").select("*").eq("settings_key", "ai_call_queue").execute()
+        queue = res.data[0]["settings_value"] if res.data else []
+        
+        # Check if already in queue
+        if any(item.get("lead_id") == lead_id for item in queue):
+            return {"success": True, "message": "Lead is already in the queue."}
+            
+        queue.append(new_item)
+        
+        supabase.table("global_settings").upsert({
+            "settings_key": "ai_call_queue",
+            "settings_value": queue
+        }, on_conflict="settings_key").execute()
+        return {"success": True, "data": new_item}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/queue/process-next")
+async def process_next_in_queue(
+    current_user: dict = Depends(get_current_user),
+    supabase: Client = Depends(get_supabase_client)
+):
+    """Process the next pending call in the queue."""
+    try:
+        res = supabase.table("global_settings").select("*").eq("settings_key", "ai_call_queue").execute()
+        queue = res.data[0]["settings_value"] if res.data else []
+        
+        # Find first pending
+        pending_idx = next((i for i, item in enumerate(queue) if item.get("status") == "pending"), -1)
+        if pending_idx == -1:
+            return {"success": False, "message": "No pending calls in queue."}
+            
+        next_call = queue[pending_idx]
+        lead_id = next_call["lead_id"]
+        
+        # Mark as processing
+        queue[pending_idx]["status"] = "processing"
+        supabase.table("global_settings").upsert({
+            "settings_key": "ai_call_queue",
+            "settings_value": queue
+        }, on_conflict="settings_key").execute()
+        
+        # We need to trigger the call using the existing logic in sales/leads.py or exotel_service
+        from services.exotel_service import initiate_ai_call
+        
+        phone = None
+        user_res = supabase.table("users").select("phone").eq("id", lead_id).execute()
+        if user_res.data and user_res.data[0].get("phone"):
+            phone = user_res.data[0]["phone"]
+        else:
+            lead_res = supabase.table("leads").select("phone_number").eq("id", lead_id).execute()
+            if lead_res.data and lead_res.data[0].get("phone_number"):
+                phone = lead_res.data[0]["phone_number"]
+                
+        if not phone:
+            queue[pending_idx]["status"] = "failed"
+            supabase.table("global_settings").upsert({"settings_key": "ai_call_queue", "settings_value": queue}, on_conflict="settings_key").execute()
+            return {"success": False, "message": "Lead phone not found"}
+            
+        settings_res = supabase.table("global_settings").select("settings_value").eq("settings_key", "ai_call_settings").execute()
+        ai_settings = settings_res.data[0]["settings_value"] if settings_res.data else {}
+        exotel_number = ai_settings.get("exotel_caller_id") or ai_settings.get("exotel_number")
+        
+        if not exotel_number:
+            queue[pending_idx]["status"] = "failed"
+            supabase.table("global_settings").upsert({"settings_key": "ai_call_queue", "settings_value": queue}, on_conflict="settings_key").execute()
+            return {"success": False, "message": "Exotel caller ID not configured"}
+            
+        log_res = supabase.table("ai_call_logs").insert({"lead_id": lead_id, "status": "initiating"}).execute()
+        call_log_id = log_res.data[0]["id"]
+        
+        exotel_res = initiate_ai_call(from_number=exotel_number, to_number=phone, lead_id=lead_id)
+        
+        if exotel_res and "Call" in exotel_res:
+            call_sid = exotel_res["Call"].get("Sid")
+            supabase.table("ai_call_logs").update({"call_sid": call_sid, "status": "ringing"}).eq("id", call_log_id).execute()
+            # Remove from queue or mark completed
+            queue.pop(pending_idx)
+            supabase.table("global_settings").upsert({"settings_key": "ai_call_queue", "settings_value": queue}, on_conflict="settings_key").execute()
+            return {"success": True, "message": "Call initiated"}
+        else:
+            supabase.table("ai_call_logs").update({"status": "failed_to_initiate"}).eq("id", call_log_id).execute()
+            queue[pending_idx]["status"] = "failed"
+            supabase.table("global_settings").upsert({"settings_key": "ai_call_queue", "settings_value": queue}, on_conflict="settings_key").execute()
+            return {"success": False, "message": "Failed to initiate Exotel call"}
+            
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))

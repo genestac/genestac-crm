@@ -1,14 +1,28 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { updateAISettings, addKnowledgeBaseItem, deleteKnowledgeBaseItem, getCallLogs } from '../actions'
+import { updateAISettings, addKnowledgeBaseItem, deleteKnowledgeBaseItem, getCallLogs, getCallQueue, updateCallQueue, processNextCall } from '../actions'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { toast } from 'sonner'
-import { Loader2, Plus, Trash2, Bot, Database, Clock, PhoneCall, ChevronDown, ChevronUp, RefreshCw, CheckCircle2, XCircle, PhoneOff, PhoneMissed } from 'lucide-react'
+import { Loader2, Plus, Trash2, Bot, Database, Clock, PhoneCall, ChevronDown, ChevronUp, RefreshCw, CheckCircle2, XCircle, PhoneOff, PhoneMissed, ListOrdered, GripVertical, Play } from 'lucide-react'
+
+// ─── Lead Score Badge ────────────────────────────────────────────────────────
+function LeadScoreBadge({ score, label }: { score?: number | null; label?: string | null }) {
+  if (score == null) return null
+  const config =
+    label === 'Hot'  ? { emoji: '🔥', className: 'bg-red-50 text-red-700 border-red-200' }
+    : label === 'Warm' ? { emoji: '🌡️', className: 'bg-amber-50 text-amber-700 border-amber-200' }
+    :                    { emoji: '❄️', className: 'bg-blue-50 text-blue-700 border-blue-200' }
+  return (
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold border ${config.className}`}>
+      {config.emoji} {score}/100
+    </span>
+  )
+}
 
 // ─── Status badge helpers ────────────────────────────────────────────────────
 function CallStatusBadge({ status }: { status: string }) {
@@ -51,6 +65,7 @@ function CallLogRow({ log }: { log: any }) {
             <span className="font-semibold text-gray-900">{leadName}</span>
             {leadPhone && <span className="text-xs text-gray-400">{leadPhone}</span>}
             <CallStatusBadge status={log.status} />
+            <LeadScoreBadge score={log.lead_score} label={log.score_label} />
           </div>
           <p className="text-xs text-gray-400 mt-0.5">{date}</p>
         </div>
@@ -71,6 +86,18 @@ function CallLogRow({ log }: { log: any }) {
             <div>
               <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Summary</h4>
               <p className="text-sm text-gray-700">{log.summary}</p>
+            </div>
+          )}
+          {/* Lead Score Section */}
+          {log.lead_score != null && (
+            <div className="flex items-start gap-3 p-3 rounded-lg bg-white border">
+              <LeadScoreBadge score={log.lead_score} label={log.score_label} />
+              <div className="flex-1">
+                <p className="text-xs font-semibold text-gray-700">{log.score_label} Lead</p>
+                {log.score_reason && (
+                  <p className="text-xs text-gray-500 mt-0.5">{log.score_reason}</p>
+                )}
+              </div>
             </div>
           )}
           {log.transcript ? (
@@ -105,7 +132,7 @@ function CallLogRow({ log }: { log: any }) {
 
 // ─── Main component ───────────────────────────────────────────────────────────
 export function AdminAICallingClient({ initialSettings, initialKnowledgeBase, initialLeadStatuses = [] }: { initialSettings: any, initialKnowledgeBase: any[], initialLeadStatuses?: any[] }) {
-  const [activeTab, setActiveTab] = useState<'settings' | 'logs'>('settings')
+  const [activeTab, setActiveTab] = useState<'settings' | 'logs' | 'queue'>('settings')
 
   const [settings, setSettings] = useState(initialSettings || {
     enabled_statuses: [],
@@ -126,6 +153,12 @@ export function AdminAICallingClient({ initialSettings, initialKnowledgeBase, in
   // Call logs state
   const [callLogs, setCallLogs] = useState<any[]>([])
   const [logsLoading, setLogsLoading] = useState(false)
+
+  // Call Queue state
+  const [callQueue, setCallQueue] = useState<any[]>([])
+  const [queueLoading, setQueueLoading] = useState(false)
+  const [draggedItemIndex, setDraggedItemIndex] = useState<number | null>(null)
+  const [processingQueue, setProcessingQueue] = useState(false)
 
   const leadStatuses = initialLeadStatuses && initialLeadStatuses.length > 0 
     ? initialLeadStatuses 
@@ -149,9 +182,69 @@ export function AdminAICallingClient({ initialSettings, initialKnowledgeBase, in
     }
   }, [])
 
+  const fetchCallQueue = useCallback(async () => {
+    setQueueLoading(true)
+    try {
+      const queue = await getCallQueue()
+      setCallQueue(queue)
+    } catch {
+      toast.error('Failed to load call queue')
+    } finally {
+      setQueueLoading(false)
+    }
+  }, [])
+
   useEffect(() => {
     if (activeTab === 'logs') fetchCallLogs()
-  }, [activeTab, fetchCallLogs])
+    if (activeTab === 'queue') fetchCallQueue()
+  }, [activeTab, fetchCallLogs, fetchCallQueue])
+
+  const handleDragStart = (e: React.DragEvent, index: number) => {
+    setDraggedItemIndex(index)
+    e.dataTransfer.effectAllowed = 'move'
+  }
+
+  const handleDragEnter = (e: React.DragEvent, index: number) => {
+    e.preventDefault()
+    if (draggedItemIndex === null || draggedItemIndex === index) return
+    const newQueue = [...callQueue]
+    const draggedItem = newQueue[draggedItemIndex]
+    newQueue.splice(draggedItemIndex, 1)
+    newQueue.splice(index, 0, draggedItem)
+    setDraggedItemIndex(index)
+    setCallQueue(newQueue)
+  }
+
+  const handleDragEnd = async () => {
+    setDraggedItemIndex(null)
+    setQueueLoading(true)
+    try {
+      await updateCallQueue(callQueue)
+      toast.success('Queue order saved')
+    } catch {
+      toast.error('Failed to save queue order')
+      fetchCallQueue()
+    } finally {
+      setQueueLoading(false)
+    }
+  }
+
+  const handleProcessNext = async () => {
+    setProcessingQueue(true)
+    try {
+      const res = await processNextCall()
+      if (res.success) {
+        toast.success(res.message || 'Processing next call...')
+        fetchCallQueue()
+      } else {
+        toast.error(res.message || 'Failed to process next call')
+      }
+    } catch {
+      toast.error('Error processing next call')
+    } finally {
+      setProcessingQueue(false)
+    }
+  }
 
   const handleSaveSettings = async () => {
     setSaving(true)
@@ -208,6 +301,7 @@ export function AdminAICallingClient({ initialSettings, initialKnowledgeBase, in
   // Stats from logs
   const completedCount = callLogs.filter(l => l.status === 'completed').length
   const failedCount = callLogs.filter(l => l.status === 'failed_to_initiate').length
+  const hotCount = callLogs.filter(l => l.score_label === 'Hot').length
   const totalCount = callLogs.length
 
   return (
@@ -225,6 +319,7 @@ export function AdminAICallingClient({ initialSettings, initialKnowledgeBase, in
         {[
           { id: 'settings', label: 'Settings & Knowledge Base', icon: <Bot className="w-4 h-4" /> },
           { id: 'logs', label: 'Call Logs', icon: <PhoneCall className="w-4 h-4" /> },
+          { id: 'queue', label: 'Call Queue', icon: <ListOrdered className="w-4 h-4" /> },
         ].map(tab => (
           <button
             key={tab.id}
@@ -378,11 +473,12 @@ export function AdminAICallingClient({ initialSettings, initialKnowledgeBase, in
       {activeTab === 'logs' && (
         <div className="space-y-6">
           {/* Stats row */}
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-4 gap-4">
             {[
-              { label: 'Total Calls', value: totalCount, color: 'text-gray-900', bg: 'bg-white' },
-              { label: 'Completed', value: completedCount, color: 'text-green-700', bg: 'bg-green-50' },
-              { label: 'Failed', value: failedCount, color: 'text-red-700', bg: 'bg-red-50' },
+              { label: 'Total Calls',  value: totalCount,     color: 'text-gray-900',   bg: 'bg-white' },
+              { label: 'Completed',    value: completedCount, color: 'text-green-700',  bg: 'bg-green-50' },
+              { label: 'Failed',       value: failedCount,    color: 'text-red-700',    bg: 'bg-red-50' },
+              { label: '🔥 Hot Leads', value: hotCount,       color: 'text-orange-700', bg: 'bg-orange-50' },
             ].map(s => (
               <div key={s.label} className={`${s.bg} rounded-xl border p-5 shadow-sm`}>
                 <p className="text-xs text-gray-500 font-medium">{s.label}</p>
@@ -415,6 +511,70 @@ export function AdminAICallingClient({ initialSettings, initialKnowledgeBase, in
             <div className="space-y-3">
               {callLogs.map(log => (
                 <CallLogRow key={log.id} log={log} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Call Queue Tab ── */}
+      {activeTab === 'queue' && (
+        <div className="space-y-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900">Upcoming Calls</h2>
+              <p className="text-xs text-gray-500 mt-1">Drag and drop to reorder the call priority.</p>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" onClick={fetchCallQueue} disabled={queueLoading}>
+                <RefreshCw className={`w-4 h-4 mr-2 ${queueLoading ? 'animate-spin' : ''}`} />
+                Refresh
+              </Button>
+              <Button size="sm" onClick={handleProcessNext} disabled={processingQueue || queueLoading || callQueue.length === 0}>
+                {processingQueue ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Play className="w-4 h-4 mr-2" />}
+                Process Next
+              </Button>
+            </div>
+          </div>
+
+          {queueLoading && callQueue.length === 0 ? (
+            <div className="flex items-center justify-center py-20 text-gray-400 border rounded-xl bg-white shadow-sm">
+              <Loader2 className="w-6 h-6 animate-spin mr-2" /> Loading call queue…
+            </div>
+          ) : callQueue.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-20 text-gray-400 border rounded-xl bg-white shadow-sm">
+              <ListOrdered className="w-10 h-10 mb-3 opacity-30" />
+              <p className="text-sm font-medium">No calls in queue</p>
+              <p className="text-xs mt-1">Leads triggered for calling will appear here.</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {callQueue.map((item, index) => (
+                <div
+                  key={item.id}
+                  draggable
+                  onDragStart={(e) => handleDragStart(e, index)}
+                  onDragEnter={(e) => handleDragEnter(e, index)}
+                  onDragEnd={handleDragEnd}
+                  onDragOver={(e) => e.preventDefault()}
+                  className={`flex items-center gap-4 p-4 border rounded-xl bg-white shadow-sm transition-all cursor-grab active:cursor-grabbing ${
+                    draggedItemIndex === index ? 'opacity-50 scale-[0.99] border-indigo-300' : 'hover:border-indigo-200'
+                  }`}
+                >
+                  <GripVertical className="w-5 h-5 text-gray-400" />
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-gray-900">{item.leads?.name || 'Unknown'}</span>
+                      {item.leads?.phone && <span className="text-xs text-gray-500">{item.leads.phone}</span>}
+                    </div>
+                    <p className="text-xs text-gray-400 mt-1">
+                      Added: {new Date(item.created_at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}
+                    </p>
+                  </div>
+                  <div className="flex-shrink-0">
+                    <CallStatusBadge status={item.status} />
+                  </div>
+                </div>
               ))}
             </div>
           )}

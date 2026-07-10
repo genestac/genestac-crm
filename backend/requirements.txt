@@ -15,3 +15,4 @@ websockets
 pipecat-ai[google]
 openai
 google-genai
+deepgram-sdk

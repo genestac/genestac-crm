@@ -103,3 +103,42 @@ export async function getCallLogs() {
     return []
   }
 }
+
+export async function getCallQueue() {
+  try {
+    const response = await fetchAPI('/api/admin/ai-settings/queue', {
+      headers: { 'Cookie': (await cookies()).toString() }
+    })
+    return response.data || []
+  } catch (error) {
+    console.error('Failed to fetch call queue:', error)
+    return []
+  }
+}
+
+export async function updateCallQueue(data: any) {
+  try {
+    const response = await fetchAPI('/api/admin/ai-settings/queue', {
+      method: 'PUT',
+      headers: { 'Cookie': (await cookies()).toString(), 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    })
+    return response
+  } catch (error) {
+    console.error('Failed to update call queue:', error)
+    throw error
+  }
+}
+
+export async function processNextCall() {
+  try {
+    const response = await fetchAPI('/api/admin/ai-settings/queue/process-next', {
+      method: 'POST',
+      headers: { 'Cookie': (await cookies()).toString() }
+    })
+    return response
+  } catch (error) {
+    console.error('Failed to process next call:', error)
+    throw error
+  }
+}

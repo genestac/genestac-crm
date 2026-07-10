@@ -29,6 +29,6 @@ def is_admin(user: dict, supabase: Client) -> bool:
 @router.post('/appointments')
 async def book_appointment(lead_id: str=Form(...), doctor_id: str=Form(...), date: str=Form(...), time: str=Form(...), notes: Optional[str]=Form(None), current_user: dict=Depends(get_current_user), supabase: Client=Depends(get_supabase_client)):
     scheduled_at = f'{date}T{time}:00'
-    payload = {'patient_id': lead_id, 'doctor_id': doctor_id, 'sales_rep_id': current_user['id'], 'scheduled_at': scheduled_at, 'notes': notes, 'status': 'pending', 'duration_minutes': 30}
+    payload = {'patient_id': lead_id, 'doctor_id': doctor_id, 'sales_rep_id': current_user['id'], 'scheduled_at': scheduled_at, 'notes': notes, 'status': 'pending', 'duration_minutes': 10}
     response = supabase.table('appointments').insert(payload).execute()
     return {'message': 'Appointment booked successfully', 'data': response.data}

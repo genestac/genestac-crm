@@ -9,6 +9,8 @@ router = APIRouter()
 
 @router.get('/patients/{patient_id}/history')
 async def get_patient_history(patient_id: str, current_user: dict=Depends(get_current_user), supabase: Client=Depends(get_supabase_client)):
+    if patient_id == 'null' or patient_id == 'None' or not patient_id:
+        return []
     response = supabase.table('clinical_assessments').select('*').eq('patient_id', patient_id).order('created_at', desc=False).execute()
     return response.data
 @router.post('/patients/{patient_id}/adverse-events')
