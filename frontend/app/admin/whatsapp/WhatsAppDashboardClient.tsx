@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { ManageTemplatesModal } from './ManageTemplatesModal'
 import { AutoResponderSettings } from './AutoResponderSettings'
+import { CampaignStatsModal } from './CampaignStatsModal'
 import Link from 'next/link'
 import { deleteWhatsAppCampaign, startWhatsAppCampaignNow } from '../whatsapp-actions'
 import { toast } from 'sonner'
@@ -15,6 +16,7 @@ import { useRouter } from 'next/navigation'
 export function WhatsAppDashboardClient({ initialCampaigns, templates, leadStatuses, sources }: { initialCampaigns: any[], templates: any[], leadStatuses: any[], sources: any[] }) {
   const [campaigns, setCampaigns] = useState(initialCampaigns)
   const [isTemplateModalOpen, setIsTemplateModalOpen] = useState(false)
+  const [selectedStatsCampaign, setSelectedStatsCampaign] = useState<any>(null)
   const router = useRouter()
 
   const handleDelete = async (id: string) => {
@@ -92,7 +94,7 @@ export function WhatsAppDashboardClient({ initialCampaigns, templates, leadStatu
                         <span className="font-medium text-gray-900">{camp.name}</span>
                         {getStatusBadge(camp.status)}
                       </div>
-                      <div className="text-sm text-muted-foreground mt-1 flex items-center gap-4">
+                      <div className="text-sm text-muted-foreground mt-1 flex flex-wrap items-center gap-4">
                         <span className="flex items-center gap-1">
                           <FileText className="w-3 h-3" />
                           Template: {camp.whatsapp_templates?.name || 'Unknown'}
@@ -101,10 +103,28 @@ export function WhatsAppDashboardClient({ initialCampaigns, templates, leadStatu
                           <Clock className="w-3 h-3" />
                           Scheduled: {new Date(camp.scheduled_time).toLocaleString()}
                         </span>
+                        {camp.stats && camp.stats.total > 0 && (
+                          <div className="flex items-center gap-3 ml-2">
+                            <div className="w-24 h-2 bg-gray-100 rounded-full overflow-hidden border">
+                              <div 
+                                className="h-full bg-emerald-500" 
+                                style={{ width: `${camp.stats.percentage}%` }}
+                              />
+                            </div>
+                            <span className="text-xs font-medium">
+                              {camp.stats.percentage}% ({camp.stats.sent} / {camp.stats.total})
+                            </span>
+                            {camp.stats.failed > 0 && (
+                              <span className="text-xs text-red-500 font-medium ml-1">
+                                {camp.stats.failed} failed
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
-                      <Button variant="ghost" size="sm" className="hidden">View Stats</Button>
+                      <Button variant="ghost" size="sm" onClick={() => setSelectedStatsCampaign(camp)}>View Stats</Button>
                       
                       {camp.status === 'PENDING' && (
                         <>
@@ -136,6 +156,12 @@ export function WhatsAppDashboardClient({ initialCampaigns, templates, leadStatu
           </div>
         </CardContent>
       </Card>
+
+      <CampaignStatsModal 
+        campaign={selectedStatsCampaign}
+        open={!!selectedStatsCampaign}
+        onOpenChange={(open) => !open && setSelectedStatsCampaign(null)}
+      />
 
       <ManageTemplatesModal 
         isOpen={isTemplateModalOpen} 

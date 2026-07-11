@@ -105,8 +105,22 @@ async def sync_templates(current_user: dict = Depends(get_current_user), supabas
 async def get_campaigns(current_user: dict = Depends(get_current_user), supabase: Client = Depends(get_supabase_client)):
     if not is_admin(current_user, supabase):
         raise HTTPException(status_code=403, detail="Admin access required")
-    res = supabase.table('whatsapp_campaigns').select('*, whatsapp_templates(name)').order('created_at', desc=True).execute()
-    return {'data': res.data or []}
+    res = supabase.table('whatsapp_campaigns').select('*, whatsapp_templates(name), whatsapp_logs(status)').order('created_at', desc=True).execute()
+    
+    campaigns = res.data or []
+    for c in campaigns:
+        logs = c.pop('whatsapp_logs', [])
+        total = len(logs)
+        sent = sum(1 for log in logs if log['status'] == 'SENT')
+        failed = sum(1 for log in logs if log['status'] == 'FAILED')
+        c['stats'] = {
+            'total': total,
+            'sent': sent,
+            'failed': failed,
+            'percentage': int((sent + failed) / total * 100) if total > 0 else 0
+        }
+        
+    return {'data': campaigns}
 
 @router.get('/campaigns/{campaign_id}/logs')
 async def get_campaign_logs(campaign_id: str, current_user: dict = Depends(get_current_user), supabase: Client = Depends(get_supabase_client)):
@@ -116,20 +130,39 @@ async def get_campaign_logs(campaign_id: str, current_user: dict = Depends(get_c
     return {'data': res.data or []}
 
 def resolve_audience(supabase: Client, audience_filter: AudienceFilter, template_id: str = None) -> List[dict]:
-    query = supabase.table('leads').select('id, name, phone_number').eq('whatsapp_opt_out', False)
-    
+    # Fetch from leads table
+    l_query = supabase.table('leads').select('id, name, phone_number').eq('whatsapp_opt_out', False)
     if audience_filter.statuses:
-        query = query.in_('status', audience_filter.statuses)
+        l_query = l_query.in_('status', audience_filter.statuses)
     if audience_filter.source_ids:
-        query = query.in_('source_id', audience_filter.source_ids)
+        l_query = l_query.in_('source_id', audience_filter.source_ids)
         
-    leads_res = query.execute()
-    leads = leads_res.data or []
+    leads_res = l_query.execute()
+    merged_leads = leads_res.data or []
     
-    if not leads:
+    # Fetch from users table (new leads)
+    u_query = supabase.table('users').select('id, name, phone')
+    if audience_filter.statuses:
+        u_query = u_query.in_('status', audience_filter.statuses)
+    if audience_filter.source_ids:
+        u_query = u_query.in_('source_id', audience_filter.source_ids)
+        
+    users_res = u_query.execute()
+    users = users_res.data or []
+    
+    for u in users:
+        # Ignore users without phone numbers
+        if not u.get('phone'): continue
+        merged_leads.append({
+            'id': u['id'],
+            'name': u['name'],
+            'phone_number': u['phone']
+        })
+    
+    if not merged_leads:
         return []
         
-    lead_ids = [lead['id'] for lead in leads]
+    lead_ids = [lead['id'] for lead in merged_leads]
     
     # Bulk fetch recent logs to avoid N+1 queries
     recent_contacted_ids = set()
@@ -150,16 +183,13 @@ def resolve_audience(supabase: Client, audience_filter: AudienceFilter, template
             if prev_log_res.data:
                 same_template_contacted_ids = {log['lead_id'] for log in prev_log_res.data}
     
+    # Filter out excluded leads
     final_leads = []
-    for lead in leads:
-        lead_id = lead['id']
-        
-        if lead_id in recent_contacted_ids:
+    for lead in merged_leads:
+        if lead['id'] in recent_contacted_ids:
             continue
-                
-        if lead_id in same_template_contacted_ids:
+        if lead['id'] in same_template_contacted_ids:
             continue
-                
         final_leads.append(lead)
         
     return final_leads

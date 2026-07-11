@@ -35,6 +35,8 @@ export async function getCampaignLogs(campaignId: string) {
   return response.data || []
 }
 
+
+
 export async function createWhatsAppCampaign(name: string, templateId: string, audienceFilter: any, scheduledTime?: string) {
   const response = await fetchAPI('/api/admin/whatsapp/campaigns', {
     method: 'POST',
