@@ -219,6 +219,7 @@ async def exotel_twiml(lead_id: str, request: Request):
 # ---------------------------------------------------------------------------
 # Main voice stream WebSocket handler
 # ---------------------------------------------------------------------------
+# Alias for old Exotel apps that still point to /stream/deepgram
 @router.websocket("/stream")
 async def voice_stream(websocket: WebSocket):
     await websocket.accept()

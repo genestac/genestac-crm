@@ -69,18 +69,28 @@ async def list_carts(current_user: dict=Depends(get_current_user), supabase: Cli
     if admin:
         res = supabase.table('cart').select('*').order('added_at', desc=True).execute()
     else:
-        leads_res = supabase.table('leads').select('id').eq('assigned_sales_rep_id', current_user['id']).execute()
-        lead_ids = [lead['id'] for lead in leads_res.data] if leads_res.data else []
-        if not lead_ids:
+        # Fetch assigned users (who can have carts)
+        users_res = supabase.table('users').select('id').eq('assigned_sales_rep_id', current_user['id']).execute()
+        assigned_user_ids = [u['id'] for u in (users_res.data or [])]
+        
+        if not assigned_user_ids:
             return {'data': []}
-        res = supabase.table('cart').select('*').in_('user_id', lead_ids).order('added_at', desc=True).execute()
+        res = supabase.table('cart').select('*').in_('user_id', assigned_user_ids).order('added_at', desc=True).execute()
     carts_data = res.data or []
     if carts_data:
         user_ids = list(set([c['user_id'] for c in carts_data if c.get('user_id')]))
         if user_ids:
             try:
+                # First check leads table
                 users_res = supabase.table('leads').select('id, name, full_name, email, phone').in_('id', user_ids).execute()
-                users_map = {u['id']: u for u in users_res.data}
+                users_map = {u['id']: u for u in (users_res.data or [])}
+                
+                # Check users table for any missing IDs
+                missing_ids = [uid for uid in user_ids if uid not in users_map]
+                if missing_ids:
+                    actual_users_res = supabase.table('users').select('id, name, full_name, email, phone').in_('id', missing_ids).execute()
+                    users_map.update({u['id']: u for u in (actual_users_res.data or [])})
+
                 for c in carts_data:
                     if c.get('user_id') in users_map:
                         c['user'] = users_map[c['user_id']]

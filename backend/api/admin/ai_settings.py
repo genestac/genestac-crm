@@ -150,6 +150,23 @@ async def get_all_call_logs(
             )
             lead_map = {l["id"]: l for l in (leads_res.data or [])}
 
+            # Check users table for missing IDs (as many "leads" are actually registered users)
+            missing_ids = [lid for lid in lead_ids if lid not in lead_map]
+            if missing_ids:
+                users_res = (
+                    supabase.table("users")
+                    .select("id, name, full_name, phone")
+                    .in_("id", missing_ids)
+                    .execute()
+                )
+                for u in (users_res.data or []):
+                    # Normalize the user data to match lead structure
+                    lead_map[u["id"]] = {
+                        "id": u["id"],
+                        "name": u.get("name") or u.get("full_name") or "Unknown",
+                        "phone_number": u.get("phone")
+                    }
+
         # Attach lead info to each log
         for log in logs:
             lead = lead_map.get(log.get("lead_id"), {})

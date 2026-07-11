@@ -47,6 +47,7 @@ async def get_admin_metrics(
         
         # Funnel Data
         status_contacted = 0
+        status_counts = {}
         
         try:
             # Fetch all leads with created_at and status
@@ -59,6 +60,7 @@ async def get_admin_metrics(
                 status = lead.get("status") or "NEW"
                 
                 # Funnel logic
+                status_counts[status] = status_counts.get(status, 0) + 1
                 if status in ["CONTACTED", "QUALIFIED", "CONSULTATION_SCHEDULED", "CONVERTED"]:
                     status_contacted += 1
                 
@@ -102,18 +104,13 @@ async def get_admin_metrics(
         monthly_leads_graph = [{"month": k, "leads": v} for k, v in sorted(monthly_leads_map.items(), key=lambda x: sort_month(x[0]))]
         
         # Funnel Graph
-        funnel_graph = [
-            {"stage": "Total Leads", "value": total_leads},
-            {"stage": "Contacted", "value": status_contacted},
-            {"stage": "Converted", "value": total_conversions}
-        ]
+        funnel_graph = [{"stage": "Total Leads", "value": total_leads}]
+        for k, v in sorted(status_counts.items(), key=lambda x: x[1], reverse=True):
+            funnel_graph.append({"stage": k.replace("_", " ").title(), "value": v})
         
-        # Contacted vs Uncontacted Pie
-        uncontacted = total_leads - status_contacted
-        contacted_graph = [
-            {"name": "Contacted", "value": status_contacted},
-            {"name": "Uncontacted", "value": max(0, uncontacted)}
-        ]
+        # Dynamic Status Breakdown Pie
+        # Keep variable name contacted_graph for frontend compatibility
+        contacted_graph = [{"name": k.replace("_", " ").title(), "value": v} for k, v in status_counts.items() if v > 0]
             
         # 3. Active Staff
         total_staff = 0

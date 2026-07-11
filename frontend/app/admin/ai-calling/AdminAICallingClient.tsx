@@ -288,12 +288,13 @@ export function AdminAICallingClient({ initialSettings, initialKnowledgeBase, in
 
   const toggleStatus = (statusValue: string) => {
     setSettings((prev: any) => {
-      const enabled = prev.enabled_statuses.includes(statusValue)
+      const statuses = prev.enabled_statuses || []
+      const enabled = statuses.includes(statusValue)
       return {
         ...prev,
         enabled_statuses: enabled
-          ? prev.enabled_statuses.filter((s: string) => s !== statusValue)
-          : [...prev.enabled_statuses, statusValue]
+          ? statuses.filter((s: string) => s !== statusValue)
+          : [...statuses, statusValue]
       }
     })
   }
@@ -307,15 +308,23 @@ export function AdminAICallingClient({ initialSettings, initialKnowledgeBase, in
   return (
     <div className="space-y-6 pb-12">
       {/* Header */}
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight text-gray-900">AI Voice Calling</h1>
-        <p className="text-muted-foreground mt-2">
-          Configure automated calls, AI instructions, knowledge base, and view call logs.
-        </p>
+      <div className="relative isolate overflow-hidden bg-gradient-to-br from-indigo-900 via-indigo-800 to-purple-900 rounded-3xl p-8 mb-8 shadow-2xl">
+        <div className="absolute inset-0 -z-10 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-indigo-500/20 via-transparent to-transparent"></div>
+        <div className="relative z-10 flex flex-col md:flex-row items-center justify-between gap-6">
+          <div className="flex items-center gap-4">
+            <div className="p-3 bg-white/10 backdrop-blur-md rounded-2xl border border-white/20">
+              <Bot className="w-8 h-8 text-indigo-100" />
+            </div>
+            <div>
+              <h1 className="text-3xl font-bold tracking-tight text-white">AI Voice Calling</h1>
+              <p className="text-indigo-200 mt-1">Configure automated calls, intelligent routing, and RAG knowledge base.</p>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 bg-gray-100 rounded-xl p-1 w-fit">
+      <div className="flex gap-2 bg-white/50 backdrop-blur-xl rounded-2xl p-1.5 w-fit border border-gray-100 shadow-sm">
         {[
           { id: 'settings', label: 'Settings & Knowledge Base', icon: <Bot className="w-4 h-4" /> },
           { id: 'logs', label: 'Call Logs', icon: <PhoneCall className="w-4 h-4" /> },
@@ -324,10 +333,10 @@ export function AdminAICallingClient({ initialSettings, initialKnowledgeBase, in
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id as any)}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+            className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all duration-300 ${
               activeTab === tab.id
-                ? 'bg-white text-gray-900 shadow-sm'
-                : 'text-gray-500 hover:text-gray-700'
+                ? 'bg-white text-indigo-700 shadow-md border-gray-100 scale-100'
+                : 'text-gray-500 hover:text-gray-900 hover:bg-white/40 scale-95 hover:scale-100'
             }`}
           >
             {tab.icon}{tab.label}
@@ -340,12 +349,15 @@ export function AdminAICallingClient({ initialSettings, initialKnowledgeBase, in
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           {/* Left Column: Settings & Prompt */}
           <div className="space-y-6">
-            <div className="bg-white p-6 rounded-xl border shadow-sm space-y-6">
-              <div className="flex items-center gap-3 border-b pb-4">
-                <div className="p-2 bg-blue-50 text-blue-600 rounded-lg">
-                  <Bot className="w-5 h-5" />
+            <div className="bg-white/80 backdrop-blur-xl p-8 rounded-3xl border border-gray-100 shadow-lg hover:shadow-xl transition-shadow duration-300 space-y-8">
+              <div className="flex items-center gap-4 border-b border-gray-100 pb-5">
+                <div className="p-3 bg-gradient-to-br from-blue-100 to-indigo-50 text-blue-600 rounded-2xl shadow-inner">
+                  <Bot className="w-6 h-6" />
                 </div>
-                <h2 className="text-lg font-semibold">AI Agent Configuration</h2>
+                <div>
+                  <h2 className="text-xl font-bold text-gray-900">AI Agent Configuration</h2>
+                  <p className="text-sm text-gray-500">Core connectivity and persona settings.</p>
+                </div>
               </div>
 
               <div className="space-y-3">
@@ -382,29 +394,33 @@ export function AdminAICallingClient({ initialSettings, initialKnowledgeBase, in
                 <Textarea
                   value={settings.base_prompt}
                   onChange={e => setSettings({...settings, base_prompt: e.target.value})}
-                  rows={8}
+                  className="h-48 max-h-96 overflow-y-auto resize-y"
+                  style={{ fieldSizing: 'fixed' } as any}
                   placeholder="You are an AI sales agent for..."
                 />
                 <p className="text-xs text-gray-500">Provide the personality, goal, and rules for the AI here. Dynamic RAG context (lead name, past summary) is automatically injected.</p>
               </div>
             </div>
 
-            <div className="bg-white p-6 rounded-xl border shadow-sm space-y-6">
-              <div className="flex items-center gap-3 border-b pb-4">
-                <div className="p-2 bg-amber-50 text-amber-600 rounded-lg">
-                  <Clock className="w-5 h-5" />
+            <div className="bg-white/80 backdrop-blur-xl p-8 rounded-3xl border border-gray-100 shadow-lg hover:shadow-xl transition-shadow duration-300 space-y-6">
+              <div className="flex items-center gap-4 border-b border-gray-100 pb-5">
+                <div className="p-3 bg-gradient-to-br from-amber-100 to-orange-50 text-amber-600 rounded-2xl shadow-inner">
+                  <Clock className="w-6 h-6" />
                 </div>
-                <h2 className="text-lg font-semibold">Trigger & Scheduling</h2>
+                <div>
+                  <h2 className="text-xl font-bold text-gray-900">Trigger & Scheduling</h2>
+                  <p className="text-sm text-gray-500">When should the AI auto-dial leads?</p>
+                </div>
               </div>
-
-              <div className="space-y-4">
+              
+              <div className="space-y-5 bg-amber-50/50 p-5 rounded-2xl border border-amber-100/50">
                 <Label>Enable Auto-Calling for these Lead Statuses</Label>
                 <div className="grid grid-cols-2 gap-3">
                   {leadStatuses.map(status => (
                     <div key={status.value} className="flex items-center space-x-2">
                       <Switch
                         id={`status-${status.value}`}
-                        checked={settings.enabled_statuses.includes(status.value)}
+                        checked={(settings.enabled_statuses || []).includes(status.value)}
                         onCheckedChange={() => toggleStatus(status.value)}
                       />
                       <Label htmlFor={`status-${status.value}`} className="cursor-pointer">{status.label}</Label>
@@ -422,15 +438,15 @@ export function AdminAICallingClient({ initialSettings, initialKnowledgeBase, in
           </div>
 
           {/* Right Column: Knowledge Base */}
-          <div className="bg-white p-6 rounded-xl border shadow-sm space-y-6 flex flex-col">
-            <div className="flex items-center justify-between border-b pb-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-purple-50 text-purple-600 rounded-lg">
-                  <Database className="w-5 h-5" />
+          <div className="bg-white/80 backdrop-blur-xl p-8 rounded-3xl border border-gray-100 shadow-lg hover:shadow-xl transition-shadow duration-300 flex flex-col h-full">
+            <div className="flex items-center justify-between border-b border-gray-100 pb-5 mb-6">
+              <div className="flex items-center gap-4">
+                <div className="p-3 bg-gradient-to-br from-purple-100 to-pink-50 text-purple-600 rounded-2xl shadow-inner">
+                  <Database className="w-6 h-6" />
                 </div>
                 <div>
-                  <h2 className="text-lg font-semibold">Knowledge Base (RAG)</h2>
-                  <p className="text-xs text-gray-500">Data the AI can search during calls.</p>
+                  <h2 className="text-xl font-bold text-gray-900">Knowledge Base (RAG)</h2>
+                  <p className="text-sm text-gray-500">Company FAQs & rules for the AI to follow.</p>
                 </div>
               </div>
             </div>

@@ -11,14 +11,14 @@ export default function AdminDashboardClient({ metrics }: { metrics: any }) {
     recent_activity 
   } = metrics
 
-  const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042'];
+  const COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#8b5cf6', '#ef4444', '#14b8a6', '#f43f5e', '#84cc16'];
 
   return (
     <div className="space-y-8 p-6 max-w-[1600px] mx-auto">
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900 tracking-tight">Admin Insights</h1>
+          <h1 className="text-3xl font-bold text-gray-900 tracking-tight">Analytics</h1>
           <p className="text-gray-500 mt-1">Deep analytics and today's pulse of the platform.</p>
         </div>
       </div>
@@ -141,9 +141,9 @@ export default function AdminDashboardClient({ metrics }: { metrics: any }) {
           </div>
         </div>
 
-        {/* Contacted Ratio */}
+        {/* Status Breakdown Ratio */}
         <div className="bg-white/80 backdrop-blur-xl border border-gray-100 rounded-3xl p-6 shadow-sm">
-          <h2 className="text-lg font-bold text-gray-900 mb-6">Lead Contact Ratio</h2>
+          <h2 className="text-lg font-bold text-gray-900 mb-6">Lead Status Breakdown</h2>
           <div className="h-72 w-full">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
@@ -159,7 +159,7 @@ export default function AdminDashboardClient({ metrics }: { metrics: any }) {
                   label={({ name, percent }) => `${name} ${((percent || 0) * 100).toFixed(0)}%`}
                 >
                   {contacted_graph?.map((entry: any, index: number) => (
-                    <Cell key={`cell-${index}`} fill={index === 0 ? '#10b981' : '#ef4444'} />
+                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                   ))}
                 </Pie>
                 <Tooltip />

@@ -1,11 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException, Form, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, Form, UploadFile, File, BackgroundTasks, Query
 from supabase import Client
 from db.supabase import get_supabase_client
 from api.deps import get_current_user
 from services.cloudinary_service import upload_file_to_cloudinary
 from typing import Optional
 router = APIRouter()
-from fastapi import Query
 from pydantic import BaseModel
 import razorpay
 import uuid
@@ -31,8 +30,31 @@ def is_admin(user: dict, supabase: Client) -> bool:
     role_name = res.data[0].get('roles', {}).get('name', '')
     return role_name in ('superadmin', 'master_admin', 'admin')
 
+async def process_whatsapp_autoresponder(phone: str, supabase: Client):
+    try:
+        res = supabase.table("global_settings").select("settings_value").eq("settings_key", "whatsapp_autoresponder").execute()
+        if not res.data:
+            return
+            
+        settings = res.data[0]["settings_value"]
+        if settings.get("enabled") and settings.get("template_id"):
+            template_id = settings.get("template_id")
+            
+            # Fetch template name
+            temp_res = supabase.table("whatsapp_templates").select("name").eq("id", template_id).execute()
+            if temp_res.data:
+                template_name = temp_res.data[0]["name"]
+                
+                # Send the template
+                from services.whatsapp_service import send_whatsapp_template
+                import asyncio
+                # We are in an async function running as BackgroundTask, so we can await
+                await send_whatsapp_template(phone, template_name)
+    except Exception as e:
+        print(f"Autoresponder error: {e}")
+
 @router.post('/leads')
-async def create_lead(phone: str=Form(...), name: Optional[str]=Form(None), source_id: Optional[str]=Form(None), email: Optional[str]=Form(None), street_address: Optional[str]=Form(None), city: Optional[str]=Form(None), state: Optional[str]=Form(None), postal_code: Optional[str]=Form(None), country: Optional[str]=Form(None), interested_plan_id: Optional[str]=Form(None), priority: Optional[str]=Form(None), followup_notes: Optional[str]=Form(None), current_user: dict=Depends(get_current_user), supabase: Client=Depends(get_supabase_client)):
+async def create_lead(background_tasks: BackgroundTasks, phone: str=Form(...), name: Optional[str]=Form(None), source_id: Optional[str]=Form(None), email: Optional[str]=Form(None), street_address: Optional[str]=Form(None), city: Optional[str]=Form(None), state: Optional[str]=Form(None), postal_code: Optional[str]=Form(None), country: Optional[str]=Form(None), interested_plan_id: Optional[str]=Form(None), priority: Optional[str]=Form(None), followup_notes: Optional[str]=Form(None), current_user: dict=Depends(get_current_user), supabase: Client=Depends(get_supabase_client)):
     payload = {'phone': phone, 'name': name, 'source_id': source_id, 'status': 'NEW', 'assigned_sales_rep_id': current_user['id']}
     optional_fields = {'email': email, 'street_address': street_address, 'city': city, 'state': state, 'postal_code': postal_code, 'country': country, 'interested_plan_id': interested_plan_id, 'priority': priority, 'followup_notes': followup_notes}
     for k, v in optional_fields.items():
@@ -54,6 +76,11 @@ async def create_lead(phone: str=Form(...), name: Optional[str]=Form(None), sour
         return {'message': 'Duplicate submission added as note', 'data': [existing_user]}
     else:
         response = supabase.table('users').insert(payload).execute()
+        
+        # Trigger Auto-Responder
+        if phone:
+            background_tasks.add_task(process_whatsapp_autoresponder, phone, supabase)
+            
         return {'message': 'Lead created successfully', 'data': response.data}
 
 @router.put('/leads/bulk-status')
@@ -103,6 +130,7 @@ async def get_leads(statuses: Optional[str]=Query(None), exclude_statuses: Optio
         is_admin = current_user.get('role') in ['SUPER_ADMIN', 'superadmin', 'admin', 'master_admin']
         settings = get_global_settings_from_db(supabase)
         shared_pool_enabled = settings.get('shared_lead_pool', False)
+        users_data = []
         u_query = supabase.table('users').select('*, user_sources(name), plans(name, price)')
         if not is_admin:
             if shared_pool_enabled:
@@ -124,6 +152,7 @@ async def get_leads(statuses: Optional[str]=Query(None), exclude_statuses: Optio
         users_data = u_res.data or []
         for u in users_data:
             u['record_type'] = 'USER'
+            
         leads_data = []
         try:
             l_query = supabase.table('leads').select('*, user_sources(name), plans(name, price)')

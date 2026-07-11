@@ -18,7 +18,8 @@ import {
   CreditCard,
   ShoppingCart,
   FileText,
-  Pin
+  Pin,
+  MessageCircle
 } from 'lucide-react'
 import { logout } from '@/app/auth/actions'
 
@@ -26,8 +27,7 @@ const modules = [
   {
     title: 'Overview',
     routes: [
-      { name: 'Dashboard', path: '/admin', icon: LayoutDashboard },
-      { name: 'Analytics', path: '/admin/analytics', icon: BarChart3 },
+      { name: 'Analytics', path: '/admin', icon: BarChart3 },
     ]
   },
   {
@@ -37,6 +37,12 @@ const modules = [
       { name: 'Abandoned Carts', path: '/admin/carts', icon: ShoppingCart },
       { name: 'Inventory', path: '/admin/inventory', icon: Box },
       { name: 'Logistics', path: '/admin/logistics', icon: Truck },
+    ]
+  },
+  {
+    title: 'Marketing',
+    routes: [
+      { name: 'WhatsApp Campaigns', path: '/admin/whatsapp', icon: MessageCircle },
     ]
   },
   {

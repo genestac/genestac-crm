@@ -282,6 +282,72 @@ def sweep_scheduled_appointments():
         print(f"[Appointment Scheduler Error]: {e}")
         traceback.print_exc()
 
+def sweep_whatsapp_campaigns():
+    """
+    Checks for pending WhatsApp campaigns where scheduled_time <= NOW().
+    Runs the campaign and updates log statuses.
+    """
+    try:
+        supabase = get_supabase_client()
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        
+        # Get pending campaigns whose scheduled_time has passed
+        res = supabase.table("whatsapp_campaigns").select("id, template_id, whatsapp_templates(name, language, default_components)").eq("status", "PENDING").lte("scheduled_time", now).execute()
+        
+        campaigns = res.data or []
+        if not campaigns:
+            return
+            
+        import asyncio
+        from services.whatsapp_service import send_whatsapp_template
+        
+        for campaign in campaigns:
+            campaign_id = campaign['id']
+            whatsapp_template = campaign.get('whatsapp_templates')
+            template_name = whatsapp_template['name'] if whatsapp_template else None
+            language_code = whatsapp_template.get('language') or 'en_US' if whatsapp_template else 'en_US'
+            components = whatsapp_template.get('default_components') if whatsapp_template else None
+            
+            if not template_name:
+                supabase.table("whatsapp_campaigns").update({"status": "FAILED"}).eq("id", campaign_id).execute()
+                continue
+                
+            # Mark campaign as running
+            supabase.table("whatsapp_campaigns").update({"status": "RUNNING"}).eq("id", campaign_id).execute()
+            
+            # Fetch pending logs
+            logs_res = supabase.table("whatsapp_logs").select("id, phone_number").eq("campaign_id", campaign_id).eq("status", "PENDING").execute()
+            logs = logs_res.data or []
+            
+            async def process_logs():
+                for log in logs:
+                    phone = log.get('phone_number')
+                    if not phone:
+                        supabase.table("whatsapp_logs").update({"status": "FAILED", "error_msg": "No phone number"}).eq("id", log['id']).execute()
+                        continue
+                        
+                    # Send message
+                    res_json = await send_whatsapp_template(phone, template_name, language_code=language_code, components=components)
+                    
+                    if res_json and "error" not in res_json:
+                        supabase.table("whatsapp_logs").update({"status": "SENT"}).eq("id", log['id']).execute()
+                    else:
+                        err = str(res_json.get("error", "Unknown error")) if res_json else "Empty response"
+                        supabase.table("whatsapp_logs").update({"status": "FAILED", "error_msg": err}).eq("id", log['id']).execute()
+            
+            # Run async execution
+            asyncio.run(process_logs())
+            
+            # Mark campaign completed
+            supabase.table("whatsapp_campaigns").update({"status": "COMPLETED"}).eq("id", campaign_id).execute()
+            print(f"[WhatsApp Scheduler] ✅ Completed campaign {campaign_id}")
+            
+    except Exception as e:
+        import traceback
+        print(f"[WhatsApp Scheduler Error]: {e}")
+        traceback.print_exc()
+
+
 
 def start_scheduler():
     if not scheduler.running:
@@ -289,6 +355,8 @@ def start_scheduler():
         scheduler.add_job(sweep_leads_for_auto_call, 'interval', minutes=5, id="ai_voice_sweep", replace_existing=True)
         # Sweep for scheduled appointments every 1 minute and trigger Exotel bridge calls
         scheduler.add_job(sweep_scheduled_appointments, 'interval', minutes=1, id="appointment_call_sweep", replace_existing=True)
+        # Sweep for WhatsApp Campaigns every 1 minute
+        scheduler.add_job(sweep_whatsapp_campaigns, 'interval', minutes=1, id="whatsapp_campaign_sweep", replace_existing=True)
         scheduler.start()
-        print("Started Background Scheduler for AI Voice Calling.")
+        print("Started Background Scheduler for AI Voice Calling and WhatsApp.")
 

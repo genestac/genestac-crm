@@ -11,7 +11,7 @@ import { useRouter } from 'next/navigation'
 import { getPaginatedLeads, bulkUpdateLeadsStatus } from '@/app/sales/actions'
 import { toast } from 'sonner'
 
-export function LeadsTable({ initialLeads, initialTotal, statusOptions }: { initialLeads: any[], initialTotal: number, statusOptions: {value: string, label: string}[] }) {
+export function LeadsTable({ initialLeads, initialTotal, statusOptions, sourceOptions = [] }: { initialLeads: any[], initialTotal: number, statusOptions: {value: string, label: string}[], sourceOptions?: {value: string, label: string}[] }) {
   const [leads, setLeads] = useState(initialLeads)
   const [total, setTotal] = useState(initialTotal)
   const [selectedLeadIds, setSelectedLeadIds] = useState<string[]>([])
@@ -31,6 +31,7 @@ export function LeadsTable({ initialLeads, initialTotal, statusOptions }: { init
   const [debouncedSearch, setDebouncedSearch] = useState('')
   // Default matches the server-side fetch in page.tsx
   const [selectedStatuses, setSelectedStatuses] = useState<string[]>(['NEW', 'UNREAD', 'CONTACT_ATTEMPTED'])
+  const [selectedSource, setSelectedSource] = useState<string>('')
   const isInitialMount = useRef(true)
 
   // Debounce search
@@ -48,7 +49,7 @@ export function LeadsTable({ initialLeads, initialTotal, statusOptions }: { init
       const sortBy = sortColumn || 'created_at'
       const order = sortDirection || 'desc'
       const statusParam = selectedStatuses.length > 0 ? selectedStatuses.join(',') : ''
-      const response = await getPaginatedLeads(currentPage, pageSize, sortBy, order, debouncedSearch, '', statusParam)
+      const response = await getPaginatedLeads(currentPage, pageSize, sortBy, order, debouncedSearch, selectedSource, statusParam)
       if (response && response.data) {
         setLeads(response.data)
         setTotal(response.total || 0)
@@ -68,7 +69,7 @@ export function LeadsTable({ initialLeads, initialTotal, statusOptions }: { init
     fetchLeads()
     // Reset selected leads on fetch to avoid acting on invisible leads
     setSelectedLeadIds([])
-  }, [currentPage, pageSize, sortColumn, sortDirection, debouncedSearch, selectedStatuses])
+  }, [currentPage, pageSize, sortColumn, sortDirection, debouncedSearch, selectedStatuses, selectedSource])
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
 
@@ -160,8 +161,49 @@ export function LeadsTable({ initialLeads, initialTotal, statusOptions }: { init
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
-        <div className="w-full sm:w-auto flex items-center gap-2">
-          <span className="text-sm text-gray-600 whitespace-nowrap">Status Filter:</span>
+        <div className="w-full sm:w-auto flex flex-wrap items-center gap-2">
+          {sourceOptions.length > 0 && (
+            <DropdownMenu>
+              <DropdownMenuTrigger className={buttonVariants({ variant: "outline", size: "sm" }) + " h-[38px] border-gray-300 w-full sm:w-auto justify-between"}>
+                <div className="flex items-center">
+                  <Filter className="w-4 h-4 mr-2 text-gray-500" />
+                  {selectedSource ? sourceOptions.find(s => s.value === selectedSource)?.label || 'All Sources' : 'All Sources'}
+                </div>
+                <ChevronDown className="w-4 h-4 ml-2 opacity-50" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-[200px]">
+                <DropdownMenuGroup>
+                  <DropdownMenuLabel>Filter by Source</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuCheckboxItem
+                    checked={selectedSource === ''}
+                    onCheckedChange={() => {
+                      setSelectedSource('')
+                      setCurrentPage(1)
+                    }}
+                  >
+                    All Sources
+                  </DropdownMenuCheckboxItem>
+                  <DropdownMenuSeparator />
+                  <div className="max-h-[300px] overflow-y-auto">
+                    {sourceOptions.map(opt => (
+                      <DropdownMenuCheckboxItem
+                        key={opt.value}
+                        checked={selectedSource === opt.value}
+                        onCheckedChange={() => {
+                          setSelectedSource(opt.value)
+                          setCurrentPage(1)
+                        }}
+                      >
+                        {opt.label}
+                      </DropdownMenuCheckboxItem>
+                    ))}
+                  </div>
+                </DropdownMenuGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+
           <DropdownMenu>
             <DropdownMenuTrigger className={buttonVariants({ variant: "outline", size: "sm" }) + " h-[38px] border-gray-300 w-full sm:w-auto justify-between"}>
               <div className="flex items-center">

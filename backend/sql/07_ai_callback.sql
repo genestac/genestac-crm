@@ -1,2 +1,0 @@
-ALTER TABLE public.leads 
-ADD COLUMN IF NOT EXISTS ai_callback_time TIMESTAMP WITH TIME ZONE;

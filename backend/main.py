@@ -41,6 +41,8 @@ app.add_middleware(
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(sales.router, prefix="/api/sales", tags=["sales"])
 app.include_router(doctor.router, prefix="/api/doctor", tags=["doctor"])
+from api.admin import whatsapp
+app.include_router(whatsapp.router, prefix="/api/admin/whatsapp", tags=["admin-whatsapp"])
 app.include_router(staffs.router, prefix="/api/admin/staffs", tags=["admin-staffs"])
 app.include_router(roles.router, prefix="/api/admin/roles", tags=["admin-roles"])
 app.include_router(crm_settings.router, prefix="/api/admin/crm-settings", tags=["admin-crm"])

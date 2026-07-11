@@ -129,7 +129,7 @@ async def get_metrics(current_user: dict=Depends(get_current_user), supabase: Cl
     sources_count = {}
     for lead in all_leads_data:
         src = lead.get('user_sources')
-        src_name = src.get('name') if src else 'Others'
+        src_name = src.get('name') if src else 'Unknown Source'
         sources_count[src_name] = sources_count.get(src_name, 0) + 1
     sorted_sources = sorted(sources_count.items(), key=lambda x: x[1], reverse=True)
     topLeadSources = []

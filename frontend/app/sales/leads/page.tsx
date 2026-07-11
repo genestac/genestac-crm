@@ -8,6 +8,7 @@ export default async function MyLeadsPage() {
   let total: number = 0
   let errorMessage: string | null = null
   let statusOptions: { value: string, label: string }[] = []
+  let sourceOptions: { value: string, label: string }[] = []
 
   try {
     const cookieHeader = (await cookies()).toString()
@@ -21,6 +22,13 @@ export default async function MyLeadsPage() {
       headers: { Cookie: cookieHeader }
     }).catch(() => null)
     
+    const metaResponse = await fetchAPI('/api/sales/metadata', {
+      headers: { Cookie: cookieHeader }
+    }).catch(() => null)
+    
+    if (metaResponse?.sources) {
+      sourceOptions = metaResponse.sources.map((s: any) => ({ value: s.id, label: s.name }))
+    }
     if (settingsResponse?.data?.lead_statuses) {
       statusOptions = settingsResponse.data.lead_statuses
     } else {
@@ -59,7 +67,7 @@ export default async function MyLeadsPage() {
             <p className="mt-1 text-red-500">{errorMessage}</p>
           </div>
         ) : (
-          <LeadsTable initialLeads={leads} initialTotal={total} statusOptions={statusOptions} />
+          <LeadsTable initialLeads={leads} initialTotal={total} statusOptions={statusOptions} sourceOptions={sourceOptions} />
         )}
       </div>
     </div>
