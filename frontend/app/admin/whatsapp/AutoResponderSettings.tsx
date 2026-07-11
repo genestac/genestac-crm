@@ -62,7 +62,7 @@ export function AutoResponderSettings({ templates }: { templates: any[] }) {
         {enabled && (
           <div className="space-y-2 mt-4 max-w-md">
             <Label>Select Template</Label>
-            <Select value={templateId} onValueChange={setTemplateId}>
+            <Select value={templateId} onValueChange={(val) => setTemplateId(val || '')}>
               <SelectTrigger>
                 <SelectValue placeholder="Select a welcome template" />
               </SelectTrigger>

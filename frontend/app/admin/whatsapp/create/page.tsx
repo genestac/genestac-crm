@@ -23,7 +23,8 @@ export default async function CreateCampaignPage({ searchParams }: { searchParam
   
   // If edit or retrigger, fetch the campaign to prefill the form
   let initialCampaign = null
-  const campaignId = searchParams?.edit || searchParams?.retrigger
+  const resolvedParams = await searchParams
+  const campaignId = resolvedParams?.edit || resolvedParams?.retrigger
   if (campaignId) {
     // We can fetch the campaigns list and find it, or write a getCampaign function.
     // Let's just fetch all and find it for simplicity, since campaigns are already paginated/fetched.
