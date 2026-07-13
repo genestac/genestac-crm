@@ -10,12 +10,13 @@ async def list_staffs(
     current_user: dict = Depends(get_current_user),
     supabase: Client = Depends(get_supabase_client)
 ):
-    # Fetch profiles that have staff roles
-    staff_roles = ["superadmin", "master_admin", "admin", "sales_rep", "doctor", "inventory_manager", "logistics_manager", "support", "staff", "sales"]
-    res = supabase.table("staffs").select("id, full_name, email, phone, address, city, state, pincode, date_of_birth, gender, avatar_url, is_active, roles!inner(name), created_at").in_("roles.name", staff_roles).order("created_at", desc=True).execute()
+    # Fetch ALL staff profiles regardless of role — no whitelist so custom roles are included
+    res = supabase.table("staffs").select(
+        "id, full_name, email, phone, address, city, state, pincode, date_of_birth, gender, avatar_url, is_active, roles(name), created_at"
+    ).order("created_at", desc=True).execute()
     # Fetch all roles
     roles_res = supabase.table("roles").select("id, name").order("name").execute()
-    
+
     return {"profiles": res.data, "roles": roles_res.data}
 
 @router.get("/me")

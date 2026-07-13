@@ -18,6 +18,8 @@ export default async function Home() {
     redirect('/doctor')
   } else if (role === 'sales' || role === 'manager' || role === 'support') {
     redirect('/sales')
+  } else if (role === 'digital_marketing') {
+    redirect('/digital-marketing')
   } else {
     redirect('/auth?error=norole')
   }

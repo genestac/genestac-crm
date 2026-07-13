@@ -1,9 +1,15 @@
 import os
 import datetime
+import httpx
+import httpcore
 from apscheduler.schedulers.background import BackgroundScheduler
 from db.supabase import get_supabase_client
 from supabase import Client
 from services.exotel_service import initiate_ai_call, bridge_doctor_and_customer
+
+# Network errors that indicate a transient DNS / connectivity issue in Docker.
+# We silence these to a single warning line instead of a full traceback.
+_NETWORK_ERRORS = (httpx.ConnectError, httpcore.ConnectError, httpx.TimeoutException, ConnectionError)
 
 scheduler = BackgroundScheduler()
 
@@ -149,6 +155,8 @@ def sweep_leads_for_auto_call():
                 if call_log_id:
                     supabase.table("ai_call_logs").update({"status": "failed_to_initiate"}).eq("id", call_log_id).execute()
 
+    except _NETWORK_ERRORS as e:
+        print(f"[AI Voice Scheduler] ⚠️  Network unavailable (DNS?), skipping sweep: {type(e).__name__}")
     except Exception as e:
         import traceback
         print(f"[AI Voice Scheduler Error]: {e}")
@@ -277,6 +285,8 @@ def sweep_scheduled_appointments():
                     "notes": existing_notes  # remove the marker
                 }).eq("id", appt_id).execute()
 
+    except _NETWORK_ERRORS as e:
+        print(f"[Appointment Scheduler] ⚠️  Network unavailable (DNS?), skipping sweep: {type(e).__name__}")
     except Exception as e:
         import traceback
         print(f"[Appointment Scheduler Error]: {e}")
@@ -342,6 +352,8 @@ def sweep_whatsapp_campaigns():
             supabase.table("whatsapp_campaigns").update({"status": "COMPLETED"}).eq("id", campaign_id).execute()
             print(f"[WhatsApp Scheduler] ✅ Completed campaign {campaign_id}")
             
+    except _NETWORK_ERRORS as e:
+        print(f"[WhatsApp Scheduler] ⚠️  Network unavailable (DNS?), skipping sweep: {type(e).__name__}")
     except Exception as e:
         import traceback
         print(f"[WhatsApp Scheduler Error]: {e}")

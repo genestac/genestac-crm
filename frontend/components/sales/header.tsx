@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Bell, User, RefreshCw, LayoutDashboard, ChevronDown, ShoppingBag, Settings } from 'lucide-react'
+import { Bell, User, RefreshCw, LayoutDashboard, ChevronDown, ShoppingBag, Settings, Megaphone } from 'lucide-react'
 import { ThemeToggle } from '@/components/theme-toggle'
 import {
   DropdownMenu,
@@ -64,6 +64,13 @@ export function SalesHeader({ role }: { role?: string }) {
                 >
                   <Settings className="w-4 h-4" />
                   Admin Dashboard
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className="flex items-center gap-2"
+                  onClick={() => router.push('/digital-marketing')}
+                >
+                  <Megaphone className="w-4 h-4" />
+                  Digital Marketing
                 </DropdownMenuItem>
               </DropdownMenuGroup>
             </DropdownMenuContent>

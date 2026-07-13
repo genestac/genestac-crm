@@ -4,7 +4,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from core.config import settings
 from api import sales, auth, doctor
-from api.admin import staffs, roles, crm_settings, logs, lead_assignment, coupons, metrics, ai_settings
+from api.admin import staffs, roles, crm_settings, logs, lead_assignment, coupons, metrics, ai_settings, blogs
 from api import public
 
 from core.scheduler import start_scheduler
@@ -51,6 +51,7 @@ app.include_router(lead_assignment.router, prefix="/api/admin/lead-assignment", 
 app.include_router(coupons.router, prefix="/api/admin/coupons", tags=["admin-coupons"])
 app.include_router(metrics.router, prefix="/api/admin/metrics", tags=["admin-metrics"])
 app.include_router(ai_settings.router, prefix="/api/admin/ai-settings", tags=["admin-ai-settings"])
+app.include_router(blogs.router, prefix="/api/admin/blogs", tags=["admin-blogs"])
 
 from api.webhooks import voice_stream, conference
 app.include_router(voice_stream.router, prefix="/api/webhooks/exotel", tags=["webhooks-exotel"])
