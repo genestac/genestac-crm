@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { FileText, MessageSquare, PhoneCall, FileBox, Plus, Variable } from 'lucide-react'
+import { useSearchParams, usePathname, useRouter } from 'next/navigation'
 
 export default function TemplatesPage() {
   const searchParams = useSearchParams()
