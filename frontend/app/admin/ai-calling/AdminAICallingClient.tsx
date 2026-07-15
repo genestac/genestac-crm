@@ -41,6 +41,16 @@ function CallStatusBadge({ status }: { status: string }) {
   )
 }
 
+function CrmStatusBadge({ status }: { status: string | undefined | null }) {
+  if (!status) return null
+  const formatted = status.replace(/_/g, ' ')
+  return (
+    <span className="inline-flex items-center px-2 py-0.5 rounded border bg-purple-50 text-purple-700 border-purple-200 text-[10px] font-bold uppercase tracking-wider">
+      {formatted}
+    </span>
+  )
+}
+
 // ─── Single call log row ─────────────────────────────────────────────────────
 function CallLogRow({ log }: { log: any }) {
   const [open, setOpen] = useState(false)
@@ -65,6 +75,7 @@ function CallLogRow({ log }: { log: any }) {
             <span className="font-semibold text-gray-900">{leadName}</span>
             {leadPhone && <span className="text-xs text-gray-400">{leadPhone}</span>}
             <CallStatusBadge status={log.status} />
+            <CrmStatusBadge status={log.leads?.crm_status} />
             <LeadScoreBadge score={log.lead_score} label={log.score_label} />
           </div>
           <p className="text-xs text-gray-400 mt-0.5">{date}</p>
@@ -491,10 +502,10 @@ export function AdminAICallingClient({ initialSettings, initialKnowledgeBase, in
           {/* Stats row */}
           <div className="grid grid-cols-4 gap-4">
             {[
-              { label: 'Total Calls',  value: totalCount,     color: 'text-gray-900',   bg: 'bg-white' },
-              { label: 'Completed',    value: completedCount, color: 'text-green-700',  bg: 'bg-green-50' },
+              { label: 'Total Logs',   value: totalCount,     color: 'text-gray-900',   bg: 'bg-white' },
+              { label: 'Success / Picked Up', value: completedCount, color: 'text-green-700',  bg: 'bg-green-50' },
               { label: 'Failed',       value: failedCount,    color: 'text-red-700',    bg: 'bg-red-50' },
-              { label: '🔥 Hot Leads', value: hotCount,       color: 'text-orange-700', bg: 'bg-orange-50' },
+              { label: 'In Queue',     value: callQueue.length, color: 'text-indigo-700', bg: 'bg-indigo-50' },
             ].map(s => (
               <div key={s.label} className={`${s.bg} rounded-xl border p-5 shadow-sm`}>
                 <p className="text-xs text-gray-500 font-medium">{s.label}</p>
@@ -536,6 +547,21 @@ export function AdminAICallingClient({ initialSettings, initialKnowledgeBase, in
       {/* ── Call Queue Tab ── */}
       {activeTab === 'queue' && (
         <div className="space-y-6">
+          {/* Stats row for Queue tab as requested */}
+          <div className="grid grid-cols-4 gap-4">
+            {[
+              { label: 'Total Campaign Calls', value: totalCount + callQueue.length, color: 'text-gray-900', bg: 'bg-white' },
+              { label: 'Success / Picked Up',  value: completedCount, color: 'text-green-700',  bg: 'bg-green-50' },
+              { label: 'Failed',               value: failedCount,    color: 'text-red-700',    bg: 'bg-red-50' },
+              { label: 'In Queue (Pending)',   value: callQueue.length, color: 'text-indigo-700', bg: 'bg-indigo-50' },
+            ].map(s => (
+              <div key={s.label} className={`${s.bg} rounded-xl border p-5 shadow-sm`}>
+                <p className="text-xs text-gray-500 font-medium">{s.label}</p>
+                <p className={`text-3xl font-bold mt-1 ${s.color}`}>{logsLoading || queueLoading ? '—' : s.value}</p>
+              </div>
+            ))}
+          </div>
+
           <div className="flex items-center justify-between">
             <div>
               <h2 className="text-lg font-semibold text-gray-900">Upcoming Calls</h2>
@@ -579,9 +605,10 @@ export function AdminAICallingClient({ initialSettings, initialKnowledgeBase, in
                 >
                   <GripVertical className="w-5 h-5 text-gray-400" />
                   <div className="flex-1">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-semibold text-gray-900">{item.leads?.name || 'Unknown'}</span>
                       {item.leads?.phone && <span className="text-xs text-gray-500">{item.leads.phone}</span>}
+                      <CrmStatusBadge status={item.leads?.crm_status} />
                     </div>
                     <p className="text-xs text-gray-400 mt-1">
                       Added: {new Date(item.created_at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}

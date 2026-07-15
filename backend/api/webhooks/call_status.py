@@ -56,6 +56,29 @@ async def exotel_call_status(
                         "type": "call",
                         "content": content
                     }).execute()
+
+                    # Also update ai_call_logs if this was an AI voice call
+                    if CallSid:
+                        log_res = supabase.table("ai_call_logs").select("id, status").eq("call_sid", CallSid).execute()
+                        if log_res.data:
+                            current_status = log_res.data[0]["status"]
+                            exotel_status = Status.lower() if Status else "completed"
+                            update_data = {}
+                            if exotel_status in ["no-answer", "canceled", "failed", "busy"]:
+                                mapped_status = exotel_status.replace("-", "_")
+                                if mapped_status == "canceled":
+                                    mapped_status = "no_answer"
+                                update_data["status"] = mapped_status
+                                
+                                # Update CRM lead status to 'CONTACT_ATTEMPTED' since they didn't pick up
+                                supabase.table("users").update({"status": "CONTACT_ATTEMPTED"}).eq("id", target_id).execute()
+                                supabase.table("leads").update({"status": "CONTACT_ATTEMPTED"}).eq("id", target_id).execute()
+                                
+                            elif exotel_status == "completed" and current_status in ["ringing", "initiating"]:
+                                update_data["status"] = "completed"
+                            
+                            if update_data:
+                                supabase.table("ai_call_logs").update(update_data).eq("id", log_res.data[0]["id"]).execute()
             except Exception as e:
                 logger.error(f"[Exotel Webhook] Failed to log missed call: {e}")
     else:

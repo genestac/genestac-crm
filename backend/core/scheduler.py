@@ -118,11 +118,17 @@ def sweep_leads_for_auto_call():
             {"id": l["id"], "phone": l.get("phone")} for l in leads_from_users if l.get("phone") and l["id"] not in {x["id"] for x in leads_from_leads}
         ]
 
+        # Fetch current queue
+        import uuid
+        q_res = supabase.table("global_settings").select("settings_value").eq("settings_key", "ai_call_queue").execute()
+        queue = q_res.data[0]["settings_value"] if q_res.data else []
+        queued_lead_ids = {item["lead_id"] for item in queue if "lead_id" in item}
+
+        new_items = []
         for lead in all_leads:
             lead_id = lead["id"]
             phone = lead["phone"]
-
-            if not phone:
+            if not phone or lead_id in queued_lead_ids:
                 continue
 
             # Skip if max 3 lifetime calls already made
@@ -137,23 +143,53 @@ def sweep_leads_for_auto_call():
             if len(today_logs.data) > 0:
                 continue
 
-            print(f"[AI Voice Scheduler] Triggering auto-call for lead {lead_id} ({phone})")
-
-            log_res = supabase.table("ai_call_logs").insert({
+            new_items.append({
+                "id": str(uuid.uuid4()),
                 "lead_id": lead_id,
-                "status": "initiating"
-            }).execute()
-            call_log_id = log_res.data[0]["id"] if log_res.data else None
+                "status": "pending",
+                "created_at": datetime.datetime.now().isoformat()
+            })
+            queued_lead_ids.add(lead_id)
 
-            exotel_res = initiate_ai_call(from_number=exotel_number, to_number=phone, lead_id=lead_id)
+        # Add new items to queue and save
+        if new_items:
+            print(f"[AI Voice Scheduler] Adding {len(new_items)} leads to the call queue.")
+            queue.extend(new_items)
+            supabase.table("global_settings").upsert({"settings_key": "ai_call_queue", "settings_value": queue}, on_conflict="settings_key").execute()
 
-            if exotel_res and "Call" in exotel_res:
-                call_sid = exotel_res["Call"].get("Sid")
-                if call_log_id:
-                    supabase.table("ai_call_logs").update({"call_sid": call_sid, "status": "ringing"}).eq("id", call_log_id).execute()
+        # Process the first item in the queue (if any)
+        if queue:
+            next_call = queue.pop(0)
+            lead_id = next_call["lead_id"]
+            
+            # Fetch phone number
+            lead_res = supabase.table("leads").select("phone_number").eq("id", lead_id).execute()
+            if lead_res.data and lead_res.data[0].get("phone_number"):
+                phone = lead_res.data[0]["phone_number"]
             else:
-                if call_log_id:
-                    supabase.table("ai_call_logs").update({"status": "failed_to_initiate"}).eq("id", call_log_id).execute()
+                user_res = supabase.table("users").select("phone").eq("id", lead_id).execute()
+                phone = user_res.data[0].get("phone") if user_res.data else None
+
+            if phone:
+                print(f"[AI Voice Scheduler] Popped queue, triggering call for lead {lead_id} ({phone})")
+                log_res = supabase.table("ai_call_logs").insert({
+                    "lead_id": lead_id,
+                    "status": "initiating"
+                }).execute()
+                call_log_id = log_res.data[0]["id"] if log_res.data else None
+
+                exotel_res = initiate_ai_call(from_number=exotel_number, to_number=phone, lead_id=lead_id)
+
+                if exotel_res and "Call" in exotel_res:
+                    call_sid = exotel_res["Call"].get("Sid")
+                    if call_log_id:
+                        supabase.table("ai_call_logs").update({"call_sid": call_sid, "status": "ringing"}).eq("id", call_log_id).execute()
+                else:
+                    if call_log_id:
+                        supabase.table("ai_call_logs").update({"status": "failed_to_initiate"}).eq("id", call_log_id).execute()
+            
+            # Save the queue with the item removed
+            supabase.table("global_settings").upsert({"settings_key": "ai_call_queue", "settings_value": queue}, on_conflict="settings_key").execute()
 
     except _NETWORK_ERRORS as e:
         print(f"[AI Voice Scheduler] ⚠️  Network unavailable (DNS?), skipping sweep: {type(e).__name__}")
@@ -364,7 +400,7 @@ def sweep_whatsapp_campaigns():
 def start_scheduler():
     if not scheduler.running:
         # Sweep for auto-calls and pending callbacks every 5 minutes
-        scheduler.add_job(sweep_leads_for_auto_call, 'interval', minutes=5, id="ai_voice_sweep", replace_existing=True)
+        scheduler.add_job(sweep_leads_for_auto_call, 'interval', minutes=1, id="ai_voice_sweep", replace_existing=True)
         # Sweep for scheduled appointments every 1 minute and trigger Exotel bridge calls
         scheduler.add_job(sweep_scheduled_appointments, 'interval', minutes=1, id="appointment_call_sweep", replace_existing=True)
         # Sweep for WhatsApp Campaigns every 1 minute

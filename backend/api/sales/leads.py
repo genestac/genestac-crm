@@ -60,20 +60,60 @@ async def create_lead(background_tasks: BackgroundTasks, phone: str=Form(...), n
     for k, v in optional_fields.items():
         if v is not None and v != '':
             payload[k] = v
-    res = None
-    if email and phone:
-        res = supabase.table('users').select('*').or_(f'email.eq.{email},phone.eq.{phone}').execute()
+    res_users = None
+    res_leads = None
+    
+    # Clean phone for checking
+    clean_phone = phone.replace(' ', '').replace('+', '').replace('-', '') if phone else None
+    
+    if email and clean_phone:
+        res_users = supabase.table('users').select('*').or_(f'email.eq.{email},phone.ilike.%{clean_phone}%').execute()
+        res_leads = supabase.table('leads').select('*').or_(f'email.eq.{email},phone_number.ilike.%{clean_phone}%').execute()
     elif email:
-        res = supabase.table('users').select('*').eq('email', email).execute()
+        res_users = supabase.table('users').select('*').eq('email', email).execute()
+        res_leads = supabase.table('leads').select('*').eq('email', email).execute()
     else:
-        res = supabase.table('users').select('*').eq('phone', phone).execute()
-    if res and res.data:
-        existing_user = res.data[0]
+        res_users = supabase.table('users').select('*').ilike('phone', f'%{clean_phone}%').execute()
+        res_leads = supabase.table('leads').select('*').ilike('phone_number', f'%{clean_phone}%').execute()
+
+    existing_record = None
+    table_type = 'users'
+    if res_users and res_users.data:
+        existing_record = res_users.data[0]
+        table_type = 'users'
+    elif res_leads and res_leads.data:
+        existing_record = res_leads.data[0]
+        table_type = 'leads'
+
+    if existing_record:
         import json
+        from datetime import datetime, timezone
+        
+        # 1. Update the existing record with the new payload data
+        update_payload = dict(payload)
+        update_payload['updated_at'] = datetime.now(timezone.utc).isoformat()
+        
+        if table_type == 'leads' and 'phone' in update_payload:
+            update_payload['phone_number'] = update_payload.pop('phone')
+            
         details_str = json.dumps(payload, indent=2)
-        note_content = f'**Duplicate Submission Received**\n\nWe received a new lead submission with these details but matching this existing record:\n```json\n{details_str}\n```'
-        supabase.table('user_notes').insert({'user_id': existing_user['id'], 'author_id': current_user['id'], 'content': note_content}).execute()
-        return {'message': 'Duplicate submission added as note', 'data': [existing_user]}
+        note_content = f'**Re-Submitted Form**\n\nThe lead submitted the form again with these details:\n```json\n{details_str}\n```'
+        
+        try:
+            # Update record in DB to bump to top and merge new data
+            update_res = supabase.table(table_type).update(update_payload).eq('id', existing_record['id']).execute()
+            updated_record = update_res.data[0] if update_res.data else existing_record
+            
+            # Add timeline note
+            if table_type == 'users':
+                supabase.table('user_notes').insert({'user_id': existing_record['id'], 'author_id': current_user['id'], 'content': note_content}).execute()
+            else:
+                supabase.table('user_notes').insert({'lead_id': existing_record['id'], 'author_id': current_user['id'], 'content': note_content}).execute()
+        except Exception as e:
+            print("Error updating duplicate lead:", e)
+            updated_record = existing_record
+            
+        return {'message': 'Existing lead updated successfully', 'data': [updated_record]}
     else:
         response = supabase.table('users').insert(payload).execute()
         
@@ -184,10 +224,32 @@ async def get_leads(statuses: Optional[str]=Query(None), exclude_statuses: Optio
             print(f'Skipping leads table fetch (may not exist): {e}')
         combined = users_data + leads_data
         
-        # Dynamic sorting
-        sort_key = sort_by if sort_by else 'created_at'
+        # Dynamic sorting (we sort BEFORE deduplicating to keep the most recent record)
+        sort_key = sort_by if sort_by else 'updated_at'
         is_reverse = True if sort_order.lower() == 'desc' else False
         combined.sort(key=lambda x: x.get(sort_key, '') or '', reverse=is_reverse)
+
+        # Deduplicate to fix the issue where leads exist in both tables or multiple times
+        seen_identifiers = set()
+        deduped_combined = []
+        for item in combined:
+            phone_val = str(item.get('phone') or item.get('phone_number') or '')
+            email_val = str(item.get('email') or '').lower().strip()
+            
+            # Extract last 10 digits of phone for a strict unique match
+            clean_phone = ''.join(filter(str.isdigit, phone_val))[-10:] if phone_val else ''
+            
+            # Use either phone or email as the unique identifier
+            identifier = clean_phone if clean_phone else email_val
+            
+            if identifier:
+                if identifier in seen_identifiers:
+                    continue # Skip this duplicate
+                seen_identifiers.add(identifier)
+            
+            deduped_combined.append(item)
+            
+        combined = deduped_combined
         
         total_count = len(combined)
         start_idx = (page - 1) * limit

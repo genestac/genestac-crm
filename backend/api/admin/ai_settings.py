@@ -144,7 +144,7 @@ async def get_all_call_logs(
         if lead_ids:
             leads_res = (
                 supabase.table("leads")
-                .select("id, name, phone_number")
+                .select("id, name, phone_number, status")
                 .in_("id", lead_ids)
                 .execute()
             )
@@ -155,7 +155,7 @@ async def get_all_call_logs(
             if missing_ids:
                 users_res = (
                     supabase.table("users")
-                    .select("id, name, full_name, phone")
+                    .select("id, name, phone, status")
                     .in_("id", missing_ids)
                     .execute()
                 )
@@ -163,14 +163,19 @@ async def get_all_call_logs(
                     # Normalize the user data to match lead structure
                     lead_map[u["id"]] = {
                         "id": u["id"],
-                        "name": u.get("name") or u.get("full_name") or "Unknown",
-                        "phone_number": u.get("phone")
+                        "name": u.get("name") or "Unknown",
+                        "phone_number": u.get("phone"),
+                        "crm_status": u.get("status")
                     }
 
         # Attach lead info to each log
         for log in logs:
             lead = lead_map.get(log.get("lead_id"), {})
-            log["leads"] = {"name": lead.get("name"), "phone": lead.get("phone_number")}
+            log["leads"] = {
+                "name": lead.get("name"), 
+                "phone": lead.get("phone_number"),
+                "crm_status": lead.get("status") or lead.get("crm_status")
+            }
 
         return {"data": logs}
     except Exception as e:
@@ -192,17 +197,21 @@ async def get_ai_call_queue(
         if queue:
             lead_ids = [item["lead_id"] for item in queue if "lead_id" in item]
             if lead_ids:
-                leads_res = supabase.table("leads").select("id, name, phone_number").in_("id", lead_ids).execute()
-                users_res = supabase.table("users").select("id, name, phone").in_("id", lead_ids).execute()
+                leads_res = supabase.table("leads").select("id, name, phone_number, status").in_("id", lead_ids).execute()
+                users_res = supabase.table("users").select("id, name, phone, status").in_("id", lead_ids).execute()
                 
                 lead_map = {l["id"]: l for l in (leads_res.data or [])}
                 for u in (users_res.data or []):
                     if u["id"] not in lead_map:
-                        lead_map[u["id"]] = {"id": u["id"], "name": u["name"], "phone_number": u.get("phone")}
+                        lead_map[u["id"]] = {"id": u["id"], "name": u.get("name") or "Unknown", "phone_number": u.get("phone"), "status": u.get("status")}
                         
                 for item in queue:
                     lead = lead_map.get(item.get("lead_id"), {})
-                    item["leads"] = {"name": lead.get("name"), "phone": lead.get("phone_number")}
+                    item["leads"] = {
+                        "name": lead.get("name"), 
+                        "phone": lead.get("phone_number"),
+                        "crm_status": lead.get("status")
+                    }
                     
         return {"data": queue}
     except Exception as e:
