@@ -13,6 +13,13 @@ export async function getAppointmentById(id: string) {
   return response
 }
 
+export async function triggerAppointmentCall(id: string) {
+  const response = await fetchAPI(`/api/doctor/appointments/${id}/call`, {
+    method: 'POST',
+  })
+  return response
+}
+
 export async function updateAppointmentStatus(appointmentId: string, status: string) {
   await fetchAPI(`/api/doctor/appointments/${appointmentId}/status`, {
     method: 'PUT',
@@ -110,12 +117,21 @@ export async function fetchPatientTimeline(patientId: string) {
   return response
 }
 
-export async function addTimelineEntry(patientId: string, type: 'clinical' | 'communication', content: string) {
-  await fetchAPI(`/api/doctor/patients/${patientId}/timeline`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ type, content })
-  })
+export async function addTimelineEntry(patientId: string | null, type: 'clinical' | 'communication', content: string, appointmentId?: string) {
+  if (!patientId || patientId === 'null') {
+    if (!appointmentId) throw new Error("No appointment ID provided for note fallback");
+    await fetchAPI(`/api/doctor/appointments/${appointmentId}/notes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content })
+    })
+  } else {
+    await fetchAPI(`/api/doctor/patients/${patientId}/timeline`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type, content })
+    })
+  }
   revalidatePath('/doctor', 'layout')
   return { success: true }
 }
@@ -176,5 +192,14 @@ export async function markNotificationRead(id: string) {
     method: 'PUT',
   })
   revalidatePath('/doctor', 'layout')
+  return response
+}
+
+export async function retranscribeCall(appointmentId: string, recordingUrl: string) {
+  const response = await fetchAPI(`/api/doctor/appointments/${appointmentId}/retranscribe`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ recording_url: recordingUrl })
+  })
   return response
 }

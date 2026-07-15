@@ -1,11 +1,12 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { 
-  X, Calendar, Clock, FileText, User, 
+import {
+  X, Calendar, RefreshCw, Clock, FileText, User, 
   MapPin, Link as LinkIcon, Download,
-  Activity, Tag, CheckCircle, Plus, Receipt, ChevronLeft
+  Activity, Tag, CheckCircle, Plus, Receipt, ChevronLeft, Phone, Loader2
 } from 'lucide-react'
+import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -24,17 +25,33 @@ import {
   addTimelineEntry,
   getPlans,
   getInventory,
-  uploadPatientReport
+  uploadPatientReport,
+  triggerAppointmentCall,
+  getAppointmentById,
+  retranscribeCall
 } from '@/app/doctor/actions'
 import { PrescriptionForm } from './prescription-form'
 import { PrescriptionHistory } from './prescription-history'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams, usePathname } from 'next/navigation'
 
 export function ConsultationWorkspace({ appointment, onClose, onStatusChange }: any) {
   const router = useRouter()
-  const [activeTab, setActiveTab] = useState('details')
+  const searchParams = useSearchParams()
+  const pathname = usePathname()
+  const tabQuery = searchParams.get('tab')
+  const activeTab = tabQuery || 'details'
+  
+  const setActiveTab = (tab: string) => {
+    const params = new URLSearchParams(searchParams.toString())
+    params.set('tab', tab)
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false })
+  }
   const [loading, setLoading] = useState(false)
   const [timeline, setTimeline] = useState<{assessments: any[], communications: any[]}>({ assessments: [], communications: [] })
+  
+  const [newNote, setNewNote] = useState("")
+  const [savingNote, setSavingNote] = useState(false)
+  const [onCall, setOnCall] = useState(false)
   
   const [plans, setPlans] = useState<any[]>([])
   const [inventory, setInventory] = useState<any[]>([])
@@ -43,12 +60,67 @@ export function ConsultationWorkspace({ appointment, onClose, onStatusChange }: 
   const [discount, setDiscount] = useState(0)
 
   useEffect(() => {
-    if (appointment?.patient_id) {
+    if (appointment?.patient_id && appointment.patient_id !== 'null') {
       fetchPatientTimeline(appointment.patient_id).then(setTimeline)
     }
     getPlans().then(setPlans)
     getInventory().then(setInventory)
   }, [appointment])
+
+
+  const [retranscribing, setRetranscribing] = useState<string | null>(null)
+
+  const handleRetranscribe = async (url: string) => {
+    if (!appointment?.id) return;
+    setRetranscribing(url);
+    try {
+      await retranscribeCall(appointment.id, url);
+      toast.success("Re-transcription started in the background. It will automatically appear when finished.");
+      // We can rely on the same polling mechanism if we turn on onCall, or just wait manually.
+      // We'll set onCall to true so the polling picks it up!
+      setOnCall(true);
+    } catch (err: any) {
+      toast.error(err.message || "Failed to start re-transcription");
+      setRetranscribing(null);
+    }
+  }
+
+  // Poll for AI summary when on a call
+
+  useEffect(() => {
+    if (!onCall || !appointment?.id) return;
+    
+    const interval = setInterval(async () => {
+      try {
+        if (appointment?.patient_id && appointment.patient_id !== 'null') {
+          const freshTimeline = await fetchPatientTimeline(appointment.patient_id);
+          setTimeline(prev => {
+            // If the server has more communications, a new AI summary arrived!
+            if (freshTimeline.communications.length > prev.communications.length) {
+              setOnCall(false);
+              toast.success("Call ended. AI Call Summary generated and added to timeline!");
+              router.refresh();
+              return freshTimeline;
+            }
+            return prev;
+          });
+        } else {
+          // Fallback for unlinked appointments (AI Voice Booking)
+          const freshAppt = await getAppointmentById(appointment.id);
+          const currentLength = (appointment.notes || '').length;
+          const freshLength = (freshAppt.notes || '').length;
+          
+          if (freshAppt.notes !== appointment.notes) {
+            setOnCall(false);
+            toast.success("Call ended. AI Call Summary generated and added to timeline!");
+            router.refresh();
+          }
+        }
+      } catch (err) {}
+    }, 5000);
+    
+    return () => clearInterval(interval);
+  }, [onCall, appointment?.patient_id, appointment?.id, appointment?.notes, router]);
 
   // Form states for details
   const [details, setDetails] = useState({
@@ -60,7 +132,7 @@ export function ConsultationWorkspace({ appointment, onClose, onStatusChange }: 
     related_to: appointment.related_to || 'none',
     location: appointment.location || '',
     link: appointment.meeting_link || '',
-    description: appointment.notes || ''
+    description: (appointment.notes || '').split(/\n\n\[/)[0].replace(/\\n/g, '\n')
   })
 
   const handleSaveDetails = async () => {
@@ -71,9 +143,11 @@ export function ConsultationWorkspace({ appointment, onClose, onStatusChange }: 
         ...details,
         scheduled_at: scheduledAt
       })
-      alert("Details saved")
+      toast.success("Details saved successfully")
     } catch (e: any) {
-      alert("Error: " + e.message)
+      let msg = e.message
+      try { const parsed = JSON.parse(msg); if (parsed.detail) msg = parsed.detail } catch {}
+      toast.error("Error: " + msg)
     } finally {
       setLoading(false)
     }
@@ -95,9 +169,11 @@ export function ConsultationWorkspace({ appointment, onClose, onStatusChange }: 
         total: discounted
       })
       
-      alert(`Payment link generated: ${res.payment_link}`)
+      toast.success(`Payment link generated: ${res.payment_link}`)
     } catch (e: any) {
-      alert("Error: " + e.message)
+      let msg = e.message
+      try { const parsed = JSON.parse(msg); if (parsed.detail) msg = parsed.detail } catch {}
+      toast.error("Error: " + msg)
     } finally {
       setLoading(false)
     }
@@ -118,11 +194,70 @@ export function ConsultationWorkspace({ appointment, onClose, onStatusChange }: 
         type: file.type || 'document',
         url: dummyUrl
       })
-      alert("File uploaded successfully!")
+      toast.success("File uploaded successfully!")
     } catch (err: any) {
-      alert("Upload failed: " + err.message)
+      let msg = err.message
+      try { const parsed = JSON.parse(msg); if (parsed.detail) msg = parsed.detail } catch {}
+      toast.error("Upload failed: " + msg)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleAddNote = async () => {
+    if (!newNote.trim()) return
+    setSavingNote(true)
+    
+    // In sales CRM it handles fields too, here we just do basic text for now
+    let finalContent = newNote.trim()
+
+    try {
+      await addTimelineEntry(appointment.patient_id, 'clinical', finalContent, appointment.id)
+      toast.success("Note added successfully")
+      setNewNote("")
+      if (appointment.patient_id && appointment.patient_id !== 'null') {
+        const freshTimeline = await fetchPatientTimeline(appointment.patient_id)
+        setTimeline(freshTimeline)
+      } else {
+        // Optimistically update the UI by pushing a synthetic assessment
+        setTimeline(prev => ({
+          ...prev,
+          assessments: [{
+            created_at: new Date().toISOString(),
+            doctor_timeline_notes: finalContent,
+            staffs: { full_name: 'You', roles: { name: 'Doctor' } }
+          }, ...prev.assessments]
+        }))
+      }
+    } catch (err: any) {
+      let msg = err.message
+      try { const parsed = JSON.parse(msg); if (parsed.detail) msg = parsed.detail } catch {}
+      toast.error("Failed to add note: " + msg)
+    } finally {
+      setSavingNote(false)
+    }
+  }
+
+  const handleCallPatient = async () => {
+    if (onCall) {
+      setOnCall(false)
+      return
+    }
+    
+    setOnCall(true)
+
+    try {
+      await triggerAppointmentCall(appointment.id)
+      toast.success("Call initiated successfully! Your phone will ring shortly.")
+      // The On Call badge will stay active until the AI call summary arrives.
+    } catch (err: any) {
+      setTimeout(() => setOnCall(false), 3000)
+      let msg = err.message
+      try {
+        const parsed = JSON.parse(msg)
+        if (parsed.detail) msg = parsed.detail
+      } catch(e) {}
+      toast.error("Exotel: " + msg)
     }
   }
 
@@ -151,6 +286,18 @@ export function ConsultationWorkspace({ appointment, onClose, onStatusChange }: 
           </div>
         </div>
         <div className="flex items-center gap-3">
+            {onCall && (
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-red-50 text-red-600 rounded-full border border-red-100 animate-pulse">
+                <div className="w-2 h-2 bg-red-500 rounded-full"></div>
+                <span className="text-xs font-bold uppercase tracking-wide">On Call</span>
+              </div>
+            )}
+            <Button 
+              onClick={handleCallPatient} 
+              className={onCall ? "bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 shadow-sm" : "bg-teal-600 hover:bg-teal-700 text-white"}
+            >
+              <Phone className="w-4 h-4 mr-2" /> {onCall ? "Dismiss Call State" : "Call Patient"}
+            </Button>
             {appointment.status !== 'completed' && (
               <Button onClick={() => onStatusChange(appointment.id, 'completed')} variant="outline" className="border-teal-600 text-teal-600 hover:bg-teal-50">
                 <CheckCircle className="w-4 h-4 mr-2" /> Mark Completed
@@ -251,29 +398,138 @@ export function ConsultationWorkspace({ appointment, onClose, onStatusChange }: 
           {/* TIMELINE TAB */}
           {activeTab === 'timeline' && (
             <div className="space-y-6">
-              <div className="bg-white rounded-xl border p-4">
-                <h3 className="font-bold text-gray-900 mb-4">Add Timeline Note</h3>
-                <div className="flex gap-2">
-                  <Input placeholder="Enter a clinical note or condition..." className="flex-1" />
-                  <Button variant="outline">Add</Button>
+              <div className="space-y-3 bg-gray-50/50 p-4 rounded-xl border border-gray-100">
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs font-semibold text-gray-700 uppercase">New Clinical Note</Label>
+                </div>
+                <Textarea 
+                  value={newNote}
+                  onChange={(e) => setNewNote(e.target.value)}
+                  placeholder="Add a clinical note, observation, or assessment... (e.g. Patient showed improvement in energy levels)" 
+                  className="min-h-[100px] resize-none bg-white rounded-xl border-gray-200 transition-all hover:bg-gray-50 focus:bg-white shadow-none"
+                />
+                
+                <div className="flex justify-end items-center pt-2 border-t border-gray-100 mt-2">
+                  <Button 
+                    type="button" 
+                    size="sm" 
+                    onClick={handleAddNote}
+                    disabled={savingNote || !newNote.trim()}
+                    className="bg-teal-600 hover:bg-teal-700 text-white shadow-sm rounded-full px-5"
+                  >
+                    {savingNote ? <Loader2 className="w-3 h-3 animate-spin mr-2" /> : null}
+                    Post Note
+                  </Button>
                 </div>
               </div>
               
-              <div className="relative border-l-2 border-gray-200 ml-4 space-y-6 pb-4">
-                {[...timeline.assessments, ...timeline.communications]
-                  .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-                  .map((item, idx) => (
-                    <div key={idx} className="relative pl-6">
-                      <div className={`absolute -left-2 top-1.5 w-4 h-4 rounded-full border-2 border-white ${item.type ? 'bg-blue-500' : 'bg-teal-500'}`}></div>
-                      <div className="bg-white p-4 rounded-lg border shadow-sm">
-                        <div className="flex justify-between items-start mb-2">
-                          <span className="font-medium text-gray-900">{item.staffs?.full_name || 'Staff'} <span className="text-gray-400 text-xs">({item.staffs?.roles?.name || 'unknown'})</span></span>
-                          <span className="text-xs text-gray-400">{new Date(item.created_at).toLocaleString()}</span>
+              <div className="relative border-l-2 border-teal-500/20 ml-3 space-y-8 pb-8 mt-4">
+                {timeline.assessments.length === 0 && timeline.communications.length === 0 && !appointment.notes ? (
+                  <div className="text-center py-6 text-sm text-gray-400 italic">No notes recorded yet.</div>
+                ) : (
+                  [
+                    ...(appointment.notes ? (() => {
+                      const normalizedNotes = appointment.notes.replace(/\\n/g, '\n');
+                      const segments = normalizedNotes.split(/\n\n(?=\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}\] Note added:\n)/).filter((s: string) => s.trim() !== '▶️ Listen to Recording');
+                      const parsed: any[] = [];
+                      if (segments[0].trim()) {
+                        parsed.push({
+                          created_at: appointment.scheduled_at || new Date().toISOString(),
+                          doctor_timeline_notes: segments[0].trim(),
+                          staffs: { full_name: 'System / Appointment Notes', roles: { name: 'System' } }
+                        });
+                      }
+                      for (let i = 1; i < segments.length; i++) {
+                        const match = segments[i].match(/^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2})\] Note added:\n([\s\S]*)/);
+                        if (match) {
+                          parsed.push({
+                            created_at: new Date(match[1]).toISOString(),
+                            doctor_timeline_notes: match[2].trim(),
+                            staffs: { full_name: 'You', roles: { name: 'Doctor' } }
+                          });
+                        } else {
+                          parsed.push({
+                            created_at: appointment.scheduled_at || new Date().toISOString(),
+                            doctor_timeline_notes: "[" + segments[i].trim(),
+                            staffs: { full_name: 'System / Appointment Notes', roles: { name: 'System' } }
+                          });
+                        }
+                      }
+                      return parsed;
+                    })() : []),
+                    ...timeline.assessments, 
+                    ...timeline.communications
+                  ]
+                    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+                    .map((item, idx) => (
+                      <div key={idx} className="relative pl-6">
+                        <div className="absolute -left-[9px] top-1.5 w-4 h-4 bg-gradient-to-r from-teal-400 to-cyan-500 rounded-full border-4 border-white shadow-sm"></div>
+                        <div className="bg-gray-50/50 rounded-xl transition-all hover:bg-gray-50 shadow-sm border border-gray-100 p-4">
+                          <div className="flex justify-between items-start mb-2">
+                            <span className="text-xs font-semibold text-gray-900 uppercase tracking-wide">
+                              {item.staffs?.full_name || 'Staff'} <span className="text-gray-400 font-normal lowercase tracking-normal">({item.staffs?.roles?.name || 'unknown'})</span>
+                            </span>
+                            <span className="text-[10px] font-medium text-gray-400 whitespace-nowrap bg-white px-2 py-1 rounded-full border border-gray-100 shadow-sm">
+                              {new Date(item.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          </div>
+                          <div className="text-gray-700 text-sm whitespace-pre-wrap leading-relaxed mt-3">
+                            {(() => {
+                              const rawText = item.content || item.doctor_timeline_notes || ""
+                              const [mainText, transcriptText] = rawText.split("||TRANSCRIPT||")
+                              
+                              const renderText = (text: string) => {
+                                const parts = text.split(/(\[.*?\]\(.*?\))/g)
+                                return parts.map((part, i) => {
+                                  const match = part.match(/\[(.*?)\]\((.*?)\)/)
+                                  if (match) {
+                                    const isRecording = match[1].includes('Listen to Recording') && match[2].includes('http');
+                                    return (
+                                      <span key={`link-${i}`} className="inline-flex items-center gap-2">
+                                        <a href={match[2]} target="_blank" rel="noreferrer" className="text-teal-600 hover:text-teal-700 hover:underline font-semibold transition-colors bg-teal-50 px-1 rounded">{match[1]}</a>
+                                        {isRecording && (
+                                          <Button 
+                                            variant="outline" 
+                                            size="sm" 
+                                            className="h-6 text-xs bg-white"
+                                            onClick={(e) => {
+                                              e.preventDefault();
+                                              handleRetranscribe(match[2]);
+                                            }}
+                                            disabled={retranscribing === match[2]}
+                                          >
+                                            {retranscribing === match[2] ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <RefreshCw className="w-3 h-3 mr-1" />}
+                                            Re-Summarize
+                                          </Button>
+                                        )}
+                                      </span>
+                                    )
+                                  }
+                                  return <span key={`text-${i}`}>{part}</span>
+                                })
+                              }
+
+                              return (
+                                <>
+                                  {renderText(mainText)}
+                                  {transcriptText && (
+                                    <details className="mt-4 border rounded-md p-3 bg-gray-50/50">
+                                      <summary className="font-semibold text-teal-700 cursor-pointer hover:text-teal-800 transition-colors">
+                                        View Full Transcript
+                                      </summary>
+                                      <div className="mt-3 text-sm text-gray-600 border-t pt-2 whitespace-pre-wrap italic">
+                                        {renderText(transcriptText.trim())}
+                                      </div>
+                                    </details>
+                                  )}
+                                </>
+                              )
+                            })()}
+                          </div>
                         </div>
-                        <p className="text-gray-700 text-sm">{item.content || item.doctor_timeline_notes}</p>
                       </div>
-                    </div>
-                ))}
+                  ))
+                )}
               </div>
             </div>
           )}
@@ -379,14 +635,7 @@ export function ConsultationWorkspace({ appointment, onClose, onStatusChange }: 
               </label>
               
               <div className="grid gap-4 md:grid-cols-2">
-                {/* Dummy previous reports */}
-                <div className="bg-white p-4 rounded-lg border flex items-center gap-4">
-                  <div className="w-10 h-10 bg-red-100 text-red-600 rounded flex items-center justify-center font-bold">PDF</div>
-                  <div>
-                    <p className="font-medium text-sm text-gray-900">Blood Test Results.pdf</p>
-                    <p className="text-xs text-gray-500">Uploaded 2 days ago</p>
-                  </div>
-                </div>
+                {/* Reports will be loaded here */}
               </div>
             </div>
           )}

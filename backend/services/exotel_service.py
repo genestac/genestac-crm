@@ -74,6 +74,8 @@ def initiate_ai_call(from_number: str, to_number: str, lead_id: str):
 def bridge_doctor_and_customer(
     doctor_phone: str,
     customer_phone: str,
+    base_url: str = "",
+    custom_field: str = "",
 ) -> bool:
     """
     Uses Exotel's connect.json click-to-call bridge to connect doctor and customer.
@@ -95,7 +97,7 @@ def bridge_doctor_and_customer(
 
     if not all([sid, token, api_key, number]):
         logger.error("[Doctor Bridge] Missing Exotel credentials — cannot bridge.")
-        return False
+        return {"success": False, "error": "Missing Exotel credentials."}
 
     # Ensure phone numbers have country code
     if customer_phone and not customer_phone.startswith("+"):
@@ -107,8 +109,17 @@ def bridge_doctor_and_customer(
         "CallerId": number,         # Our Exotel number shown as caller ID to both parties
         "To": customer_phone,       # After doctor answers, Exotel calls customer & bridges
         "Record": "true",
-        "StatusCallback": "",       # Optional — can add callback for call events
     }
+    
+    if custom_field:
+        payload["CustomField"] = str(custom_field)
+        callback_url = f"{base_url.rstrip('/')}/api/webhooks/exotel/call-status?appointment_id={custom_field}"
+    else:
+        callback_url = f"{base_url.rstrip('/')}/api/webhooks/exotel/call-status"
+
+    if base_url:
+        payload["StatusCallback"] = callback_url
+
 
     logger.warning(
         f"[Doctor Bridge] Initiating bridge via connect.json: "
@@ -117,14 +128,32 @@ def bridge_doctor_and_customer(
     try:
         resp = requests.post(url, data=payload, timeout=10)
         logger.warning(f"[Doctor Bridge] Response HTTP {resp.status_code}: {resp.text[:500]}")
+        
+        if resp.status_code != 200:
+            error_msg = "Failed to initiate call via Exotel."
+            try:
+                data = resp.json()
+                if "RestException" in data and "Message" in data["RestException"]:
+                    error_msg = data["RestException"]["Message"]
+            except Exception:
+                pass
+            return {"success": False, "error": error_msg}
+            
         resp.raise_for_status()
         logger.warning(f"[Doctor Bridge] ✅ Bridge call initiated successfully")
-        return True
+        return {"success": True, "error": None}
     except Exception as e:
         logger.error(f"[Doctor Bridge] ❌ Failed to initiate bridge: {e}")
+        error_msg = str(e)
         if hasattr(e, "response") and e.response is not None:
             logger.error(f"[Doctor Bridge] Error body: {e.response.text[:500]}")
-        return False
+            try:
+                data = e.response.json()
+                if "RestException" in data and "Message" in data["RestException"]:
+                    error_msg = data["RestException"]["Message"]
+            except Exception:
+                pass
+        return {"success": False, "error": error_msg}
 
 
 def redirect_customer_to_doctor(

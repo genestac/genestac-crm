@@ -84,7 +84,9 @@ export function DoctorHeader() {
             )}
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-80 max-h-96 overflow-y-auto">
-            <DropdownMenuLabel>Notifications</DropdownMenuLabel>
+            <DropdownMenuGroup>
+              <DropdownMenuLabel>Notifications</DropdownMenuLabel>
+            </DropdownMenuGroup>
             <DropdownMenuSeparator />
             {notifications.length === 0 ? (
               <div className="p-4 text-center text-sm text-muted-foreground">No new notifications</div>

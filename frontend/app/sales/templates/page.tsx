@@ -5,7 +5,17 @@ import { Button } from '@/components/ui/button'
 import { FileText, MessageSquare, PhoneCall, FileBox, Plus, Variable } from 'lucide-react'
 
 export default function TemplatesPage() {
-  const [activeTab, setActiveTab] = useState('COMMUNICATION')
+  const searchParams = useSearchParams()
+  const pathname = usePathname()
+  const router = useRouter()
+  const tabQuery = searchParams.get('tab')
+  const activeTab = tabQuery || 'COMMUNICATION'
+  
+  const setActiveTab = (tab: string) => {
+    const params = new URLSearchParams(searchParams.toString())
+    params.set('tab', tab)
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false })
+  }
   const [templates, setTemplates] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
 

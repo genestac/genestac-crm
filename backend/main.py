@@ -53,9 +53,10 @@ app.include_router(metrics.router, prefix="/api/admin/metrics", tags=["admin-met
 app.include_router(ai_settings.router, prefix="/api/admin/ai-settings", tags=["admin-ai-settings"])
 app.include_router(blogs.router, prefix="/api/admin/blogs", tags=["admin-blogs"])
 
-from api.webhooks import voice_stream, conference
+from api.webhooks import voice_stream, conference, call_status
 app.include_router(voice_stream.router, prefix="/api/webhooks/exotel", tags=["webhooks-exotel"])
 app.include_router(conference.router, prefix="/api/webhooks/exotel", tags=["webhooks-exotel"])
+app.include_router(call_status.router, prefix="/api/webhooks/exotel", tags=["webhooks-exotel"])
 
 from api import templates, custom_fields
 from app.routes import admin_proforma_routes, invoice_settings_routes

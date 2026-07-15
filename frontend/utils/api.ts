@@ -47,7 +47,17 @@ export async function fetchAPI(endpoint: string, options: RequestInit = {}) {
   if (!res.ok) {
     let errorStatus = res.status
     let errorText = await res.text().catch(() => 'No response body')
-    const error: any = new Error(`${errorText} (Failed URL: ${url})`)
+    
+    try {
+      const parsed = JSON.parse(errorText)
+      if (parsed.detail) {
+        errorText = typeof parsed.detail === 'string' ? parsed.detail : JSON.stringify(parsed.detail)
+      }
+    } catch (e) {}
+    
+    console.error(`[fetchAPI] Error ${errorStatus} for ${url}:`, errorText)
+    
+    const error: any = new Error(errorText)
     error.status = errorStatus
     throw error
   }

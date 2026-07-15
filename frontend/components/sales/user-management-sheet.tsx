@@ -39,7 +39,17 @@ export function UserManagementSheet({
   const [customFields, setCustomFields] = useState<any[]>([])
   
   // Tab state: "overview", "pipeline", "payment", "appointments", "files"
-  const [activeTab, setActiveTab] = useState("overview")
+  const [activeTab, setActiveTabRaw] = useState("overview")
+
+  useEffect(() => {
+    const saved = sessionStorage.getItem("user-management-tab")
+    if (saved) setActiveTabRaw(saved)
+  }, [])
+
+  const setActiveTab = (tab: string) => {
+    setActiveTabRaw(tab)
+    sessionStorage.setItem("user-management-tab", tab)
+  }
   const [addressOpen, setAddressOpen] = useState(false)
   
   // Notes state

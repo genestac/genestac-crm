@@ -35,7 +35,14 @@ export default function DoctorAppointmentsPage() {
   }
 
   const pendingAppointments = appointments.filter(a => a.status === 'pending')
-  const upcomingAppointments = appointments.filter(a => ['confirmed', 'completed'].includes(a.status))
+  
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  
+  const confirmedOrCompleted = appointments.filter(a => ['confirmed', 'completed'].includes(a.status))
+  
+  const upcomingAppointments = confirmedOrCompleted.filter(a => new Date(a.scheduled_at) >= today)
+  const pastAppointments = confirmedOrCompleted.filter(a => new Date(a.scheduled_at) < today)
 
   return (
     <div className="space-y-8">
@@ -176,6 +183,67 @@ export default function DoctorAppointmentsPage() {
             </table>
           </div>
         </div>
+
+        {/* Past Appointments */}
+        {pastAppointments.length > 0 && (
+          <div>
+            <h2 className="text-xl font-semibold text-gray-800 mb-4 flex items-center gap-2">
+              <FileText className="w-5 h-5 text-gray-500" />
+              Past Appointments
+            </h2>
+            
+            <div className="bg-white rounded-xl border border-gray-100 overflow-hidden shadow-sm opacity-75">
+              <table className="w-full text-sm text-left">
+                <thead className="bg-gray-50 text-gray-500 uppercase text-xs font-semibold">
+                  <tr>
+                    <th className="px-6 py-4">Date & Time</th>
+                    <th className="px-6 py-4">Patient</th>
+                    <th className="px-6 py-4">Contact</th>
+                    <th className="px-6 py-4">Status</th>
+                    <th className="px-6 py-4 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {pastAppointments.map(appt => (
+                    <tr 
+                      key={appt.id} 
+                      className="hover:bg-gray-50 transition-colors cursor-pointer"
+                      onClick={() => router.push(`/doctor/appointments/${appt.id}`)}
+                    >
+                      <td className="px-6 py-4 font-medium text-gray-900">
+                        {new Date(appt.scheduled_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}
+                      </td>
+                      <td className="px-4 py-3 font-medium text-gray-900">
+                        {appt.patients?.name || appt.patients?.full_name || 'Unknown Patient'}
+                      </td>
+                      <td className="px-4 py-3 text-gray-500">
+                        {appt.patients?.phone || 'No phone'}
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className={`px-2 py-1 text-xs font-semibold rounded-full ${appt.status === 'confirmed' ? 'bg-teal-100 text-teal-800' : 'bg-gray-100 text-gray-800'}`}>
+                          {appt.status}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 text-right">
+                        {appt.status === 'confirmed' && (
+                          <button 
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleUpdateStatus(appt.id, 'completed')
+                            }}
+                            className="text-teal-600 hover:text-teal-900 font-medium text-xs"
+                          >
+                            Mark Completed
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )

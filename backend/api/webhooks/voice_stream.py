@@ -473,7 +473,7 @@ async def voice_stream(websocket: WebSocket):
                 ),
                 turn_detection=events.TurnDetection(
                     threshold=0.8,
-                    silence_duration_ms=800
+                    silence_duration_ms=400
                 )
             ),
             output=events.AudioOutput(voice="alloy")

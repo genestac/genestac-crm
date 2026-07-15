@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException, Form, Body, Query
+from fastapi import APIRouter, Depends, HTTPException, Form, Body, Query, Request
 from supabase import Client
 from db.supabase import get_supabase_client
 from api.deps import get_current_user
 from typing import Any, Dict, List, Optional
 import datetime
+import re
 
 router = APIRouter()
 
@@ -60,7 +61,35 @@ async def get_appointments(
         if not is_admin:
             query = query.eq('doctor_id', current_user['id'])
         response = query.order('scheduled_at', desc=False).execute()
-        return response.data
+        appointments = response.data
+        
+        missing_patient_ids = [a['patient_id'] for a in appointments if not a.get('patients') and a.get('patient_id')]
+        if missing_patient_ids:
+            leads_res = supabase.table('leads').select('id, name, phone_number, email').in_('id', missing_patient_ids).execute()
+            leads_dict = {l['id']: l for l in leads_res.data}
+            for a in appointments:
+                if not a.get('patients') and a.get('patient_id') in leads_dict:
+                    lead = leads_dict[a['patient_id']]
+                    a['patients'] = {
+                        'id': lead['id'],
+                        'name': lead['name'],
+                        'phone': lead['phone_number'],
+                        'email': lead['email']
+                    }
+                    
+        # Fallback for AI-booked appointments with no patient_id
+        for a in appointments:
+            if not a.get('patients') and not a.get('patient_id') and a.get('title'):
+                if "with " in a['title']:
+                    extracted_name = a['title'].split("with ")[-1].strip()
+                    extracted_phone = None
+                    if a.get('notes'):
+                        phone_match = re.search(r'\[PHONE:\s*([^\]]+)\]', a['notes'])
+                        if phone_match:
+                            extracted_phone = phone_match.group(1).strip()
+                    a['patients'] = {'name': extracted_name, 'phone': extracted_phone}
+                    
+        return appointments
     except Exception as e:
         import traceback; traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
@@ -79,7 +108,30 @@ async def get_appointment_by_id(
         '*, patients:users!patient_id(id, name, phone, email), '
         'sales:staffs!sales_rep_id(id, full_name)'
     ).eq('id', id).single().execute()
-    return response.data
+    
+    appt = response.data
+    if appt and not appt.get('patients') and appt.get('patient_id'):
+        lead_res = supabase.table('leads').select('id, name, phone_number, email').eq('id', appt['patient_id']).execute()
+        if lead_res.data:
+            lead = lead_res.data[0]
+            appt['patients'] = {
+                'id': lead['id'],
+                'name': lead['name'],
+                'phone': lead['phone_number'],
+                'email': lead['email']
+            }
+            
+    if appt and not appt.get('patients') and not appt.get('patient_id') and appt.get('title'):
+        if "with " in appt['title']:
+            extracted_name = appt['title'].split("with ")[-1].strip()
+            extracted_phone = None
+            if appt.get('notes'):
+                phone_match = re.search(r'\[PHONE:\s*([^\]]+)\]', appt['notes'])
+                if phone_match:
+                    extracted_phone = phone_match.group(1).strip()
+            appt['patients'] = {'name': extracted_name, 'phone': extracted_phone}
+            
+    return appt
 
 
 # ---------------------------------------------------------------------------
@@ -343,6 +395,7 @@ async def generate_payment_link(
 @router.post('/appointments/{id}/call')
 async def trigger_appointment_call(
     id: str,
+    request: Request,
     current_user: dict = Depends(get_current_user),
     supabase: Client = Depends(get_supabase_client),
 ):
@@ -352,7 +405,7 @@ async def trigger_appointment_call(
     """
     # 1. Fetch appointment details
     res = supabase.table('appointments').select(
-        'doctor_id, patients:users!patient_id(phone), notes'
+        'doctor_id, patient_id, patients:users!patient_id(phone), notes'
     ).eq('id', id).single().execute()
     
     if not res.data:
@@ -360,6 +413,11 @@ async def trigger_appointment_call(
         
     appt = res.data
     
+    if not appt.get('patients') and appt.get('patient_id'):
+        lead_res = supabase.table('leads').select('phone_number').eq('id', appt['patient_id']).execute()
+        if lead_res.data:
+            appt['patients'] = {'phone': lead_res.data[0].get('phone_number')}
+            
     # 2. Get doctor exotel number
     doc_res = supabase.table('doctor_schedules').select('exotel_number').eq('staff_id', appt['doctor_id']).single().execute()
     doctor_exotel = doc_res.data.get('exotel_number') if doc_res.data else None
@@ -381,17 +439,29 @@ async def trigger_appointment_call(
     if not patient_phone.startswith('+'):
         patient_phone = '+91' + patient_phone.lstrip('0')
         
-    # 4. Trigger bridge call
+    import os
+    public_url = os.getenv("BACKEND_PUBLIC_URL") or str(request.base_url)
+    
     from services.exotel_service import bridge_doctor_and_customer
-    success = bridge_doctor_and_customer(
+    result = bridge_doctor_and_customer(
         doctor_phone=doctor_exotel,
         customer_phone=patient_phone,
+        base_url=public_url,
+        custom_field=id,
     )
     
-    if success:
+    # Handle both old bool return and new dict return safely
+    if isinstance(result, bool):
+        if result:
+            return {"success": True, "message": "Call initiated successfully. Doctor's phone will ring first."}
+        else:
+            raise HTTPException(status_code=500, detail="Failed to initiate call via Exotel.")
+            
+    if result and result.get("success"):
         return {"success": True, "message": "Call initiated successfully. Doctor's phone will ring first."}
     else:
-        raise HTTPException(status_code=500, detail="Failed to initiate call via Exotel.")
+        error_msg = result.get("error") if result else "Failed to initiate call via Exotel."
+        raise HTTPException(status_code=500, detail=error_msg)
 
 
 # ---------------------------------------------------------------------------
@@ -405,3 +475,39 @@ async def get_all_doctors(
     response = supabase.table('staffs').select('id, full_name, roles!inner(name)').eq('roles.name', 'doctor').execute()
     return {'data': response.data}
 
+
+
+@router.post('/appointments/{id}/notes')
+async def add_appointment_note(id: str, content: str = Body(embed=True), current_user: dict = Depends(get_current_user), supabase: Client = Depends(get_supabase_client)):
+    # Append the note to the appointment's existing notes
+    res = supabase.table('appointments').select('notes').eq('id', id).single().execute()
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Appointment not found")
+    
+    existing_notes = res.data.get('notes') or ""
+    new_notes = existing_notes + "\n\n" + f"[{datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}] Note added:\n" + content
+    supabase.table('appointments').update({'notes': new_notes.strip()}).eq('id', id).execute()
+    return {'success': True}
+
+from fastapi import BackgroundTasks
+from services.audio_tasks import process_call_recording
+
+@router.post('/appointments/{id}/retranscribe')
+async def retranscribe_call(
+    id: str,
+    background_tasks: BackgroundTasks,
+    payload: dict = Body(...),
+    current_user: dict = Depends(get_current_user),
+    supabase: Client = Depends(get_supabase_client),
+):
+    """
+    Manually triggers the background transcription task for an existing recording URL.
+    """
+    recording_url = payload.get("recording_url")
+    if not recording_url:
+        raise HTTPException(status_code=400, detail="Recording URL is required")
+
+    # Queue the background task exactly like the webhook does
+    background_tasks.add_task(process_call_recording, id, recording_url)
+    
+    return {"success": True, "message": "Transcription started in the background"}

@@ -17,16 +17,39 @@ async def get_doctor_metrics(current_user: dict=Depends(get_current_user), supab
     daily_query = supabase.table('appointments').select('id', count='exact').gte('scheduled_at', start_of_day).lte('scheduled_at', end_of_day)
     total_query = supabase.table('appointments').select('id', count='exact').eq('status', 'completed')
     patients_query = supabase.table('appointments').select('patient_id').eq('status', 'completed')
+    cancelled_query = supabase.table('appointments').select('id', count='exact').eq('status', 'cancelled')
+    
     if not is_admin:
         daily_query = daily_query.eq('doctor_id', current_user['id'])
         total_query = total_query.eq('doctor_id', current_user['id'])
         patients_query = patients_query.eq('doctor_id', current_user['id'])
+        cancelled_query = cancelled_query.eq('doctor_id', current_user['id'])
+        
     daily_res = daily_query.execute()
     total_res = total_query.execute()
     patients_data = patients_query.execute()
+    cancelled_res = cancelled_query.execute()
+    
     unique_patients = set()
     for p in patients_data.data:
         if p.get('patient_id'):
             unique_patients.add(p['patient_id'])
-    monthly_revenue = len(unique_patients) * 500
-    return {'dailyQueue': daily_res.count or 0, 'totalConsultations': total_res.count or 0, 'activePatients': len(unique_patients), 'treatmentSuccessRate': 85, 'monthlyRevenue': monthly_revenue}
+            
+    completed_count = total_res.count or 0
+    cancelled_count = cancelled_res.count or 0
+    total_appointments = completed_count + cancelled_count
+    
+    success_rate = 0
+    if total_appointments > 0:
+        success_rate = round((completed_count / total_appointments) * 100)
+        
+    # Pending Reviews is mocked or could be based on something else, we will use dailyQueue as a mock
+    pending_reviews = (daily_res.count or 0)
+    
+    return {
+        'dailyQueue': daily_res.count or 0, 
+        'totalConsultations': completed_count, 
+        'activePatients': len(unique_patients), 
+        'treatmentSuccessRate': success_rate, 
+        'pendingReviews': pending_reviews
+    }

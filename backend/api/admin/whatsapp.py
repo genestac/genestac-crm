@@ -126,8 +126,35 @@ async def get_campaigns(current_user: dict = Depends(get_current_user), supabase
 async def get_campaign_logs(campaign_id: str, current_user: dict = Depends(get_current_user), supabase: Client = Depends(get_supabase_client)):
     if not is_admin(current_user, supabase):
         raise HTTPException(status_code=403, detail="Admin access required")
-    res = supabase.table('whatsapp_logs').select('*, leads(name, phone_number)').eq('campaign_id', campaign_id).execute()
-    return {'data': res.data or []}
+        
+    # 1. Fetch raw logs
+    res = supabase.table('whatsapp_logs').select('*').eq('campaign_id', campaign_id).execute()
+    logs = res.data or []
+    if not logs:
+        return {'data': []}
+        
+    # 2. Extract unique lead_ids
+    lead_ids = list(set([log['lead_id'] for log in logs if log.get('lead_id')]))
+    
+    # 3. Fetch from both leads and users tables to get names and phone numbers
+    lead_details = {}
+    if lead_ids:
+        # Fetch from old leads
+        l_res = supabase.table('leads').select('id, name, phone_number').in_('id', lead_ids).execute()
+        for l in (l_res.data or []):
+            lead_details[l['id']] = {'name': l.get('name'), 'phone_number': l.get('phone_number')}
+            
+        # Fetch from new users table
+        u_res = supabase.table('users').select('id, name, phone').in_('id', lead_ids).execute()
+        for u in (u_res.data or []):
+            lead_details[u['id']] = {'name': u.get('name'), 'phone_number': u.get('phone')}
+            
+    # 4. Attach lead info to logs
+    for log in logs:
+        lid = log.get('lead_id')
+        log['leads'] = lead_details.get(lid)
+        
+    return {'data': logs}
 
 def resolve_audience(supabase: Client, audience_filter: AudienceFilter, template_id: str = None) -> List[dict]:
     # Fetch from leads table

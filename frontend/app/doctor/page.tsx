@@ -5,9 +5,10 @@ import { getDoctorMetrics, getDoctorAppointments } from './actions'
 import { getPatientHistory, getRecentPrescriptions } from './actions'
 import { PatientSnapshot } from '@/components/doctor/patient-snapshot'
 import { WeightChart } from '@/components/doctor/weight-chart'
+import { SymptomsChart } from '@/components/doctor/symptoms-chart'
 import { PrescriptionForm } from '@/components/doctor/prescription-form'
 import { ProgressForm } from '@/components/doctor/progress-form'
-import { Activity, Users, DollarSign, Calendar, Clock, Video, FileText, CheckCircle2 } from 'lucide-react'
+import { Activity, Users, ClipboardList, Calendar, Clock, Video, FileText, CheckCircle2 } from 'lucide-react'
 import Link from 'next/link'
 
 export default function DoctorDashboard() {
@@ -112,10 +113,10 @@ export default function DoctorDashboard() {
               </div>
             </div>
             <div className="flex items-center gap-4 bg-gray-50 p-4 rounded-xl border border-gray-100">
-              <div className="p-3 bg-indigo-100 text-indigo-600 rounded-lg"><DollarSign className="w-5 h-5" /></div>
+              <div className="p-3 bg-indigo-100 text-indigo-600 rounded-lg"><ClipboardList className="w-5 h-5" /></div>
               <div>
-                <div className="text-2xl font-bold text-gray-900">₹{metrics.monthlyRevenue.toLocaleString()}</div>
-                <div className="text-xs text-gray-500 font-medium">Monthly Revenue</div>
+                <div className="text-2xl font-bold text-gray-900">{metrics.pendingReviews}</div>
+                <div className="text-xs text-gray-500 font-medium">Pending Reviews</div>
               </div>
             </div>
           </div>
@@ -178,9 +179,14 @@ export default function DoctorDashboard() {
         {/* Right Column: Patient Context */}
         <div className="col-span-12 lg:col-span-8">
           {!selectedPatientId ? (
-            <div className="h-full min-h-[400px] flex flex-col items-center justify-center text-gray-400 bg-white rounded-xl border border-dashed">
-              <Activity className="w-12 h-12 mb-4 text-gray-300" />
-              <p>Select a patient from the queue to view clinical context.</p>
+            <div className="grid grid-cols-12 gap-6 h-full min-h-[400px]">
+              <div className="col-span-12 lg:col-span-7">
+                <SymptomsChart />
+              </div>
+              <div className="col-span-12 lg:col-span-5 flex flex-col items-center justify-center text-gray-400 bg-white rounded-xl border border-dashed border-gray-200">
+                <Activity className="w-12 h-12 mb-4 text-gray-300" />
+                <p className="text-center px-4">Select a patient from the queue on the left to view their detailed clinical context, weight progress, and prescriptions.</p>
+              </div>
             </div>
           ) : (
             <div className="space-y-6">

@@ -20,11 +20,16 @@ async def log_adverse_event(patient_id: str, eventDetails: str=Body(embed=True),
     return {'success': True}
 @router.get('/patients/{patient_id}/timeline')
 async def fetch_patient_timeline(patient_id: str, current_user: dict=Depends(get_current_user), supabase: Client=Depends(get_supabase_client)):
+    if patient_id == 'null' or patient_id == 'None' or not patient_id:
+        return {'assessments': [], 'communications': []}
     assessments_res = supabase.table('clinical_assessments').select('id, created_at, doctor_timeline_notes, conditions, recorded_by, staffs!recorded_by(full_name, roles!inner(name))').eq('patient_id', patient_id).order('created_at', desc=False).execute()
     comms_res = supabase.table('communications').select('id, created_at, content, type, sender_id, staffs!sender_id(full_name, roles!inner(name))').eq('lead_id', patient_id).order('created_at', desc=False).execute()
     return {'assessments': assessments_res.data or [], 'communications': comms_res.data or []}
 @router.post('/patients/{patient_id}/timeline')
 async def add_timeline_entry(patient_id: str, type: str=Body(embed=True), content: str=Body(embed=True), current_user: dict=Depends(get_current_user), supabase: Client=Depends(get_supabase_client)):
+    if patient_id == 'null' or patient_id == 'None' or not patient_id:
+        raise HTTPException(status_code=400, detail="Cannot add notes to an appointment without a registered patient profile.")
+        
     if type == 'clinical':
         supabase.table('clinical_assessments').insert({'patient_id': patient_id, 'recorded_by': current_user['id'], 'doctor_timeline_notes': content}).execute()
     else:
