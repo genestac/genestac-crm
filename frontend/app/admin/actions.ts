@@ -92,15 +92,37 @@ export async function deleteKnowledgeBaseItem(id: string) {
   }
 }
 
-export async function getCallLogs() {
+export async function getCallLogs(page = 1, limit = 50) {
   try {
-    const response = await fetchAPI('/api/admin/ai-settings/call-logs?limit=50', {
+    const response = await fetchAPI(`/api/admin/ai-settings/call-logs?page=${page}&limit=${limit}`, {
       headers: { 'Cookie': (await cookies()).toString() }
     })
-    return response.data || []
+    return response || { data: [], total: 0 }
   } catch (error) {
     console.error('Failed to fetch call logs:', error)
-    return []
+    return { data: [], total: 0 }
+  }
+}
+
+export async function getCallStats() {
+  try {
+    const response = await fetchAPI('/api/admin/ai-settings/stats', {
+      headers: { 'Cookie': (await cookies()).toString() }
+    })
+    return response || {
+      total_calls: 0,
+      monthly_calls: 0,
+      todays_calls: 0,
+      todays_picked_up: 0
+    }
+  } catch (error) {
+    console.error('Failed to fetch call stats:', error)
+    return {
+      total_calls: 0,
+      monthly_calls: 0,
+      todays_calls: 0,
+      todays_picked_up: 0
+    }
   }
 }
 

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { updateAISettings, addKnowledgeBaseItem, deleteKnowledgeBaseItem, getCallLogs, getCallQueue, updateCallQueue, processNextCall } from '../actions'
+import { updateAISettings, addKnowledgeBaseItem, deleteKnowledgeBaseItem, getCallLogs, getCallQueue, updateCallQueue, processNextCall, getCallStats } from '../actions'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -164,6 +164,17 @@ export function AdminAICallingClient({ initialSettings, initialKnowledgeBase, in
   // Call logs state
   const [callLogs, setCallLogs] = useState<any[]>([])
   const [logsLoading, setLogsLoading] = useState(false)
+  const [logsPage, setLogsPage] = useState(1)
+  const [logsTotal, setLogsTotal] = useState(0)
+  const limit = 50
+
+  // Call stats state
+  const [callStats, setCallStats] = useState({
+    total_calls: 0,
+    monthly_calls: 0,
+    todays_calls: 0,
+    todays_picked_up: 0
+  })
 
   // Call Queue state
   const [callQueue, setCallQueue] = useState<any[]>([])
@@ -181,15 +192,25 @@ export function AdminAICallingClient({ initialSettings, initialKnowledgeBase, in
         { value: "QUALIFIED", label: "Qualified" },
       ]
 
-  const fetchCallLogs = useCallback(async () => {
+  const fetchCallLogs = useCallback(async (page: number = logsPage) => {
     setLogsLoading(true)
     try {
-      const logs = await getCallLogs()
-      setCallLogs(logs)
+      const res = await getCallLogs(page, limit)
+      setCallLogs(res.data || [])
+      setLogsTotal(res.total || 0)
     } catch {
       toast.error('Failed to load call logs')
     } finally {
       setLogsLoading(false)
+    }
+  }, [logsPage, limit])
+
+  const fetchCallStats = useCallback(async () => {
+    try {
+      const stats = await getCallStats()
+      setCallStats(stats)
+    } catch {
+      console.error('Failed to fetch call stats')
     }
   }, [])
 
@@ -206,9 +227,12 @@ export function AdminAICallingClient({ initialSettings, initialKnowledgeBase, in
   }, [])
 
   useEffect(() => {
-    if (activeTab === 'logs') fetchCallLogs()
+    if (activeTab === 'logs') {
+      fetchCallLogs(logsPage)
+      fetchCallStats()
+    }
     if (activeTab === 'queue') fetchCallQueue()
-  }, [activeTab, fetchCallLogs, fetchCallQueue])
+  }, [activeTab, logsPage, fetchCallLogs, fetchCallQueue, fetchCallStats])
 
   const handleDragStart = (e: React.DragEvent, index: number) => {
     setDraggedItemIndex(index)
@@ -502,10 +526,10 @@ export function AdminAICallingClient({ initialSettings, initialKnowledgeBase, in
           {/* Stats row */}
           <div className="grid grid-cols-4 gap-4">
             {[
-              { label: 'Total Logs',   value: totalCount,     color: 'text-gray-900',   bg: 'bg-white' },
-              { label: 'Success / Picked Up', value: completedCount, color: 'text-green-700',  bg: 'bg-green-50' },
-              { label: 'Failed',       value: failedCount,    color: 'text-red-700',    bg: 'bg-red-50' },
-              { label: 'In Queue',     value: callQueue.length, color: 'text-indigo-700', bg: 'bg-indigo-50' },
+              { label: 'Total Calls', value: callStats.total_calls, color: 'text-gray-900', bg: 'bg-white' },
+              { label: 'Monthly Calls', value: callStats.monthly_calls, color: 'text-blue-700', bg: 'bg-blue-50' },
+              { label: 'Today\'s Calls', value: callStats.todays_calls, color: 'text-indigo-700', bg: 'bg-indigo-50' },
+              { label: 'Today\'s Picked Up', value: callStats.todays_picked_up, color: 'text-green-700', bg: 'bg-green-50' },
             ].map(s => (
               <div key={s.label} className={`${s.bg} rounded-xl border p-5 shadow-sm`}>
                 <p className="text-xs text-gray-500 font-medium">{s.label}</p>
@@ -517,7 +541,7 @@ export function AdminAICallingClient({ initialSettings, initialKnowledgeBase, in
           {/* Toolbar */}
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-semibold text-gray-900">Recent Calls</h2>
-            <Button variant="outline" size="sm" onClick={fetchCallLogs} disabled={logsLoading}>
+            <Button variant="outline" size="sm" onClick={() => { fetchCallLogs(logsPage); fetchCallStats(); }} disabled={logsLoading}>
               <RefreshCw className={`w-4 h-4 mr-2 ${logsLoading ? 'animate-spin' : ''}`} />
               Refresh
             </Button>
@@ -535,10 +559,37 @@ export function AdminAICallingClient({ initialSettings, initialKnowledgeBase, in
               <p className="text-xs mt-1">Trigger an AI call from a lead card to see logs here.</p>
             </div>
           ) : (
-            <div className="space-y-3">
-              {callLogs.map(log => (
-                <CallLogRow key={log.id} log={log} />
-              ))}
+            <div className="space-y-4">
+              <div className="space-y-3">
+                {callLogs.map(log => (
+                  <CallLogRow key={log.id} log={log} />
+                ))}
+              </div>
+              
+              {/* Pagination Controls */}
+              <div className="flex items-center justify-between pt-4 border-t">
+                <p className="text-xs text-gray-500">
+                  Showing {(logsPage - 1) * limit + 1} to {Math.min(logsPage * limit, logsTotal)} of {logsTotal} calls
+                </p>
+                <div className="flex gap-2">
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    disabled={logsPage === 1 || logsLoading}
+                    onClick={() => setLogsPage(p => p - 1)}
+                  >
+                    Previous
+                  </Button>
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    disabled={logsPage * limit >= logsTotal || logsLoading}
+                    onClick={() => setLogsPage(p => p + 1)}
+                  >
+                    Next
+                  </Button>
+                </div>
+              </div>
             </div>
           )}
         </div>

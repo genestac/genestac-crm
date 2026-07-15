@@ -51,6 +51,10 @@ def initiate_ai_call(from_number: str, to_number: str, lead_id: str):
         return None
 
     url = f"https://{api_key}:{token}@{subdomain}/v1/Accounts/{sid}/Calls/connect.json"
+    
+    backend_url = os.environ.get("BACKEND_PUBLIC_URL", "").rstrip("/")
+    status_callback = f"{backend_url}/api/webhooks/call-status" if backend_url else ""
+
     payload = {
         "From": to_number,             # Customer's number (called first)
         "CallerId": from_number,        # Exotel virtual number (caller ID)
@@ -58,6 +62,10 @@ def initiate_ai_call(from_number: str, to_number: str, lead_id: str):
         "Url": f"http://my.exotel.com/{sid}/exoml/start_voice/{app_id}",
         "Record": "true",
     }
+    
+    if status_callback:
+        payload["StatusCallback"] = status_callback
+        payload["StatusCallbackEvents[0]"] = "terminal"
 
     logger.warning(f"Initiating Exotel Call with payload: {payload}")
     try:

@@ -123,20 +123,25 @@ async def delete_knowledge_base_item(
 
 @router.get("/call-logs")
 async def get_all_call_logs(
+    page: int = 1,
     limit: int = 50,
     current_user: dict = Depends(get_current_user),
     supabase: Client = Depends(get_supabase_client)
 ):
-    """Get all AI call logs across all leads for admin dashboard."""
+    """Get all AI call logs across all leads for admin dashboard with pagination."""
     try:
+        start = (page - 1) * limit
+        end = start + limit - 1
+
         logs_res = (
             supabase.table("ai_call_logs")
-            .select("*")
+            .select("*", count="exact")
             .order("created_at", desc=True)
-            .limit(limit)
+            .range(start, end)
             .execute()
         )
         logs = logs_res.data or []
+        total_count = logs_res.count if hasattr(logs_res, 'count') and logs_res.count is not None else len(logs)
 
         # Batch-fetch lead names for all unique lead_ids
         lead_ids = list({l["lead_id"] for l in logs if l.get("lead_id")})
@@ -177,7 +182,44 @@ async def get_all_call_logs(
                 "crm_status": lead.get("status") or lead.get("crm_status")
             }
 
-        return {"data": logs}
+        return {"data": logs, "total": total_count}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/stats")
+async def get_ai_call_stats(
+    current_user: dict = Depends(get_current_user),
+    supabase: Client = Depends(get_supabase_client)
+):
+    """Get global statistics for AI call logs."""
+    try:
+        import datetime
+        now = datetime.datetime.now()
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
+
+        # Total calls
+        total_res = supabase.table("ai_call_logs").select("id", count="exact").execute()
+        total_calls = total_res.count if hasattr(total_res, 'count') and total_res.count is not None else 0
+
+        # Monthly calls
+        monthly_res = supabase.table("ai_call_logs").select("id", count="exact").gte("created_at", month_start).execute()
+        monthly_calls = monthly_res.count if hasattr(monthly_res, 'count') and monthly_res.count is not None else 0
+
+        # Today's calls
+        todays_res = supabase.table("ai_call_logs").select("id", count="exact").gte("created_at", today_start).execute()
+        todays_calls = todays_res.count if hasattr(todays_res, 'count') and todays_res.count is not None else 0
+
+        # Today's picked up (completed)
+        picked_up_res = supabase.table("ai_call_logs").select("id", count="exact").gte("created_at", today_start).eq("status", "completed").execute()
+        todays_picked_up = picked_up_res.count if hasattr(picked_up_res, 'count') and picked_up_res.count is not None else 0
+
+        return {
+            "total_calls": total_calls,
+            "monthly_calls": monthly_calls,
+            "todays_calls": todays_calls,
+            "todays_picked_up": todays_picked_up
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
