@@ -72,3 +72,75 @@ async def sync_templates_from_meta():
         except Exception as e:
             print(f"Meta Template Sync Error: {e}")
             return {"error": str(e)}
+
+async def send_whatsapp_text(phone_number: str, text: str):
+    """
+    Sends a standard text message.
+    """
+    token = os.getenv("WHATSAPP_TOKEN")
+    phone_number_id = os.getenv("WHATSAPP_PHONE_NUMBER_ID")
+    
+    if not token or not phone_number_id:
+        return {"error": "Missing credentials"}
+        
+    url = f"{WHATSAPP_API_URL}/{phone_number_id}/messages"
+    
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json"
+    }
+    
+    clean_phone = ''.join(filter(str.isdigit, phone_number))
+    
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": clean_phone,
+        "type": "text",
+        "text": {
+            "body": text
+        }
+    }
+    
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.post(url, headers=headers, json=payload, timeout=10.0)
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            print(f"WhatsApp API Error (Text): {e}")
+            return {"error": str(e)}
+
+async def send_whatsapp_interactive(phone_number: str, interactive_payload: dict):
+    """
+    Sends an interactive message (list or buttons).
+    """
+    token = os.getenv("WHATSAPP_TOKEN")
+    phone_number_id = os.getenv("WHATSAPP_PHONE_NUMBER_ID")
+    
+    if not token or not phone_number_id:
+        return {"error": "Missing credentials"}
+        
+    url = f"{WHATSAPP_API_URL}/{phone_number_id}/messages"
+    
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json"
+    }
+    
+    clean_phone = ''.join(filter(str.isdigit, phone_number))
+    
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": clean_phone,
+        "type": "interactive",
+        "interactive": interactive_payload
+    }
+    
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.post(url, headers=headers, json=payload, timeout=10.0)
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            print(f"WhatsApp API Error (Interactive): {e}")
+            return {"error": str(e)}

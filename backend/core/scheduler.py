@@ -100,7 +100,6 @@ def sweep_leads_for_auto_call():
 
         # ─── NORMAL QUEUE: Sweep enabled-status leads inside the calling window ───
         if not enabled_statuses:
-            print("[AI Voice Scheduler] No enabled_statuses configured. Skipping normal sweep.")
             return
 
         if not is_within_calling_window(windows):

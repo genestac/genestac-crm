@@ -1,10 +1,13 @@
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime, timedelta, timezone
 from supabase import Client
 from db.supabase import get_supabase_client
 from api.deps import get_current_user
+from services.whatsapp_service import send_whatsapp_text, send_whatsapp_interactive
+from services.exotel_service import initiate_ai_call
 
 router = APIRouter()
 
@@ -358,14 +361,18 @@ async def update_autoresponder(data: AutoResponderSettings, current_user: dict =
     return {"data": val}
 
 @router.get('/webhook')
-async def verify_webhook(hub_mode: str = None, hub_challenge: str = None, hub_verify_token: str = None):
+async def verify_webhook(
+    hub_mode: str = Query(None, alias="hub.mode"),
+    hub_challenge: str = Query(None, alias="hub.challenge"),
+    hub_verify_token: str = Query(None, alias="hub.verify_token")
+):
     # Meta webhook verification
     if hub_mode == "subscribe":
-        return int(hub_challenge)
+        return PlainTextResponse(hub_challenge)
     return {"status": "ok"}
 
 @router.post('/webhook')
-async def webhook_handler(payload: dict, supabase: Client = Depends(get_supabase_client)):
+async def webhook_handler(payload: dict, background_tasks: BackgroundTasks, supabase: Client = Depends(get_supabase_client)):
     try:
         if payload.get("object") == "whatsapp_business_account":
             for entry in payload.get("entry", []):
@@ -373,17 +380,174 @@ async def webhook_handler(payload: dict, supabase: Client = Depends(get_supabase
                     value = change.get("value", {})
                     if "messages" in value:
                         for msg in value.get("messages", []):
-                            if msg.get("type") == "text":
-                                text = msg.get("text", {}).get("body", "").strip().lower()
-                                phone = msg.get("from") # The sender's phone number
+                            phone = msg.get("from")
+                            if not phone:
+                                continue
                                 
-                                # Check for STOP intent
-                                if text in ["stop", "unsubscribe", "cancel"]:
-                                    if phone:
-                                        # Opt-out the lead
-                                        supabase.table("leads").update({"whatsapp_opt_out": True}).eq("phone_number", phone).execute()
-                                        print(f"[WhatsApp Webhook] Opted out phone: {phone}")
+                            clean_phone = ''.join(filter(str.isdigit, phone))
+                            
+                            # Determine message content
+                            text_body = ""
+                            msg_type = msg.get("type")
+                            interactive_reply_id = None
+                            interactive_reply_title = None
+                            
+                            if msg_type == "text":
+                                text_body = msg.get("text", {}).get("body", "").strip()
+                            elif msg_type == "interactive":
+                                interactive = msg.get("interactive", {})
+                                if interactive.get("type") == "list_reply":
+                                    text_body = interactive.get("list_reply", {}).get("title", "")
+                                    interactive_reply_id = interactive.get("list_reply", {}).get("id", "")
+                                elif interactive.get("type") == "button_reply":
+                                    text_body = interactive.get("button_reply", {}).get("title", "")
+                                    interactive_reply_id = interactive.get("button_reply", {}).get("id", "")
+                            
+                            # Check for STOP intent
+                            if text_body.lower() in ["stop", "unsubscribe", "cancel"]:
+                                supabase.table("leads").update({"whatsapp_opt_out": True}).eq("phone_number", f"+{clean_phone}").execute()
+                                print(f"[WhatsApp Webhook] Opted out phone: {clean_phone}")
+                                continue
+                                
+                            # ----- State Machine Logic -----
+                            
+                            # 1. Fetch existing lead/user
+                            existing = None
+                            table = "leads"
+                            phone_field = "phone_number"
+                            
+                            res_users = supabase.table("users").select("id, name, metadata").ilike("phone", f"%{clean_phone}%").execute()
+                            if res_users.data:
+                                existing = res_users.data[0]
+                                table = "users"
+                                phone_field = "phone"
+                            else:
+                                res_leads = supabase.table("leads").select("id, name, metadata").ilike("phone_number", f"%{clean_phone}%").execute()
+                                if res_leads.data:
+                                    existing = res_leads.data[0]
+                                    table = "leads"
+                                    phone_field = "phone_number"
+                                    
+                            metadata = existing.get("metadata", {}) if existing else {}
+                            current_step = metadata.get("whatsapp_step")
+                            lead_name = existing.get("name") if existing else None
+                            
+                            # If no user/lead, create one
+                            if not existing:
+                                # Create new lead
+                                whatsapp_source_id = "936ddc7e-f841-41f8-bccc-06820a5d33c4" # Meta ads source
+                                new_lead_data = {
+                                    "phone_number": f"+{clean_phone}",
+                                    "status": "NEW",
+                                    "source_id": whatsapp_source_id,
+                                    "metadata": {"whatsapp_step": "asked_name"}
+                                }
+                                res = supabase.table("leads").insert(new_lead_data).execute()
+                                if res.data:
+                                    existing = res.data[0]
+                                    table = "leads"
+                                    phone_field = "phone_number"
+                                    metadata = new_lead_data["metadata"]
+                                    current_step = "asked_name"
+                                    
+                                # Send "May I know your name?"
+                                await send_whatsapp_text(clean_phone, "Hi! Welcome to Genestac!\nMay I know your name?")
+                                continue
+                                
+                            # State: asked_name
+                            if current_step == "asked_name":
+                                # Save name, ask condition
+                                name_provided = text_body
+                                metadata["whatsapp_step"] = "asked_condition"
+                                supabase.table(table).update({"name": name_provided, "metadata": metadata}).eq("id", existing["id"]).execute()
+                                
+                                # Send Condition list
+                                list_payload = {
+                                    "type": "list",
+                                    "body": {"text": "Please select your medical condition:"},
+                                    "action": {
+                                        "button": "Select",
+                                        "sections": [{
+                                            "title": "Conditions",
+                                            "rows": [
+                                                {"id": "diabetes", "title": "Diabetes"},
+                                                {"id": "fatty_liver", "title": "Fatty Liver"},
+                                                {"id": "pcos", "title": "PCOS"},
+                                                {"id": "other", "title": "Other"}
+                                            ]
+                                        }]
+                                    }
+                                }
+                                await send_whatsapp_interactive(clean_phone, list_payload)
+                                continue
+                                
+                            # State: asked_condition
+                            if current_step == "asked_condition":
+                                condition = interactive_reply_title or text_body
+                                metadata["medical_condition"] = condition
+                                metadata["whatsapp_step"] = "asked_call"
+                                supabase.table(table).update({"metadata": metadata}).eq("id", existing["id"]).execute()
+                                
+                                # Ask call preference
+                                button_payload = {
+                                    "type": "button",
+                                    "body": {"text": "Would you like us to call you?"},
+                                    "action": {
+                                        "buttons": [
+                                            {"type": "reply", "reply": {"id": "call_yes", "title": "Get a Call"}},
+                                            {"type": "reply", "reply": {"id": "call_no", "title": "No Thanks"}}
+                                        ]
+                                    }
+                                }
+                                await send_whatsapp_interactive(clean_phone, button_payload)
+                                continue
+                                
+                            # State: asked_call
+                            if current_step == "asked_call":
+                                wants_call = (interactive_reply_id == "call_yes" or text_body.lower() == "yes" or text_body.lower() == "get a call")
+                                metadata["wants_call"] = wants_call
+                                metadata["whatsapp_step"] = "done"
+                                supabase.table(table).update({"metadata": metadata}).eq("id", existing["id"]).execute()
+                                
+                                if wants_call:
+                                    # Trigger Exotel AI Call in background
+                                    def trigger_exotel(phone, lead_id):
+                                        res_settings = supabase.table("global_settings").select("settings_value").eq("settings_key", "ai_call_settings").execute()
+                                        exotel_number = None
+                                        if res_settings.data:
+                                            exotel_number = res_settings.data[0]["settings_value"].get("exotel_number")
+                                        if not exotel_number:
+                                            exotel_number = "+9101141189316" # Fallback caller ID
+                                            
+                                        log_res = supabase.table("ai_call_logs").insert({"lead_id": lead_id, "status": "initiating"}).execute()
+                                        call_log_id = log_res.data[0]["id"] if log_res.data else None
+                                        
+                                        formatted_phone = f"+{phone}" if not phone.startswith("+") else phone
+                                        exotel_res = initiate_ai_call(from_number=exotel_number, to_number=formatted_phone, lead_id=lead_id)
+                                        
+                                        if exotel_res and "Call" in exotel_res:
+                                            call_sid = exotel_res["Call"].get("Sid")
+                                            if call_log_id:
+                                                supabase.table("ai_call_logs").update({"call_sid": call_sid, "status": "ringing"}).eq("id", call_log_id).execute()
+                                        else:
+                                            if call_log_id:
+                                                supabase.table("ai_call_logs").update({"status": "failed_to_initiate"}).eq("id", call_log_id).execute()
+                                                
+                                    background_tasks.add_task(trigger_exotel, clean_phone, existing["id"])
+                                    
+                                    await send_whatsapp_text(clean_phone, "Thank you!\nOur team will call you very soon.")
+                                else:
+                                    await send_whatsapp_text(clean_phone, "Thank you!\nOur team will contact you very soon.")
+                                continue
+                                
+                            # State: done (or empty if they completed it before)
+                            if current_step == "done":
+                                name_greeting = lead_name or "there"
+                                await send_whatsapp_text(clean_phone, f"Welcome back {name_greeting}!\nOur team will be in touch with you very soon.")
+                                
     except Exception as e:
         print(f"[WhatsApp Webhook Error]: {e}")
+        import traceback
+        traceback.print_exc()
         
     return {"status": "success"}
