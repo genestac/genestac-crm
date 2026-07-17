@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Calendar, Mail, Phone, Settings2 } from 'lucide-react'
 
 export default async function FollowupsPage() {
-  const response = await fetchAPI('/api/sales/leads?exclude_statuses=LOST,CONVERTED&require_followup=true')
+  const response = await fetchAPI('/api/sales/leads?exclude_statuses=LOST,CONVERTED&require_followup=true&sort_by=next_followup_date&sort_order=asc')
   const leads = response.data
 
   return (

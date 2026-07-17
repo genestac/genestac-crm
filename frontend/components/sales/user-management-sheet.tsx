@@ -21,10 +21,14 @@ import { WhatsappChat } from "./whatsapp-chat"
 export function UserManagementSheet({ 
   lead, 
   statusOptions,
+  defaultTab,
+  onLeadUpdate,
   children 
 }: { 
   lead: any, 
   statusOptions?: {value: string, label: string}[],
+  defaultTab?: string,
+  onLeadUpdate?: (updatedLead: any) => void,
   children: React.ReactNode 
 }) {
   const [open, setOpen] = useState(false)
@@ -40,12 +44,18 @@ export function UserManagementSheet({
   const [customFields, setCustomFields] = useState<any[]>([])
   
   // Tab state: "overview", "pipeline", "payment", "appointments", "files", "call_logs", "whatsapp"
-  const [activeTab, setActiveTabRaw] = useState("overview")
+  const [activeTab, setActiveTabRaw] = useState(defaultTab || "overview")
 
   useEffect(() => {
-    const saved = sessionStorage.getItem("user-management-tab")
-    if (saved) setActiveTabRaw(saved)
-  }, [])
+    if (open) {
+      if (defaultTab) {
+        setActiveTabRaw(defaultTab)
+      } else {
+        const saved = sessionStorage.getItem("user-management-tab")
+        if (saved) setActiveTabRaw(saved)
+      }
+    }
+  }, [open, defaultTab])
 
   const setActiveTab = (tab: string) => {
     setActiveTabRaw(tab)
@@ -143,11 +153,38 @@ export function UserManagementSheet({
     submitData.append('lead_id', lead.id)
     if (lead.record_type) submitData.append('record_type', lead.record_type)
     
+    // Fix timezone: convert the local datetime string from the input into a proper UTC ISO string
+    const localDateStr = submitData.get('next_followup_date') as string
+    if (localDateStr) {
+      submitData.set('next_followup_date', new Date(localDateStr).toISOString())
+    }
+    
     submitData.append('metadata_json', JSON.stringify(metaData))
     
     try {
       await updateLeadDetails(submitData)
       toast.success("Updated successfully!")
+      
+      if (onLeadUpdate) {
+        onLeadUpdate({
+          ...lead,
+          name: submitData.get('name') as string || lead.name,
+          email: submitData.get('email') as string || lead.email,
+          phone: submitData.get('phone') as string || lead.phone,
+          street_address: submitData.get('street_address') as string || lead.street_address,
+          city: submitData.get('city') as string || lead.city,
+          state: submitData.get('state') as string || lead.state,
+          postal_code: submitData.get('postal_code') as string || lead.postal_code,
+          country: submitData.get('country') as string || lead.country,
+          status: submitData.get('status') as string || lead.status,
+          priority: submitData.get('priority') as string || lead.priority,
+          next_followup_date: submitData.get('next_followup_date') as string || lead.next_followup_date,
+          user_source_id: sourceId || lead.user_source_id,
+          interested_plan_id: planId || lead.interested_plan_id,
+          metadata: metaData
+        })
+      }
+      
       setOpen(false)
     } catch (err: any) {
       toast.error("Error: " + err.message)
@@ -329,13 +366,11 @@ export function UserManagementSheet({
           </div>
         </DialogHeader>
 
-        <div className="flex border-b px-8 bg-muted/30 pt-2 gap-2 overflow-x-auto scrollbar-hide">
+        <div className="flex border-b px-8 bg-muted/30 pt-2 pb-1 gap-2 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
           {[
             { id: "overview", label: "Overview", icon: User },
-            { id: "pipeline", label: "Pipeline", icon: Activity },
-            { id: "payment", label: "Payment", icon: CreditCard },
-            { id: "appointments", label: "Appointments", icon: Calendar },
             { id: "files", label: "Files & Notes", icon: FileText },
+            { id: "orders", label: "Orders & Bookings", icon: Receipt },
             { id: "call_logs", label: "AI Calls", icon: Phone },
             { id: "whatsapp", label: "WhatsApp", icon: MessageCircle }
           ].map(tab => (
@@ -460,13 +495,11 @@ export function UserManagementSheet({
                     </div>
                   </div>
                 )}
-              </div>
-            )}
-
-            {/* PIPELINE TAB */}
-            {activeTab === "pipeline" && (
-              <div className="space-y-8">
-                <div className="grid grid-cols-2 gap-6">
+              
+                <div className="pt-6 mt-6 border-t border-gray-100">
+                  <h4 className="text-xs font-bold text-gray-900 uppercase tracking-wider mb-4 flex items-center"><Activity className="w-4 h-4 mr-1.5 text-primary" /> Pipeline Settings</h4>
+                  <div className="p-5 bg-white border border-gray-100 rounded-xl shadow-sm space-y-6">
+<div className="grid grid-cols-2 gap-6">
                   <div className="space-y-1.5">
                     <Label className="text-xs text-gray-500 font-medium uppercase tracking-wider">User Stage</Label>
                     <Select name="status" defaultValue={lead.status}>
@@ -591,24 +624,16 @@ export function UserManagementSheet({
                     )}
                   </div>
                 </div>
-
-                <div className="space-y-1.5">
-                  <Label className="text-xs text-gray-500 font-medium uppercase tracking-wider">Next Follow-up</Label>
-                  <Input 
-                    name="next_followup_date" 
-                    type="datetime-local" 
-                    value={formData.next_followup_date}
-                    onChange={handleInputChange}
-                    className="bg-muted/50 rounded-xl border-border/50 transition-all hover:bg-muted focus:bg-card shadow-inner shadow-none"
-                  />
+                  </div>
                 </div>
-              </div>
+</div>
             )}
 
-            {/* PAYMENT & INVOICE TAB */}
-            {activeTab === "payment" && (
-              <div className="space-y-6">
-                <div className="flex flex-col mb-6 pb-6 border-b border-gray-100">
+                        {/* ORDERS & BOOKINGS TAB */}
+            {activeTab === "orders" && (
+              <div className="flex flex-col xl:flex-row gap-8">
+                <div className="space-y-6 flex-1">
+<div className="flex flex-col mb-6 pb-6 border-b border-gray-100">
                   <h3 className="text-lg font-bold text-gray-900 mb-1">Generate Proforma Invoice</h3>
                   <p className="text-xs text-gray-500">Create a Razorpay payment link based on the selected plan.</p>
                 </div>
@@ -858,13 +883,12 @@ export function UserManagementSheet({
                     </div>
                   </div>
                 )}
-              </div>
-            )}
-
-            {/* APPOINTMENTS TAB */}
-            {activeTab === "appointments" && (
-              <div className="space-y-6">
-                <div className="space-y-4">
+              
+                </div>
+                <div className="hidden xl:block w-px bg-gray-100 self-stretch"></div>
+                <div className="xl:hidden h-px w-full bg-gray-100 my-4"></div>
+                <div className="space-y-6 flex-1">
+<div className="space-y-4">
                   <div className="flex flex-col mb-6 pb-6 border-b border-gray-100">
                     <h3 className="text-lg font-bold text-gray-900 mb-1">Book Consultation</h3>
                     <p className="text-xs text-gray-500">Request a time slot with a doctor. The doctor will need to approve this request.</p>
@@ -955,13 +979,28 @@ export function UserManagementSheet({
                     </Button>
                   </div>
                 </div>
+              
+                </div>
               </div>
             )}
-
-            {/* FILES & NOTES TAB */}
+{/* FILES & NOTES TAB */}
             {activeTab === "files" && (
               <div className="space-y-8">
                 <div className="space-y-4">
+                  
+                  <div className="bg-amber-50/50 p-4 rounded-xl border border-amber-100 mb-6 flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
+                    <div>
+                      <h3 className="font-bold text-amber-900 mb-1 flex items-center"><Calendar className="w-4 h-4 mr-1.5" /> Next Follow-up Date</h3>
+                      <p className="text-xs text-amber-700">Set the next scheduled follow-up for this lead.</p>
+                    </div>
+                    <Input 
+                      name="next_followup_date" 
+                      type="datetime-local" 
+                      value={formData.next_followup_date}
+                      onChange={handleInputChange}
+                      className="bg-white rounded-xl border-amber-200 transition-all hover:bg-gray-50 focus:bg-white shadow-sm w-auto"
+                    />
+                  </div>
                   <Label className="text-xs text-gray-500 font-medium uppercase tracking-wider">Interaction Timeline</Label>
                   
                   {/* Add Note */}
@@ -1176,7 +1215,7 @@ export function UserManagementSheet({
           <div className="px-8 py-5 bg-card border-t border-border/50 flex items-center justify-between mt-auto shrink-0 z-10 relative">
             <button 
               type="button" 
-              onClick={() => setActiveTab('payment')}
+              onClick={() => setActiveTab('orders')}
               className="text-sm font-medium text-primary hover:text-primary/90 flex items-center"
             >
               <CreditCard className="w-4 h-4 mr-1.5" />

@@ -1,0 +1,247 @@
+   404	            {/* OVERVIEW TAB */}
+   405	            {activeTab === "overview" && (
+   406	              <div className="space-y-6">
+   407	                <div className="space-y-4">
+   408	                  <div className="space-y-1.5">
+   409	                    <Label className="text-xs text-gray-500 font-medium uppercase tracking-wider">Full Name</Label>
+   410	                    <Input name="name" value={formData.name} onChange={handleInputChange} className="bg-muted/50 rounded-xl border-border/50 transition-all hover:bg-muted focus:bg-card shadow-inner border-gray-200 shadow-none focus-visible:ring-primary" />
+   411	                  </div>
+   412	                  
+   413	                  <div className="grid grid-cols-2 gap-4">
+   414	                    <div className="space-y-1.5">
+   415	                      <Label className="text-xs text-gray-500 font-medium uppercase tracking-wider">Phone</Label>
+   416	                      <Input name="phone" value={formData.phone} onChange={handleInputChange} readOnly className="bg-gray-100 text-gray-500 border-gray-200 shadow-none" />
+   417	                    </div>
+   418	                    <div className="space-y-1.5">
+   419	                      <Label className="text-xs text-gray-500 font-medium uppercase tracking-wider">Email</Label>
+   420	                      <Input name="email" type="email" value={formData.email} onChange={handleInputChange} className="bg-muted/50 rounded-xl border-border/50 transition-all hover:bg-muted focus:bg-card shadow-inner border-gray-200 shadow-none focus-visible:ring-primary" />
+   421	                    </div>
+   422	                  </div>
+   423	                </div>
+   424	
+   425	                <div className="pt-4 border-t border-gray-100">
+   426	                  <button 
+   427	                    type="button" 
+   428	                    onClick={() => setAddressOpen(!addressOpen)}
+   429	                    className="flex items-center text-sm font-medium text-gray-900 hover:text-primary transition-colors"
+   430	                  >
+   431	                    {addressOpen ? <ChevronDown className="w-4 h-4 mr-1" /> : <ChevronRight className="w-4 h-4 mr-1" />}
+   432	                    Address Details
+   433	                  </button>
+   434	                  
+   435	                  {addressOpen && (
+   436	                    <div className="mt-4 grid grid-cols-2 gap-4">
+   437	                      <div className="col-span-2 space-y-1.5">
+   438	                        <Input name="street_address" value={formData.street_address} onChange={handleInputChange} placeholder="Street Address" className="bg-muted/50 rounded-xl border-border/50 transition-all hover:bg-muted focus:bg-card shadow-inner shadow-none" />
+   439	                      </div>
+   440	                      <div className="space-y-1.5">
+   441	                        <Input name="city" value={formData.city} onChange={handleInputChange} placeholder="City" className="bg-muted/50 rounded-xl border-border/50 transition-all hover:bg-muted focus:bg-card shadow-inner shadow-none" />
+   442	                      </div>
+   443	                      <div className="space-y-1.5">
+   444	                        <Input name="state" value={formData.state} onChange={handleInputChange} placeholder="State" className="bg-muted/50 rounded-xl border-border/50 transition-all hover:bg-muted focus:bg-card shadow-inner shadow-none" />
+   445	                      </div>
+   446	                      <div className="space-y-1.5">
+   447	                        <Input name="postal_code" value={formData.postal_code} onChange={handleInputChange} placeholder="Postal Code" className="bg-muted/50 rounded-xl border-border/50 transition-all hover:bg-muted focus:bg-card shadow-inner shadow-none" />
+   448	                      </div>
+   449	                      <div className="space-y-1.5">
+   450	                        <Input name="country" value={formData.country} onChange={handleInputChange} placeholder="Country" className="bg-muted/50 rounded-xl border-border/50 transition-all hover:bg-muted focus:bg-card shadow-inner shadow-none" />
+   451	                      </div>
+   452	                    </div>
+   453	                  )}
+   454	                </div>
+   455	
+   456	                {(customFields.length > 0 || Object.keys(metaData || {}).filter(k => !customFields.find(f => f.name === k)).length > 0) && (
+   457	                  <div className="pt-4 border-t border-gray-100">
+   458	                    <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-4">Additional Details</h4>
+   459	                    <div className="grid grid-cols-2 gap-4">
+   460	                      {customFields.map((field) => (
+   461	                        <div key={field.id} className="space-y-1.5">
+   462	                          <Label className="text-xs text-gray-500 font-medium">{field.label}</Label>
+   463	                          {field.type === 'boolean' ? (
+   464	                            <Select 
+   465	                              name={`meta_${field.name}`} 
+   466	                              value={metaData[field.name] || 'false'} 
+   467	                              onValueChange={(val) => handleMetaChange({ target: { name: `meta_${field.name}`, value: val } } as any)}
+   468	                            >
+   469	                              <SelectTrigger className="bg-muted/50 rounded-xl border-border/50 shadow-none">
+   470	                                <SelectValue placeholder="Select" />
+   471	                              </SelectTrigger>
+   472	                              <SelectContent>
+   473	                                <SelectItem value="true">Yes</SelectItem>
+   474	                                <SelectItem value="false">No</SelectItem>
+   475	                              </SelectContent>
+   476	                            </Select>
+   477	                          ) : (
+   478	                            <Input 
+   479	                              type={field.type === 'number' ? 'number' : field.type === 'date' ? 'date' : 'text'}
+   480	                              name={`meta_${field.name}`}
+   481	                              value={metaData[field.name] || ''}
+   482	                              onChange={handleMetaChange}
+   483	                              className="bg-muted/50 rounded-xl border-border/50 shadow-none"
+   484	                              required={field.is_required}
+   485	                            />
+   486	                          )}
+   487	                        </div>
+   488	                      ))}
+   489	
+   490	                      {/* Render unmapped metadata properties pushed from webhook */}
+   491	                      {Object.keys(metaData || {})
+   492	                        .filter(key => !customFields.find(f => f.name === key))
+   493	                        .map((key) => (
+   494	                        <div key={key} className="space-y-1.5">
+   495	                          <Label className="text-xs text-gray-500 font-medium capitalize">{key.replace(/_/g, ' ')}</Label>
+   496	                          <Input 
+   497	                            value={String(metaData[key] || '')}
+   498	                            readOnly
+   499	                            className="bg-gray-100 text-gray-500 border-gray-200 shadow-none"
+   500	                          />
+   501	                        </div>
+   502	                      ))}
+   503	                    </div>
+   504	                  </div>
+   505	                )}
+   506	              </div>
+   507	            )}
+   508	
+   509	            {/* PIPELINE TAB */}
+   510	            {activeTab === "pipeline" && (
+   511	              <div className="space-y-8">
+   512	                <div className="grid grid-cols-2 gap-6">
+   513	                  <div className="space-y-1.5">
+   514	                    <Label className="text-xs text-gray-500 font-medium uppercase tracking-wider">User Stage</Label>
+   515	                    <Select name="status" defaultValue={lead.status}>
+   516	                      <SelectTrigger className="bg-muted/50 rounded-xl border-border/50 transition-all hover:bg-muted focus:bg-card shadow-inner shadow-none">
+   517	                        <SelectValue placeholder="Status" />
+   518	                      </SelectTrigger>
+   519	                      <SelectContent>
+   520	                        {statusOptions ? statusOptions.map(opt => (
+   521	                          <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+   522	                        )) : (
+   523	                          <>
+   524	                            <SelectItem value="NEW">New (Raw)</SelectItem>
+   525	                            <SelectItem value="UNREAD">Unread</SelectItem>
+   526	
+   527	                            <SelectItem value="CONTACT_ATTEMPTED">Contact Attempted</SelectItem>
+   528	                            <SelectItem value="CONTACTED">Contacted</SelectItem>
+   529	                            <SelectItem value="QUALIFIED">Qualified</SelectItem>
+   530	                            <SelectItem value="CONSULTATION_SCHEDULED">Consultation Scheduled</SelectItem>
+   531	                            <SelectItem value="CONSULTATION_COMPLETED">Consultation Completed</SelectItem>
+   532	                            <SelectItem value="CONVERTED">Converted</SelectItem>
+   533	                            <SelectItem value="ON_HOLD">On Hold</SelectItem>
+   534	                            <SelectItem value="LOST">Lost</SelectItem>
+   535	                          </>
+   536	                        )}
+   537	                      </SelectContent>
+   538	                    </Select>
+   539	                  </div>
+   540	                  <div className="space-y-1.5">
+   541	                    <Label className="text-xs text-gray-500 font-medium uppercase tracking-wider">Priority</Label>
+   542	                    <Select name="priority" defaultValue={lead.priority || 'MEDIUM'}>
+   543	                      <SelectTrigger className="bg-muted/50 rounded-xl border-border/50 transition-all hover:bg-muted focus:bg-card shadow-inner shadow-none">
+   544	                        <SelectValue placeholder="Priority" />
+   545	                      </SelectTrigger>
+   546	                      <SelectContent>
+   547	                        <SelectItem value="HIGH">High</SelectItem>
+   548	                        <SelectItem value="MEDIUM">Medium</SelectItem>
+   549	                        <SelectItem value="LOW">Low</SelectItem>
+   550	                      </SelectContent>
+   551	                    </Select>
+   552	                  </div>
+   553	                </div>
+   554	
+   555	                <div className="grid grid-cols-2 gap-6">
+   556	                  <div className="space-y-1.5">
+   557	                    <Label className="text-xs text-gray-500 font-medium uppercase tracking-wider">User Source</Label>
+   558	                    {sources.length === 0 ? (
+   559	                      <div className="h-9 w-full animate-pulse bg-gray-100 rounded-md"></div>
+   560	                    ) : (
+   561	                      <Select name="source_id" value={sourceId} onValueChange={(val) => setSourceId(val || null)}>
+   562	                        <SelectTrigger className="bg-muted/50 rounded-xl border-border/50 transition-all hover:bg-muted focus:bg-card shadow-inner shadow-none overflow-hidden">
+   563	                          <span className="truncate">
+   564	                            {sourceId 
+   565	                              ? (sources.find(s => s.id === sourceId)?.name || lead.user_sources?.name || 'Unknown Source')
+   566	                              : 'Select Source'
+   567	                            }
+   568	                          </span>
+   569	                        </SelectTrigger>
+   570	                        <SelectContent>
+   571	                          {sourceId && !sources.some(s => s.id === sourceId) && (
+   572	                            <SelectItem value={sourceId}>
+   573	                              {lead.user_sources?.name || 'Unknown Source'}
+   574	                            </SelectItem>
+   575	                          )}
+   576	                          {sources.map(s => {
+   577	                            if (!s.is_active && s.id !== sourceId) return null;
+   578	                            return <SelectItem key={s.id} value={s.id}>{s.name} {!s.is_active && '(Inactive)'}</SelectItem>
+   579	                          })}
+   580	                        </SelectContent>
+   581	                      </Select>
+   582	                    )}
+   583	                  </div>
+   584	                  <div className="space-y-1.5">
+   585	                    <Label className="text-xs text-gray-500 font-medium uppercase tracking-wider">Interested Plan</Label>
+   586	                    {plans.length === 0 ? (
+   587	                      <div className="h-9 w-full animate-pulse bg-gray-100 rounded-md"></div>
+   588	                    ) : (
+   589	                      <Select name="interested_plan_id" value={planId} onValueChange={(val) => setPlanId(val || null)}>
+   590	                        <SelectTrigger className="bg-muted/50 rounded-xl border-border/50 transition-all hover:bg-muted focus:bg-card shadow-inner shadow-none overflow-hidden">
+   591	                          <span className="truncate">
+   592	                            {(() => {
+   593	                              if (!planId) return 'Select Plan'
+   594	                              const plan = plans.find(p => p.id === planId)
+   595	                              if (plan) return plan.name
+   596	                              
+   597	                              for (const p of plans) {
+   598	                                if (p.plan_variants) {
+   599	                                  const variant = p.plan_variants.find((v: any) => `${p.id}|${v.id}` === planId)
+   600	                                  if (variant) return `${p.name} - ${variant.duration_label}`
+   601	                                }
+   602	                              }
+   603	                              
+   604	                              return lead.plans?.name || 'Unknown Plan'
+   605	                            })()}
+   606	                          </span>
+   607	                        </SelectTrigger>
+   608	                        <SelectContent>
+   609	                          {planId && !plans.some(p => p.id === planId) && !plans.some(p => p.plan_variants?.some((v: any) => `${p.id}|${v.id}` === planId)) && (
+   610	                            <SelectItem value={planId}>
+   611	                              {lead.plans?.name || 'Unknown Plan'}
+   612	                            </SelectItem>
+   613	                          )}
+   614	                          {plans.map(p => {
+   615	                            if (!p.is_active && p.id !== planId && !p.plan_variants?.some((v: any) => `${p.id}|${v.id}` === planId)) return null;
+   616	                            
+   617	                            if (p.plan_variants && p.plan_variants.length > 0) {
+   618	                              return (
+   619	                                <SelectGroup key={p.id}>
+   620	                                  <SelectLabel className="font-bold text-primary">{p.name}</SelectLabel>
+   621	                                  {p.plan_variants.map((v: any) => (
+   622	                                    <SelectItem key={v.id} value={`${p.id}|${v.id}`} className="pl-6">
+   623	                                      {v.duration_label} (₹{v.discounted_price || v.base_price})
+   624	                                    </SelectItem>
+   625	                                  ))}
+   626	                                </SelectGroup>
+   627	                              )
+   628	                            }
+   629	                            
+   630	                            return <SelectItem key={p.id} value={p.id}>{p.name} (₹{p.price}) {!p.is_active && '(Inactive)'}</SelectItem>
+   631	                          })}
+   632	                        </SelectContent>
+   633	                      </Select>
+   634	                    )}
+   635	                  </div>
+   636	                </div>
+   637	
+   638	                <div className="space-y-1.5">
+   639	                  <Label className="text-xs text-gray-500 font-medium uppercase tracking-wider">Next Follow-up</Label>
+   640	                  <Input 
+   641	                    name="next_followup_date" 
+   642	                    type="datetime-local" 
+   643	                    value={formData.next_followup_date}
+   644	                    onChange={handleInputChange}
+   645	                    className="bg-muted/50 rounded-xl border-border/50 transition-all hover:bg-muted focus:bg-card shadow-inner shadow-none"
+   646	                  />
+   647	                </div>
+   648	              </div>
+   649	            )}
+   650	

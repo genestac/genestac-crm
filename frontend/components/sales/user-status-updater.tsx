@@ -5,7 +5,7 @@ import { updateLeadDetails } from '@/app/sales/actions'
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
 
-export function UserStatusUpdater({ leadId, currentStatus, recordType, statusOptions }: { leadId: string, currentStatus: string, recordType?: string, statusOptions?: {value: string, label: string}[] }) {
+export function UserStatusUpdater({ leadId, currentStatus, recordType, statusOptions, onStatusChange }: { leadId: string, currentStatus: string, recordType?: string, statusOptions?: {value: string, label: string}[], onStatusChange?: (status: string) => void }) {
   const [loading, setLoading] = useState(false)
   const [localStatus, setLocalStatus] = useState(currentStatus)
 
@@ -22,6 +22,7 @@ export function UserStatusUpdater({ leadId, currentStatus, recordType, statusOpt
       await updateLeadDetails(formData)
       setLocalStatus(status)
       toast.success('Status updated successfully')
+      if (onStatusChange) onStatusChange(status)
     } catch (err: any) {
       toast.error("Failed to update: " + err.message)
     } finally {

@@ -28,7 +28,7 @@ def get_consultations(
         
         # Actually, let's just do a basic select.
         res = supabase.table('appointments').select(
-            '*, users!appointments_patient_id_fkey(id, name, email, phone), staffs!appointments_doctor_id_fkey(id, full_name)'
+            '*, users!appointments_patient_id_fkey(id, name, full_name, email, phone), staffs!appointments_doctor_id_fkey(id, full_name)'
         ).order('scheduled_at', desc=True).limit(200).execute()
         
         data = res.data or []
@@ -65,7 +65,7 @@ def get_consultations(
             
             users_map = {}
             if p_ids:
-                u_res = supabase.table('users').select('id, name, email, phone').in_('id', p_ids).execute()
+                u_res = supabase.table('users').select('id, name, full_name, email, phone').in_('id', p_ids).execute()
                 users_map.update({u["id"]: u for u in (u_res.data or [])})
                 l_res = supabase.table('leads').select('id, name, email, phone_number').in_('id', p_ids).execute()
                 for l in (l_res.data or []):
@@ -80,6 +80,7 @@ def get_consultations(
                 d["users"] = users_map.get(d["patient_id"])
                 d["staffs"] = staffs_map.get(d["doctor_id"])
                 
+            print("DEBUG: Final data returned:", data)
             return data
         except Exception as e2:
             print(f"DEBUG: Fallback error: {e2}")
@@ -90,12 +91,12 @@ def get_patients(current_user: dict = Depends(get_current_user), supabase: Clien
     _check_admin(current_user)
     try:
         # Fetch a combined list of users and leads to show in the dropdown
-        users_res = supabase.table('users').select('id, name, email, phone').order('created_at', desc=True).limit(100).execute()
+        users_res = supabase.table('users').select('id, name, full_name, email, phone').order('created_at', desc=True).limit(100).execute()
         leads_res = supabase.table('leads').select('id, name, email, phone_number').order('created_at', desc=True).limit(100).execute()
         
         patients = []
         for u in (users_res.data or []):
-            patients.append({"id": u["id"], "name": u.get("name") or "Unknown", "phone": u.get("phone"), "type": "user"})
+            patients.append({"id": u["id"], "name": u.get("name") or u.get("full_name") or "Unknown", "phone": u.get("phone"), "type": "user"})
         for l in (leads_res.data or []):
             patients.append({"id": l["id"], "name": l.get("name") or "Unknown", "phone": l.get("phone_number"), "type": "lead"})
             

@@ -168,8 +168,8 @@ export default function ConsultationsPage() {
                 filteredConsultations.map((appt) => (
                   <tr key={appt.id} className="hover:bg-muted/30 transition-colors">
                     <td className="px-4 py-3">
-                      <div className="font-medium">{appt.users?.name || 'Unknown Patient'}</div>
-                      <div className="text-xs text-muted-foreground">{appt.users?.phone || appt.users?.email || '-'}</div>
+                      <div className="font-medium">{appt.users?.name || appt.users?.full_name || appt.users?.phone || 'Unknown Patient'}</div>
+                      <div className="text-xs text-muted-foreground">{(appt.users?.name || appt.users?.full_name) ? (appt.users?.phone || appt.users?.email || '-') : (appt.users?.email || '-')}</div>
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1.5">

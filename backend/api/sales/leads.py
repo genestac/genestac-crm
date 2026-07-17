@@ -147,7 +147,7 @@ async def update_lead_details(lead_id: str, status: Optional[str]=Form(None), pr
     fields = {'status': status, 'priority': priority, 'next_followup_date': next_followup_date, 'followup_notes': followup_notes, 'name': name, 'email': email, 'street_address': street_address, 'city': city, 'state': state, 'postal_code': postal_code, 'country': country, 'source_id': source_id, 'interested_plan_id': interested_plan_id}
     for k, v in fields.items():
         if v is not None:
-            if v == '':
+            if v == '' or v == '__CLEAR__':
                 payload[k] = None
             else:
                 payload[k] = v
@@ -158,8 +158,13 @@ async def update_lead_details(lead_id: str, status: Optional[str]=Form(None), pr
         except Exception:
             pass
     table = 'leads' if record_type == 'LEAD' else 'users'
+    print(f"DEBUG: Updating {table} lead {lead_id} with payload:", payload)
     try:
         response = supabase.table(table).update(payload).eq('id', lead_id).execute()
+        if not response.data:
+            other_table = 'users' if table == 'leads' else 'leads'
+            response = supabase.table(other_table).update(payload).eq('id', lead_id).execute()
+        
         return {'message': 'Lead updated successfully', 'data': response.data}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))

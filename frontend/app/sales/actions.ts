@@ -36,6 +36,11 @@ export async function createLead(formData: FormData) {
 
 export async function updateLeadDetails(formData: FormData) {
   const leadId = formData.get('lead_id') as string
+  
+  if (formData.get('next_followup_date') === '') {
+    formData.set('next_followup_date', '__CLEAR__')
+  }
+  
   await fetchAPI(`/api/sales/leads/${leadId}`, {
     method: 'PUT',
     body: formData

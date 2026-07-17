@@ -9,7 +9,8 @@ import { toast } from 'sonner'
 export function MarkFollowupDoneButton({ lead }: { lead: any }) {
   const [loading, setLoading] = useState(false)
 
-  const handleMarkDone = async () => {
+  const handleMarkDone = async (e: React.MouseEvent<HTMLButtonElement>) => {
+    const row = e.currentTarget.closest('tr')
     setLoading(true)
     try {
       const formData = new FormData()
@@ -19,6 +20,9 @@ export function MarkFollowupDoneButton({ lead }: { lead: any }) {
 
       await updateLeadDetails(formData)
       toast.success('Follow-up marked as done')
+      if (row) {
+        row.style.display = 'none'
+      }
     } catch (error: any) {
       toast.error('Failed to mark as done: ' + error.message)
     } finally {

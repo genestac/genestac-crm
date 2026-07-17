@@ -39,12 +39,26 @@ export function getAuthToken(cookiesList: { name: string; value: string }[]): st
 }
 
 export function clearAuthCookies(cookieStore: any): void {
+  const API_BASE_URL = process.env.API_BASE_URL || 'http://localhost:8000';
+  const isProd = process.env.NODE_ENV === 'production' && !API_BASE_URL.includes('localhost');
+  const domainOpt = isProd ? { domain: '.genestac.com' } : {};
+
   // Function works with both Next.js request.cookies and next/headers cookies()
-  cookieStore.delete('access_token')
-  const allCookies = cookieStore.getAll()
+  try {
+    cookieStore.delete({ name: 'access_token', path: '/', ...domainOpt })
+  } catch (e) {
+    // Fallback for older next.js versions or different interfaces
+    cookieStore.delete('access_token')
+  }
+
+  const allCookies = typeof cookieStore.getAll === 'function' ? cookieStore.getAll() : []
   for (const cookie of allCookies) {
     if (cookie.name.startsWith('sb-') && cookie.name.endsWith('-auth-token')) {
-      cookieStore.delete(cookie.name)
+      try {
+        cookieStore.delete({ name: cookie.name, path: '/', ...domainOpt })
+      } catch (e) {
+        cookieStore.delete(cookie.name)
+      }
     }
   }
 }

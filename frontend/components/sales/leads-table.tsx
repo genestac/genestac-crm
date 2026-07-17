@@ -1,37 +1,58 @@
 'use client'
 
 import { useState, useMemo, useEffect, useRef } from 'react'
-import { Calendar, Mail, Phone, Settings2, ArrowUpDown, ArrowUp, ArrowDown, ChevronLeft, ChevronRight, Search, Filter, ChevronDown } from 'lucide-react'
+import { Calendar, Mail, Phone, Settings2, ArrowUpDown, ArrowUp, ArrowDown, ChevronLeft, ChevronRight, Search, Filter, ChevronDown, FileText } from 'lucide-react'
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuCheckboxItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuGroup } from '@/components/ui/dropdown-menu'
 import { UserStatusUpdater } from '@/components/sales/user-status-updater'
 import { UserManagementSheet } from '@/components/sales/user-management-sheet'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { AICallButton } from '@/components/sales/ai-call-button'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams, usePathname } from 'next/navigation'
 import { getPaginatedLeads, bulkUpdateLeadsStatus } from '@/app/sales/actions'
 import { toast } from 'sonner'
 
 export function LeadsTable({ initialLeads, initialTotal, statusOptions, sourceOptions = [] }: { initialLeads: any[], initialTotal: number, statusOptions: {value: string, label: string}[], sourceOptions?: {value: string, label: string}[] }) {
+  const formatPhone = (phone: string) => {
+    if (!phone) return phone;
+    const clean = phone.replace(/\s+/g, '');
+    const match = clean.match(/^(\+\d{1,3})(\d{3})(\d{3})(\d{4})$/);
+    if (match) {
+      return `${match[1]} ${match[2]}-${match[3]}-${match[4]}`;
+    }
+    const fallbackMatch = clean.match(/^(\+\d{1,3})(\d+)$/);
+    if (fallbackMatch) {
+      return `${fallbackMatch[1]} ${fallbackMatch[2]}`;
+    }
+    return phone;
+  }
+
   const [leads, setLeads] = useState(initialLeads)
   const [total, setTotal] = useState(initialTotal)
   const [selectedLeadIds, setSelectedLeadIds] = useState<string[]>([])
   const [isUpdating, setIsUpdating] = useState(false)
   const [loading, setLoading] = useState(false)
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const pathname = usePathname()
 
   type SortColumn = 'name' | 'created_at' | 'next_followup_date' | 'status' | 'source_id'
   type SortDirection = 'asc' | 'desc' | null
 
-  const [sortColumn, setSortColumn] = useState<SortColumn | null>(null)
-  const [sortDirection, setSortDirection] = useState<SortDirection>(null)
-  const [currentPage, setCurrentPage] = useState(1)
-  const [pageSize, setPageSize] = useState(10)
+  const [sortColumn, setSortColumn] = useState<SortColumn | null>(() => (searchParams.get('sort') as SortColumn) || null)
+  const [sortDirection, setSortDirection] = useState<SortDirection>(() => (searchParams.get('order') as SortDirection) || null)
+  const [currentPage, setCurrentPage] = useState(() => Number(searchParams.get('page')) || 1)
+  const [pageSize, setPageSize] = useState(() => Number(searchParams.get('limit')) || 10)
   
-  const [search, setSearch] = useState('')
-  const [debouncedSearch, setDebouncedSearch] = useState('')
-  // Default matches the server-side fetch in page.tsx
-  const [selectedStatuses, setSelectedStatuses] = useState<string[]>(['NEW', 'UNREAD', 'CONTACT_ATTEMPTED'])
-  const [selectedSource, setSelectedSource] = useState<string>('')
+  const [search, setSearch] = useState(() => searchParams.get('search') || '')
+  const [debouncedSearch, setDebouncedSearch] = useState(() => searchParams.get('search') || '')
+  
+  const [selectedStatuses, setSelectedStatuses] = useState<string[]>(() => {
+    const s = searchParams.get('status')
+    if (s === null) return ['NEW', 'UNREAD', 'CONTACT_ATTEMPTED']
+    if (s === '') return []
+    return s.split(',')
+  })
+  const [selectedSource, setSelectedSource] = useState<string>(() => searchParams.get('source') || '')
   const isInitialMount = useRef(true)
 
   // Debounce search
@@ -53,6 +74,19 @@ export function LeadsTable({ initialLeads, initialTotal, statusOptions, sourceOp
       if (response && response.data) {
         setLeads(response.data)
         setTotal(response.total || 0)
+        
+        // Sync to URL
+        const params = new URLSearchParams()
+        if (currentPage !== 1) params.set('page', currentPage.toString())
+        if (pageSize !== 10) params.set('limit', pageSize.toString())
+        if (debouncedSearch) params.set('search', debouncedSearch)
+        if (selectedSource) params.set('source', selectedSource)
+        if (selectedStatuses.length > 0) params.set('status', selectedStatuses.join(','))
+        else params.set('status', '')
+        if (sortBy !== 'created_at') params.set('sort', sortBy)
+        if (order !== 'desc') params.set('order', order)
+        
+        window.history.replaceState(null, '', `${pathname}?${params.toString()}`)
       }
     } catch (error) {
       console.error('Error fetching leads:', error)
@@ -321,15 +355,24 @@ export function LeadsTable({ initialLeads, initialTotal, statusOptions, sourceOp
                 </td>
 
                 {/* Date */}
-                <td className="px-6 py-4 text-gray-600">
-                  {lead.created_at ? new Date(lead.created_at).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }) : '-'}
+                <td className="px-6 py-4">
+                  {lead.created_at ? (
+                    <>
+                      <div className="font-medium text-gray-800">
+                        {new Date(lead.created_at).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })}
+                      </div>
+                      <div className="text-xs text-gray-500 mt-1">
+                        {new Date(lead.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </div>
+                    </>
+                  ) : '-'}
                 </td>
 
                 {/* Contact */}
                 <td className="px-6 py-4">
-                  <div className="flex items-center text-gray-700">
-                    <Phone className="w-3 h-3 mr-2 text-gray-400" />
-                    {lead.phone}
+                  <div className="flex items-center text-gray-900 font-bold tracking-wide">
+                    <Phone className="w-3 h-3 mr-2 text-gray-400 font-normal" />
+                    {formatPhone(lead.phone)}
                   </div>
                   {lead.email && (
                     <div className="flex items-center text-gray-500 text-xs mt-1">
@@ -365,7 +408,21 @@ export function LeadsTable({ initialLeads, initialTotal, statusOptions, sourceOp
 
                 {/* Status */}
                 <td className="px-6 py-4">
-                  <UserStatusUpdater leadId={lead.id} currentStatus={lead.status} recordType={lead.record_type} statusOptions={statusOptions} />
+                  <UserStatusUpdater 
+                    leadId={lead.id} 
+                    currentStatus={lead.status} 
+                    recordType={lead.record_type} 
+                    statusOptions={statusOptions} 
+                    onStatusChange={(newStatus) => {
+                      const updatedLeads = leads.map((l: any) => l.id === lead.id ? { ...l, status: newStatus } : l)
+                      if (selectedStatuses.length > 0 && !selectedStatuses.includes(newStatus)) {
+                        setLeads(updatedLeads.filter((l: any) => l.id !== lead.id))
+                        setTotal(prev => prev - 1)
+                      } else {
+                        setLeads(updatedLeads)
+                      }
+                    }}
+                  />
                 </td>
 
                 {/* Actions */}
@@ -387,8 +444,39 @@ export function LeadsTable({ initialLeads, initialTotal, statusOptions, sourceOp
                     
                     <AICallButton leadId={lead.id} compact={true} />
                     
-                    <UserManagementSheet lead={lead} statusOptions={statusOptions}>
-                      <Button variant="secondary" size="sm" className="bg-gray-100 hover:bg-gray-200 text-gray-900">
+                    <UserManagementSheet 
+                      lead={lead} 
+                      statusOptions={statusOptions} 
+                      defaultTab="files"
+                      onLeadUpdate={(updatedLead) => {
+                        const newStatus = updatedLead.status
+                        if (selectedStatuses.length > 0 && !selectedStatuses.includes(newStatus)) {
+                          setLeads(prev => prev.filter((l: any) => l.id !== updatedLead.id))
+                          setTotal(prev => prev - 1)
+                        } else {
+                          setLeads(prev => prev.map((l: any) => l.id === updatedLead.id ? updatedLead : l))
+                        }
+                      }}
+                    >
+                      <Button variant="outline" size="icon" className="w-8 h-8 rounded bg-gray-50 border-gray-200 text-gray-500 hover:text-blue-600 hover:bg-blue-50 transition-colors shadow-sm" title="Notes & Symptoms">
+                        <FileText className="w-4 h-4" />
+                      </Button>
+                    </UserManagementSheet>
+
+                    <UserManagementSheet 
+                      lead={lead} 
+                      statusOptions={statusOptions}
+                      onLeadUpdate={(updatedLead) => {
+                        const newStatus = updatedLead.status
+                        if (selectedStatuses.length > 0 && !selectedStatuses.includes(newStatus)) {
+                          setLeads(prev => prev.filter((l: any) => l.id !== updatedLead.id))
+                          setTotal(prev => prev - 1)
+                        } else {
+                          setLeads(prev => prev.map((l: any) => l.id === updatedLead.id ? updatedLead : l))
+                        }
+                      }}
+                    >
+                      <Button variant="secondary" size="sm" className="bg-gray-100 hover:bg-gray-200 text-gray-900 shadow-sm">
                         <Settings2 className="w-4 h-4 mr-2" /> Manage
                       </Button>
                     </UserManagementSheet>
