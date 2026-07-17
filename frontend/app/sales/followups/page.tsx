@@ -1,5 +1,6 @@
 import { fetchAPI } from '@/utils/api'
 import { UserManagementSheet } from '@/components/sales/user-management-sheet'
+import { MarkFollowupDoneButton } from '@/components/sales/mark-followup-done-button'
 import { Button } from '@/components/ui/button'
 import { Calendar, Mail, Phone, Settings2 } from 'lucide-react'
 
@@ -79,11 +80,14 @@ export default async function FollowupsPage() {
 
                     {/* Actions */}
                     <td className="px-6 py-4 text-right">
-                      <UserManagementSheet lead={lead}>
-                        <Button variant="secondary" size="sm" className="bg-gray-100 hover:bg-gray-200 text-gray-900">
-                          <Settings2 className="w-4 h-4 mr-2" /> Manage
-                        </Button>
-                      </UserManagementSheet>
+                      <div className="flex justify-end items-center">
+                        <MarkFollowupDoneButton lead={lead} />
+                        <UserManagementSheet lead={lead}>
+                          <Button variant="secondary" size="sm" className="bg-gray-100 hover:bg-gray-200 text-gray-900">
+                            <Settings2 className="w-4 h-4 mr-2" /> Manage
+                          </Button>
+                        </UserManagementSheet>
+                      </div>
                     </td>
                     
                   </tr>

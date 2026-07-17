@@ -166,7 +166,7 @@ def get_available_slots(
     """
     schedule = get_doctor_schedule(doctor_id, supabase)
 
-    if not schedule:
+    if not schedule or not schedule.get("allow_scheduling", True):
         return []
 
     # Check if the target date is in the doctor's working days

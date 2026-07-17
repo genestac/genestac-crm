@@ -80,8 +80,13 @@ from datetime import datetime
 import pytz
 
 def is_doctor_available(doc: dict, current_time: datetime) -> bool:
-    if doc.get("is_active"):
-        return True
+    if not doc.get("allow_ai_calls", True):
+        return False
+        
+    if not doc.get("is_active"):
+        return False
+        
+    # If they are active and allow AI calls, check their schedule
     
     start_time_str = doc.get("start_time")
     end_time_str = doc.get("end_time")
@@ -780,53 +785,71 @@ async def voice_stream(websocket: WebSocket):
                 if admin_res.data:
                     sales_rep_id = admin_res.data[0]["id"]
 
-            # --- Find the best doctor for the requested time ---
-            doc_res = supabase.table("doctor_schedules").select("staff_id, staffs(full_name)").execute()
-            doctor_id = None
-            doctor_name = "our doctor"
-            if doc_res.data:
-                doctor_id = doc_res.data[0]["staff_id"]
-                staff_info = doc_res.data[0].get("staffs")
-                if isinstance(staff_info, dict):
-                    doctor_name = staff_info.get("full_name", "our doctor")
-
-            if not doctor_id or not sales_rep_id:
-                logger.error(f"[Schedule Call] Cannot book: doctor_id={doctor_id}, sales_rep_id={sales_rep_id}")
+            # --- Find all eligible doctors ---
+            doc_res = supabase.table("doctor_schedules").select("staff_id, staffs(full_name), allow_scheduling").eq("allow_scheduling", True).execute()
+            
+            if not doc_res.data:
+                logger.error("[Schedule Call] No doctors with allow_scheduling=True found.")
                 await result_callback({
                     "status": "error",
                     "message": "Tell the user: 'I was unable to schedule the appointment automatically. Our team will reach out to you to confirm the booking.'"
                 })
                 return
 
-            # --- Use slot engine to find the nearest available slot ---
-            from services.slot_service import find_nearest_available_slot as _find_slot, check_conflict as _check_conflict
+            from services.slot_service import find_nearest_available_slot as _find_slot
             from datetime import datetime as _dt2
 
             preferred_dt = _dt2.fromisoformat(scheduled_at_iso)
-            slot = _find_slot(
-                doctor_id=doctor_id,
-                preferred_dt=preferred_dt,
-                duration_minutes=10,
-                supabase=supabase,
-                search_days=7,
-            )
+            
+            best_slot = None
+            best_doctor_id = None
+            best_doctor_name = "our doctor"
+            
+            # Find the doctor with the nearest slot across all doctors
+            for doc in doc_res.data:
+                did = doc["staff_id"]
+                slot = _find_slot(
+                    doctor_id=did,
+                    preferred_dt=preferred_dt,
+                    duration_minutes=10,
+                    supabase=supabase,
+                    search_days=7,
+                )
+                if slot:
+                    # Compare distance to preferred_dt
+                    slot_start = _dt2.fromisoformat(slot["start"])
+                    # Remove tz for naive subtraction if preferred_dt is naive, or ensure both are aware
+                    if slot_start.tzinfo and not preferred_dt.tzinfo:
+                        import pytz
+                        ist = pytz.timezone("Asia/Kolkata")
+                        preferred_dt = ist.localize(preferred_dt)
+                    dist = abs((slot_start - preferred_dt).total_seconds())
+                    
+                    if best_slot is None or dist < best_slot["dist"]:
+                        slot["dist"] = dist
+                        best_slot = slot
+                        best_doctor_id = did
+                        staff_info = doc.get("staffs")
+                        if isinstance(staff_info, dict):
+                            best_doctor_name = staff_info.get("full_name", "our doctor")
 
-            if not slot:
-                logger.warning(f"[Schedule Call] No available slot found in the next 7 days for doctor {doctor_id}")
+            if not best_slot:
+                logger.warning(f"[Schedule Call] No available slot found in the next 7 days across any doctor")
                 await result_callback({
                     "status": "error",
                     "message": "Tell the user: 'I'm sorry, I couldn't find an available appointment slot in the next 7 days. Our team will contact you to confirm a convenient time.'"
                 })
                 return
 
-            # Use the found slot (may differ from requested time if that was taken)
-            actual_scheduled_at = slot["start"]
+            doctor_id = best_doctor_id
+            doctor_name = best_doctor_name
+            actual_scheduled_at = best_slot["start"]
             slot_was_adjusted = actual_scheduled_at != scheduled_at_iso
 
             if slot_was_adjusted:
                 logger.warning(
                     f"[Schedule Call] Requested slot {scheduled_at_iso} was taken. "
-                    f"Auto-adjusted to nearest free slot: {actual_scheduled_at}"
+                    f"Auto-adjusted to nearest free slot: {actual_scheduled_at} with doctor {doctor_name}"
                 )
 
             # --- Insert into appointments table ---

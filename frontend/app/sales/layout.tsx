@@ -19,7 +19,7 @@ export default async function SalesLayout({ children }: { children: React.ReactN
     <div className="flex h-screen overflow-hidden bg-gray-50">
       <SalesSidebar />
       <div className="flex flex-col flex-1 w-full">
-        <SalesHeader role={roleName} />
+        <SalesHeader user={data.user} />
         <main className="flex-1 overflow-y-auto bg-gray-50/50 p-6">
           {children}
         </main>

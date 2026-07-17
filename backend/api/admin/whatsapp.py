@@ -8,6 +8,7 @@ from db.supabase import get_supabase_client
 from api.deps import get_current_user
 from services.whatsapp_service import send_whatsapp_text, send_whatsapp_interactive
 from services.exotel_service import initiate_ai_call
+from services.openai_agent import process_whatsapp_message
 
 router = APIRouter()
 
@@ -374,6 +375,7 @@ async def verify_webhook(
 @router.post('/webhook')
 async def webhook_handler(payload: dict, background_tasks: BackgroundTasks, supabase: Client = Depends(get_supabase_client)):
     try:
+        print(f"[WhatsApp Webhook] Received payload: {payload}")
         if payload.get("object") == "whatsapp_business_account":
             for entry in payload.get("entry", []):
                 for change in entry.get("changes", []):
@@ -440,7 +442,7 @@ async def webhook_handler(payload: dict, background_tasks: BackgroundTasks, supa
                                     "phone_number": f"+{clean_phone}",
                                     "status": "NEW",
                                     "source_id": whatsapp_source_id,
-                                    "metadata": {"whatsapp_step": "asked_name"}
+                                    "metadata": {}
                                 }
                                 res = supabase.table("leads").insert(new_lead_data).execute()
                                 if res.data:
@@ -448,102 +450,69 @@ async def webhook_handler(payload: dict, background_tasks: BackgroundTasks, supa
                                     table = "leads"
                                     phone_field = "phone_number"
                                     metadata = new_lead_data["metadata"]
-                                    current_step = "asked_name"
                                     
-                                # Send "May I know your name?"
-                                await send_whatsapp_text(clean_phone, "Hi! Welcome to Genestac!\nMay I know your name?")
+                            # Check if bot is paused
+                            is_bot_paused = metadata.get("bot_paused", False)
+                            
+                            # Insert incoming message to DB
+                            wa_message_id = msg.get("id")
+                            lead_col = "user_id" if table == "users" else "lead_id"
+                            
+                            supabase.table("whatsapp_messages").insert({
+                                lead_col: existing["id"],
+                                "message_body": text_body,
+                                "sender_type": "lead",
+                                "wa_message_id": wa_message_id
+                            }).execute()
+                            
+                            if is_bot_paused:
+                                print(f"[WhatsApp Webhook] Bot paused for {clean_phone}, skipping AI reply.")
                                 continue
+                            
+                            print(f"[WhatsApp Webhook] Processing message with OpenAI Agent for {clean_phone}")
+                            
+                            # Use OpenAI RAG Agent
+                            ai_reply, should_trigger_call = await process_whatsapp_message(
+                                lead=existing, 
+                                message=text_body, 
+                                supabase=supabase
+                            )
+                            
+                            # Send AI Reply
+                            if ai_reply:
+                                await send_whatsapp_text(clean_phone, ai_reply)
+                                supabase.table("whatsapp_messages").insert({
+                                    lead_col: existing["id"],
+                                    "message_body": ai_reply,
+                                    "sender_type": "bot"
+                                }).execute()
                                 
-                            # State: asked_name
-                            if current_step == "asked_name":
-                                # Save name, ask condition
-                                name_provided = text_body
-                                metadata["whatsapp_step"] = "asked_condition"
-                                supabase.table(table).update({"name": name_provided, "metadata": metadata}).eq("id", existing["id"]).execute()
-                                
-                                # Send Condition list
-                                list_payload = {
-                                    "type": "list",
-                                    "body": {"text": "Please select your medical condition:"},
-                                    "action": {
-                                        "button": "Select",
-                                        "sections": [{
-                                            "title": "Conditions",
-                                            "rows": [
-                                                {"id": "diabetes", "title": "Diabetes"},
-                                                {"id": "fatty_liver", "title": "Fatty Liver"},
-                                                {"id": "pcos", "title": "PCOS"},
-                                                {"id": "other", "title": "Other"}
-                                            ]
-                                        }]
-                                    }
-                                }
-                                await send_whatsapp_interactive(clean_phone, list_payload)
-                                continue
-                                
-                            # State: asked_condition
-                            if current_step == "asked_condition":
-                                condition = interactive_reply_title or text_body
-                                metadata["medical_condition"] = condition
-                                metadata["whatsapp_step"] = "asked_call"
-                                supabase.table(table).update({"metadata": metadata}).eq("id", existing["id"]).execute()
-                                
-                                # Ask call preference
-                                button_payload = {
-                                    "type": "button",
-                                    "body": {"text": "Would you like us to call you?"},
-                                    "action": {
-                                        "buttons": [
-                                            {"type": "reply", "reply": {"id": "call_yes", "title": "Get a Call"}},
-                                            {"type": "reply", "reply": {"id": "call_no", "title": "No Thanks"}}
-                                        ]
-                                    }
-                                }
-                                await send_whatsapp_interactive(clean_phone, button_payload)
-                                continue
-                                
-                            # State: asked_call
-                            if current_step == "asked_call":
-                                wants_call = (interactive_reply_id == "call_yes" or text_body.lower() == "yes" or text_body.lower() == "get a call")
-                                metadata["wants_call"] = wants_call
-                                metadata["whatsapp_step"] = "done"
-                                supabase.table(table).update({"metadata": metadata}).eq("id", existing["id"]).execute()
-                                
-                                if wants_call:
-                                    # Trigger Exotel AI Call in background
-                                    def trigger_exotel(phone, lead_id):
-                                        res_settings = supabase.table("global_settings").select("settings_value").eq("settings_key", "ai_call_settings").execute()
-                                        exotel_number = None
-                                        if res_settings.data:
-                                            exotel_number = res_settings.data[0]["settings_value"].get("exotel_number")
-                                        if not exotel_number:
-                                            exotel_number = "+9101141189316" # Fallback caller ID
+                            # Trigger Exotel Call if AI requested it
+                            if should_trigger_call:
+                                print(f"[WhatsApp Webhook] Triggering Exotel call for {clean_phone}")
+                                def trigger_exotel(phone, lead_id):
+                                    res_settings = supabase.table("global_settings").select("settings_value").eq("settings_key", "ai_call_settings").execute()
+                                    exotel_number = None
+                                    if res_settings.data:
+                                        exotel_number = res_settings.data[0]["settings_value"].get("exotel_number")
+                                    if not exotel_number:
+                                        exotel_number = "+9101141189316" # Fallback caller ID
+                                        
+                                    log_res = supabase.table("ai_call_logs").insert({"lead_id": lead_id, "status": "initiating"}).execute()
+                                    call_log_id = log_res.data[0]["id"] if log_res.data else None
+                                    
+                                    formatted_phone = f"+{phone}" if not phone.startswith("+") else phone
+                                    exotel_res = initiate_ai_call(from_number=exotel_number, to_number=formatted_phone, lead_id=lead_id)
+                                    
+                                    if exotel_res and "Call" in exotel_res:
+                                        call_sid = exotel_res["Call"].get("Sid")
+                                        if call_log_id:
+                                            supabase.table("ai_call_logs").update({"call_sid": call_sid, "status": "ringing"}).eq("id", call_log_id).execute()
+                                    else:
+                                        if call_log_id:
+                                            supabase.table("ai_call_logs").update({"status": "failed_to_initiate"}).eq("id", call_log_id).execute()
                                             
-                                        log_res = supabase.table("ai_call_logs").insert({"lead_id": lead_id, "status": "initiating"}).execute()
-                                        call_log_id = log_res.data[0]["id"] if log_res.data else None
-                                        
-                                        formatted_phone = f"+{phone}" if not phone.startswith("+") else phone
-                                        exotel_res = initiate_ai_call(from_number=exotel_number, to_number=formatted_phone, lead_id=lead_id)
-                                        
-                                        if exotel_res and "Call" in exotel_res:
-                                            call_sid = exotel_res["Call"].get("Sid")
-                                            if call_log_id:
-                                                supabase.table("ai_call_logs").update({"call_sid": call_sid, "status": "ringing"}).eq("id", call_log_id).execute()
-                                        else:
-                                            if call_log_id:
-                                                supabase.table("ai_call_logs").update({"status": "failed_to_initiate"}).eq("id", call_log_id).execute()
-                                                
-                                    background_tasks.add_task(trigger_exotel, clean_phone, existing["id"])
-                                    
-                                    await send_whatsapp_text(clean_phone, "Thank you!\nOur team will call you very soon.")
-                                else:
-                                    await send_whatsapp_text(clean_phone, "Thank you!\nOur team will contact you very soon.")
-                                continue
-                                
-                            # State: done (or empty if they completed it before)
-                            if current_step == "done":
-                                name_greeting = lead_name or "there"
-                                await send_whatsapp_text(clean_phone, f"Welcome back {name_greeting}!\nOur team will be in touch with you very soon.")
+                                background_tasks.add_task(trigger_exotel, clean_phone, existing["id"])
                                 
     except Exception as e:
         print(f"[WhatsApp Webhook Error]: {e}")

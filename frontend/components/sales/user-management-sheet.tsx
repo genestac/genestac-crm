@@ -15,7 +15,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGr
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
 import { updateLeadDetails, uploadLeadDocument, getLeadDocuments, getUserNotes, addInteractionNote, getDoctors, bookAppointment, getPlans, getSources, generateRazorpayLink, getProformaInvoices, deleteProformaInvoice, getCurrentUserRole, getAICallLogs, triggerAICall } from '@/app/sales/actions'
-import { FileUp, FileText, Download, Loader2, CreditCard, ChevronDown, ChevronRight, Check, Calendar, Activity, User, Receipt, CheckCircle2, FileDown, Phone, Mic, Bot } from 'lucide-react'
+import { FileUp, FileText, Download, Loader2, CreditCard, ChevronDown, ChevronRight, Check, Calendar, Activity, User, Receipt, CheckCircle2, FileDown, Phone, Mic, Bot, MessageCircle } from 'lucide-react'
+import { WhatsappChat } from "./whatsapp-chat"
 
 export function UserManagementSheet({ 
   lead, 
@@ -38,7 +39,7 @@ export function UserManagementSheet({
   const [planId, setPlanId] = useState<string | null>(lead.interested_plan_id || null)
   const [customFields, setCustomFields] = useState<any[]>([])
   
-  // Tab state: "overview", "pipeline", "payment", "appointments", "files"
+  // Tab state: "overview", "pipeline", "payment", "appointments", "files", "call_logs", "whatsapp"
   const [activeTab, setActiveTabRaw] = useState("overview")
 
   useEffect(() => {
@@ -328,22 +329,23 @@ export function UserManagementSheet({
           </div>
         </DialogHeader>
 
-        <div className="flex border-b px-8 bg-muted/30 pt-2 gap-2">
+        <div className="flex border-b px-8 bg-muted/30 pt-2 gap-2 overflow-x-auto scrollbar-hide">
           {[
             { id: "overview", label: "Overview", icon: User },
             { id: "pipeline", label: "Pipeline", icon: Activity },
             { id: "payment", label: "Payment", icon: CreditCard },
             { id: "appointments", label: "Appointments", icon: Calendar },
             { id: "files", label: "Files & Notes", icon: FileText },
-            { id: "call_logs", label: "AI Calls", icon: Phone }
+            { id: "call_logs", label: "AI Calls", icon: Phone },
+            { id: "whatsapp", label: "WhatsApp", icon: MessageCircle }
           ].map(tab => (
             <button
               key={tab.id}
               type="button"
               onClick={() => setActiveTab(tab.id)}
-              className={`px-5 py-2.5 text-sm font-semibold rounded-t-xl transition-all duration-300 flex items-center gap-2 ${
+              className={`px-5 py-2.5 text-sm font-semibold rounded-t-xl transition-all duration-300 flex items-center gap-2 whitespace-nowrap ${
                 activeTab === tab.id 
-                  ? 'border-primary text-primary' 
+                  ? 'border-primary text-primary border-b-2' 
                   : 'border-transparent text-gray-500 hover:text-gray-900'
               }`}
             >
@@ -1083,6 +1085,7 @@ export function UserManagementSheet({
               </div>
             )}
 
+            {/* AI CALL LOGS TAB */}
             {activeTab === "call_logs" && (
               <div className="space-y-6">
                 <div className="flex items-center justify-between pb-4 border-b">
@@ -1158,6 +1161,13 @@ export function UserManagementSheet({
                     ))
                   )}
                 </div>
+              </div>
+            )}
+
+            {/* WHATSAPP TAB */}
+            {activeTab === "whatsapp" && (
+              <div className="p-0">
+                <WhatsappChat leadId={lead.id} />
               </div>
             )}
           </div>

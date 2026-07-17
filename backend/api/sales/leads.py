@@ -187,7 +187,8 @@ async def get_leads(statuses: Optional[str]=Query(None), exclude_statuses: Optio
         if source_id:
             u_query = u_query.eq('source_id', source_id)
         if search:
-            u_query = u_query.or_(f'name.ilike.%{search}%,phone.ilike.%{search}%')
+            safe_search = search.replace('"', '""')
+            u_query = u_query.or_(f'name.ilike."%{safe_search}%",phone.ilike."%{safe_search}%"')
         u_res = u_query.execute()
         users_data = u_res.data or []
         for u in users_data:
@@ -211,7 +212,8 @@ async def get_leads(statuses: Optional[str]=Query(None), exclude_statuses: Optio
             if source_id:
                 l_query = l_query.eq('source_id', source_id)
             if search:
-                l_query = l_query.or_(f'name.ilike.%{search}%,phone_number.ilike.%{search}%')
+                safe_search = search.replace('"', '""')
+                l_query = l_query.or_(f'name.ilike."%{safe_search}%",phone_number.ilike."%{safe_search}%"')
             l_res = l_query.execute()
             leads_data = l_res.data or []
             for l in leads_data:

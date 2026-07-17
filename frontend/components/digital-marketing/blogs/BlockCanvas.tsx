@@ -2,8 +2,8 @@
 
 import { useState, useRef } from 'react'
 import {
-  Plus, GripVertical, Trash2, ChevronDown,
-  Heading2, Type, Image as ImageIcon, Video, MousePointerClick, Table, Columns,
+  Plus, GripVertical, Trash2, ChevronDown, MoveVertical,
+  Heading2, Type, Image as ImageIcon, Video, MousePointerClick, Table, Columns, Settings2
 } from 'lucide-react'
 import { HeadingBlock } from './blocks/HeadingBlock'
 import { TextBlock }    from './blocks/TextBlock'
@@ -60,6 +60,8 @@ export function BlockCanvas({ blocks, onChange, disableColumns }: Props) {
   const [showAddMenu, setShowAddMenu] = useState<number | null>(null) // insert AFTER this index, -1 = top
   const [dragging, setDragging] = useState<number | null>(null)
   const [dragOver, setDragOver]   = useState<number | null>(null)
+  const [showSpacingMenu, setShowSpacingMenu] = useState<string | null>(null)
+  const [showGlobalMenu, setShowGlobalMenu] = useState(false)
 
   const availableBlocks = disableColumns ? BLOCK_META.filter(b => b.type !== 'columns') : BLOCK_META
 
@@ -75,8 +77,22 @@ export function BlockCanvas({ blocks, onChange, disableColumns }: Props) {
     onChange(blocks.map(b => b.id === id ? { ...b, data } : b))
   }
 
+  const updateBlockSpacing = (id: string, spacing: ContentBlock['spacing']) => {
+    onChange(blocks.map(b => b.id === id ? { ...b, spacing: { ...b.spacing, ...spacing } } : b))
+  }
+
   const deleteBlock = (id: string) => {
     onChange(blocks.filter(b => b.id !== id))
+    if (showSpacingMenu === id) setShowSpacingMenu(null)
+  }
+
+  const setGlobalTextSize = (size: string) => {
+    onChange(blocks.map(b => {
+      if (b.type === 'text') {
+        return { ...b, data: { ...b.data, baseFontSize: size } as TextData }
+      }
+      return b
+    }))
   }
 
   // Drag-and-drop reorder
@@ -92,6 +108,47 @@ export function BlockCanvas({ blocks, onChange, disableColumns }: Props) {
 
   return (
     <div className="space-y-2">
+      {/* Global Toolbar */}
+      {blocks.length > 0 && (
+        <div className="flex justify-end mb-4 relative z-50">
+          <div className="relative">
+            <button 
+              type="button" 
+              onClick={() => setShowGlobalMenu(!showGlobalMenu)}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-border bg-card hover:bg-muted transition-colors text-muted-foreground"
+            >
+              <Type className="w-3.5 h-3.5" />
+              Set All Text Sizes
+              <ChevronDown className="w-3 h-3" />
+            </button>
+            {showGlobalMenu && (
+              <div className="absolute top-full right-0 mt-1 flex flex-col bg-card border border-border rounded-xl shadow-xl z-[60] py-1 min-w-[180px]">
+                <div className="px-3 py-1.5 text-[10px] font-bold text-muted-foreground uppercase tracking-wider border-b border-border mb-1">Global Base Size</div>
+                {[
+                  { size: 'text-sm prose-sm', label: 'Small' },
+                  { size: 'text-base prose-base', label: 'Medium' },
+                  { size: 'text-lg prose-lg', label: 'Large (Medium.com)' },
+                  { size: 'text-xl prose-xl', label: 'Extra Large' },
+                ].map(({ size, label }) => (
+                  <button
+                    key={size}
+                    type="button"
+                    onMouseDown={e => {
+                      e.preventDefault()
+                      setGlobalTextSize(size)
+                      setShowGlobalMenu(false)
+                    }}
+                    className="px-4 py-2 text-left text-sm hover:bg-muted transition-colors"
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Empty state */}
       {blocks.length === 0 && (
         <div className={`text-center rounded-2xl border-2 border-dashed border-violet-200 dark:border-violet-800 bg-violet-50/30 dark:bg-violet-950/10 ${disableColumns ? 'py-6' : 'py-16'}`}>
@@ -118,6 +175,10 @@ export function BlockCanvas({ blocks, onChange, disableColumns }: Props) {
             onDragEnd={() => { setDragging(null); setDragOver(null) }}
             onDragOver={e => { e.preventDefault(); setDragOver(idx) }}
             onDrop={() => handleDrop(idx)}
+            style={{ 
+              marginTop: block.spacing?.marginTop || undefined,
+              marginBottom: block.spacing?.marginBottom || undefined,
+            }}
             className={`group relative bg-card border rounded-2xl p-5 transition-all duration-200 ${
               dragging === idx
                 ? 'opacity-40 border-violet-400 shadow-lg scale-[0.99]'
@@ -139,6 +200,59 @@ export function BlockCanvas({ blocks, onChange, disableColumns }: Props) {
               >
                 <Plus className="w-4 h-4" />
               </button>
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setShowSpacingMenu(showSpacingMenu === block.id ? null : block.id)}
+                  className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                  title="Spacing Settings"
+                >
+                  <MoveVertical className="w-4 h-4" />
+                </button>
+                {showSpacingMenu === block.id && (
+                  <div className="absolute top-full right-0 mt-1 w-64 bg-card border border-border rounded-xl shadow-xl p-3 z-30">
+                    <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-3">Spacing (Margins)</p>
+                    <div className="space-y-3">
+                      <div>
+                        <label className="text-[10px] uppercase font-semibold text-muted-foreground">Top Spacing</label>
+                        <select 
+                          value={block.spacing?.marginTop || ''} 
+                          onChange={e => updateBlockSpacing(block.id, { marginTop: e.target.value })}
+                          className="w-full mt-1 text-sm bg-background border border-border rounded-md px-2 py-1"
+                        >
+                          <option value="">Default</option>
+                          <option value="0">Remove (0px)</option>
+                          <option value="-1rem">Negative (-1rem)</option>
+                          <option value="-2rem">Negative (-2rem)</option>
+                          <option value="-3rem">Negative (-3rem)</option>
+                          <option value="1rem">Small (1rem)</option>
+                          <option value="2rem">Medium (2rem)</option>
+                          <option value="4rem">Large (4rem)</option>
+                          <option value="8rem">Massive (8rem)</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-[10px] uppercase font-semibold text-muted-foreground">Bottom Spacing</label>
+                        <select 
+                          value={block.spacing?.marginBottom || ''} 
+                          onChange={e => updateBlockSpacing(block.id, { marginBottom: e.target.value })}
+                          className="w-full mt-1 text-sm bg-background border border-border rounded-md px-2 py-1"
+                        >
+                          <option value="">Default</option>
+                          <option value="0">Remove (0px)</option>
+                          <option value="-1rem">Negative (-1rem)</option>
+                          <option value="-2rem">Negative (-2rem)</option>
+                          <option value="-3rem">Negative (-3rem)</option>
+                          <option value="1rem">Small (1rem)</option>
+                          <option value="2rem">Medium (2rem)</option>
+                          <option value="4rem">Large (4rem)</option>
+                          <option value="8rem">Massive (8rem)</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
               <div className="cursor-grab active:cursor-grabbing p-1.5 rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors">
                 <GripVertical className="w-4 h-4" />
               </div>

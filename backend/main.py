@@ -4,7 +4,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from core.config import settings
 from api import sales, auth, doctor
-from api.admin import staffs, roles, crm_settings, logs, lead_assignment, coupons, metrics, ai_settings, blogs
+from api.admin import staffs, roles, crm_settings, logs, lead_assignment, coupons, metrics, ai_settings, blogs, doctors
 from api import public
 
 from core.scheduler import start_scheduler
@@ -42,7 +42,9 @@ app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(sales.router, prefix="/api/sales", tags=["sales"])
 app.include_router(doctor.router, prefix="/api/doctor", tags=["doctor"])
 from api.admin import whatsapp
+from api.admin import whatsapp_chat
 app.include_router(whatsapp.router, prefix="/api/admin/whatsapp", tags=["admin-whatsapp"])
+app.include_router(whatsapp_chat.router, prefix="/api/admin/whatsapp/chat", tags=["admin-whatsapp-chat"])
 app.include_router(staffs.router, prefix="/api/admin/staffs", tags=["admin-staffs"])
 app.include_router(roles.router, prefix="/api/admin/roles", tags=["admin-roles"])
 app.include_router(crm_settings.router, prefix="/api/admin/crm-settings", tags=["admin-crm"])
@@ -52,7 +54,9 @@ app.include_router(coupons.router, prefix="/api/admin/coupons", tags=["admin-cou
 app.include_router(metrics.router, prefix="/api/admin/metrics", tags=["admin-metrics"])
 app.include_router(ai_settings.router, prefix="/api/admin/ai-settings", tags=["admin-ai-settings"])
 app.include_router(blogs.router, prefix="/api/admin/blogs", tags=["admin-blogs"])
-
+app.include_router(doctors.router, prefix="/api/admin/doctors", tags=["admin-doctors"])
+from api.admin import consultations
+app.include_router(consultations.router, prefix="/api/admin/consultations", tags=["admin-consultations"])
 from api.webhooks import voice_stream, conference, call_status
 app.include_router(voice_stream.router, prefix="/api/webhooks/exotel", tags=["webhooks-exotel"])
 app.include_router(conference.router, prefix="/api/webhooks/exotel", tags=["webhooks-exotel"])

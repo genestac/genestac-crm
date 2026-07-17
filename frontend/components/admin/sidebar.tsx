@@ -43,6 +43,7 @@ const modules = [
     title: 'Marketing',
     routes: [
       { name: 'WhatsApp Campaigns', path: '/admin/whatsapp', icon: MessageCircle },
+      { name: 'WhatsApp Inbox', path: '/admin/whatsapp-inbox', icon: MessageCircle },
     ]
   },
   {
@@ -52,6 +53,7 @@ const modules = [
       { name: 'Lead Assignment', path: '/admin/lead-assignment', icon: Users },
       { name: 'Proforma Invoices', path: '/admin/proforma-invoices', icon: FileText },
       { name: 'Doctors', path: '/admin/doctors', icon: Stethoscope },
+      { name: 'Consultations', path: '/admin/consultations', icon: FileText },
       { name: 'Medical Plans', path: '/admin/plans', icon: CreditCard },
     ]
   },

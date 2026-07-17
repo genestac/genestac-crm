@@ -129,9 +129,14 @@ async def get_admin_metrics(
         todays_orders_count = 0
         todays_orders_revenue = 0
         try:
-            orders_res = supabase.table("orders").select("grand_total, created_at").execute()
+            orders_res = supabase.table("orders").select("grand_total, created_at, payment_status").execute()
             orders_data = orders_res.data or []
             for o in orders_data:
+                # ONLY COUNT PAID ORDERS
+                status = str(o.get("payment_status", "")).lower()
+                if status not in ["paid", "successful", "completed", "success"]:
+                    continue
+                    
                 amt = float(o.get("grand_total") or 0)
                 total_revenue += amt
                 

@@ -41,6 +41,7 @@ export async function updateLeadDetails(formData: FormData) {
     body: formData
   })
   revalidatePath('/sales/leads')
+  revalidatePath('/sales/followups')
 }
 
 export async function bulkUpdateLeadsStatus(leadIds: string[], status: string) {
@@ -158,4 +159,52 @@ export async function triggerAICall(leadId: string) {
     headers: { 'Cookie': (await cookies()).toString() }
   })
   return response
+}
+
+export async function getWhatsappChats(leadId: string) {
+  try {
+    const res = await fetchAPI(`/api/admin/whatsapp/chat/${leadId}`)
+    return res.data || []
+  } catch (error) {
+    console.error("Failed to get WA chats:", error)
+    return []
+  }
+}
+
+export async function sendWhatsappChat(leadId: string, message: string) {
+  try {
+    const res = await fetchAPI(`/api/admin/whatsapp/chat/${leadId}/send`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message })
+    })
+    return res
+  } catch (error: any) {
+    console.error("Failed to send WA chat:", error)
+    throw new Error(error.message || "Failed to send message")
+  }
+}
+
+export async function resumeWhatsappBot(leadId: string) {
+  try {
+    const res = await fetchAPI(`/api/admin/whatsapp/chat/${leadId}/resume-bot`, {
+      method: 'POST'
+    })
+    return res
+  } catch (error: any) {
+    console.error("Failed to resume bot:", error)
+    throw new Error(error.message || "Failed to resume bot")
+  }
+}
+
+export async function getWhatsappConversations() {
+  try {
+    const res = await fetchAPI('/api/admin/whatsapp/chat/conversations', {
+      next: { revalidate: 5 } // Short cache
+    })
+    return res.data || []
+  } catch (error) {
+    console.error("Failed to get WA conversations:", error)
+    return []
+  }
 }

@@ -11,6 +11,9 @@ export interface HeadingData {
 
 export interface TextData {
   html: string // innerHTML with basic rich-text markup
+  paragraphSpacing?: string
+  lineHeight?: string
+  baseFontSize?: string
 }
 
 export interface ImageItem {
@@ -52,10 +55,18 @@ export interface ColumnsData {
   columns: ContentBlock[][]
 }
 
+export interface BlockSpacing {
+  marginTop?: string;
+  marginBottom?: string;
+  paddingTop?: string;
+  paddingBottom?: string;
+}
+
 export interface ContentBlock {
   id: string
   type: BlockType
   data: HeadingData | TextData | ImageData | VideoData | CTAData | TableData | ColumnsData
+  spacing?: BlockSpacing
 }
 
 export function generateBlockId(): string {

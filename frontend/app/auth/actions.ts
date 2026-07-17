@@ -92,5 +92,6 @@ export async function logout() {
   }
   
   clearAuthCookies(cookieStore)
+  revalidatePath('/', 'layout')
   redirect('/auth')
 }

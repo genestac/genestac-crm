@@ -18,7 +18,8 @@ import { cn } from '@/lib/utils'
 
 const ADMIN_ROLES = ['superadmin', 'master_admin', 'admin', 'SUPER_ADMIN']
 
-export function SalesHeader({ role }: { role?: string }) {
+export function SalesHeader({ user }: { user?: any }) {
+  const role = user?.role || ''
   const router = useRouter()
   const [isRefreshing, setIsRefreshing] = useState(false)
 
@@ -98,11 +99,17 @@ export function SalesHeader({ role }: { role?: string }) {
         </Button>
 
         <DropdownMenu>
-          <DropdownMenuTrigger className={cn(buttonVariants({ variant: "ghost" }), "relative h-10 w-10 rounded-full bg-gradient-to-br from-[var(--color-brand-teal)] to-[var(--color-brand-ocean)] p-[2px] transition-transform hover:scale-105 shadow-md")}>
-            <div className="h-full w-full rounded-full bg-card flex items-center justify-center">
-              <User className="w-5 h-5 text-primary" />
+          <div className="flex items-center gap-3">
+            <div className="hidden md:flex flex-col items-end">
+              <span className="text-sm font-semibold leading-none">{user?.name || user?.email || 'User'}</span>
+              <span className="text-xs text-muted-foreground uppercase tracking-wider mt-1">{role.replace(/_/g, ' ')}</span>
             </div>
-          </DropdownMenuTrigger>
+            <DropdownMenuTrigger className={cn(buttonVariants({ variant: "ghost" }), "relative h-10 w-10 rounded-full bg-gradient-to-br from-[var(--color-brand-teal)] to-[var(--color-brand-ocean)] p-[2px] transition-transform hover:scale-105 shadow-md")}>
+              <div className="h-full w-full rounded-full bg-card flex items-center justify-center">
+                <User className="w-5 h-5 text-primary" />
+              </div>
+            </DropdownMenuTrigger>
+          </div>
           <DropdownMenuContent align="end" className="w-56">
             <DropdownMenuGroup>
               <DropdownMenuLabel>My Account</DropdownMenuLabel>
