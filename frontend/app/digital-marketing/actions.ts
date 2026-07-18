@@ -19,6 +19,7 @@ export interface Blog {
   meta_title: string | null
   meta_description: string | null
   focus_keywords: string[] | null
+  cover_image: string | null
   og_image: string | null
   canonical_url: string | null
   faqs: { question: string, answer: string }[] | null

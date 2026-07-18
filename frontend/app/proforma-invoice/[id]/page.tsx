@@ -212,6 +212,12 @@ export default async function ProformaInvoicePage({ params }: { params: Promise<
             border-bottom: 1px solid #1e293b;
             margin-bottom: 8px;
         }
+        .inv-sig-img {
+            max-width: 220px;
+            max-height: 120px;
+            object-fit: contain;
+            margin-bottom: 4px;
+        }
         .inv-bottom-bar {
             background: #f0f4f8;
             color: #64748b;
@@ -225,7 +231,11 @@ export default async function ProformaInvoicePage({ params }: { params: Promise<
       <div className="invoice-card">
           <div className="inv-header">
               <div className="inv-logo" style={{ maxWidth: '200px' }}>
-                  <img src="/logo.jpeg" alt="Company Logo" style={{ width: '100%', height: 'auto', objectFit: 'contain' }} />
+                  <img
+                    src={companyInfo.logo_url || '/logo.jpeg'}
+                    alt="Company Logo"
+                    style={{ width: '100%', height: 'auto', objectFit: 'contain' }}
+                  />
               </div>
               <div className="inv-document-title">
                   <h1>Proforma Invoice</h1>
@@ -366,7 +376,15 @@ export default async function ProformaInvoicePage({ params }: { params: Promise<
                   </div>
                   
                   <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontSize: '12px', marginBottom: '40px' }}>for <strong>{companyInfo.name}</strong></div>
+                      <div style={{ fontSize: '12px', marginBottom: '12px' }}>for <strong>{companyInfo.name}</strong></div>
+                      {/* Signature image */}
+                      {companyInfo.signature_url && (
+                        <img
+                          src={companyInfo.signature_url}
+                          alt="Authorised Signature"
+                          className="inv-sig-img"
+                        />
+                      )}
                       <div className="inv-sig-line"></div>
                       <div style={{ fontSize: '12px', color: '#64748b' }}>Authorised Signatory</div>
                   </div>

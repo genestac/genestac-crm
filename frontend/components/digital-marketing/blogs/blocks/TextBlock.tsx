@@ -1,8 +1,9 @@
 'use client'
 
 import { useRef, useEffect, useState, useId } from 'react'
-import { Bold, Italic, Underline, Link, AlignLeft, AlignCenter, AlignRight, AlignJustify, Highlighter, X, ChevronDown, List, ListOrdered, Type, MoveVertical } from 'lucide-react'
+import { Bold, Italic, Underline, Link, AlignLeft, AlignCenter, AlignRight, AlignJustify, Highlighter, X, ChevronDown, List, ListOrdered, Type, MoveVertical, Loader2 } from 'lucide-react'
 import type { TextData } from '../types'
+import { uploadBlogImage } from '@/app/digital-marketing/actions'
 
 interface Props {
   data: TextData
@@ -19,6 +20,7 @@ export function TextBlock({ data, onChange }: Props) {
     underline: false,
     highlight: false,
   })
+  const [isUploading, setIsUploading] = useState(false)
   
   // Track last HTML to avoid update loops
   const lastHtml = useRef(data.html)
@@ -50,7 +52,50 @@ export function TextBlock({ data, onChange }: Props) {
     }
   }
 
-  const handlePaste = (e: React.ClipboardEvent) => {
+  const handlePaste = async (e: React.ClipboardEvent) => {
+    // Intercept image pastes first
+    const items = e.clipboardData.items
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.indexOf('image') !== -1) {
+        e.preventDefault()
+        const file = items[i].getAsFile()
+        if (!file) continue
+        
+        setIsUploading(true)
+        const tempId = 'uploading-' + Date.now()
+        document.execCommand('insertHTML', false, `<span id="${tempId}" class="text-sm font-semibold text-violet-500 animate-pulse">[Uploading Image...]</span>`)
+        
+        try {
+          const fd = new FormData()
+          fd.append('file', file)
+          const res = await uploadBlogImage(fd)
+          
+          if (ref.current) {
+            const currentHtml = ref.current.innerHTML
+            const newHtml = currentHtml.replace(
+              `<span id="${tempId}" class="text-sm font-semibold text-violet-500 animate-pulse">[Uploading Image...]</span>`, 
+              `<img src="${res.url}" alt="Pasted Image" class="rounded-xl max-w-full my-4 shadow-sm" />`
+            )
+            ref.current.innerHTML = newHtml
+            handleInput()
+          }
+        } catch (err) {
+          console.error('Failed to upload pasted image:', err)
+          if (ref.current) {
+            const currentHtml = ref.current.innerHTML
+            ref.current.innerHTML = currentHtml.replace(
+              `<span id="${tempId}" class="text-sm font-semibold text-violet-500 animate-pulse">[Uploading Image...]</span>`, 
+              `<span class="text-red-500 text-sm">[Failed to upload image]</span>`
+            )
+            handleInput()
+          }
+        } finally {
+          setIsUploading(false)
+        }
+        return // Stop processing other paste data
+      }
+    }
+
     e.preventDefault()
     
     const html = e.clipboardData.getData('text/html')
@@ -407,6 +452,12 @@ export function TextBlock({ data, onChange }: Props) {
         style={{ lineHeight: data.lineHeight || '1.75' }}
         className={`w-full outline-none text-foreground prose dark:prose-invert max-w-none empty:before:content-[attr(data-placeholder)] empty:before:text-muted-foreground/50 empty:before:pointer-events-none custom-p-spacing-${id} ${data.baseFontSize || 'text-lg prose-lg'}`}
       />
+      {isUploading && (
+        <div className="absolute top-2 right-2 flex items-center gap-2 bg-white/80 dark:bg-card/80 backdrop-blur-md px-3 py-1.5 rounded-full shadow-sm border border-border text-xs font-semibold text-violet-600 dark:text-violet-400">
+          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          Uploading...
+        </div>
+      )}
     </div>
   )
 }

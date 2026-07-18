@@ -8,6 +8,7 @@ import {
   HelpCircle, Plus, Trash2, UploadCloud, Loader2
 } from 'lucide-react'
 import { uploadBlogImage } from '@/app/digital-marketing/actions'
+import { ImageCropperModal } from './ImageCropperModal'
 
 export interface SEOData {
   title: string
@@ -15,6 +16,7 @@ export interface SEOData {
   metaTitle: string
   metaDescription: string
   focusKeywords: string
+  coverImage: string
   ogImage: string
   canonicalUrl: string
   status: 'draft' | 'published' | 'scheduled'
@@ -88,22 +90,41 @@ function SectionToggle({
 export function SEOPanel({ data, onChange, baseUrl = 'https://genestac.com/blog' }: Props) {
   const [isUploadingOg, setIsUploadingOg] = useState(false)
   const ogFileRef = useRef<HTMLInputElement>(null)
+  const [isUploadingCover, setIsUploadingCover] = useState(false)
+  const coverFileRef = useRef<HTMLInputElement>(null)
+
+  // Cropper state
+  const [cropperSrc, setCropperSrc] = useState<string | null>(null)
+  const [cropperTarget, setCropperTarget] = useState<'cover' | 'og' | null>(null)
 
   const update = <K extends keyof SEOData>(field: K, value: SEOData[K]) => onChange({ ...data, [field]: value })
 
-  const handleOgUpload = async (files: FileList | null) => {
+  // Open the cropper with the selected file
+  const openCropper = (files: FileList | null, target: 'cover' | 'og') => {
     if (!files || files.length === 0) return
-    setIsUploadingOg(true)
+    const file = files[0]
+    const objectUrl = URL.createObjectURL(file)
+    setCropperSrc(objectUrl)
+    setCropperTarget(target)
+  }
+
+  // Upload cropped blob
+  const handleCropConfirm = async (blob: Blob) => {
+    if (!cropperTarget) return
+    const isOg = cropperTarget === 'og'
+    isOg ? setIsUploadingOg(true) : setIsUploadingCover(true)
+    setCropperSrc(null)
+    setCropperTarget(null)
+
     try {
-      const file = files[0]
       const fd = new FormData()
-      fd.append('file', file)
+      fd.append('file', blob, 'image.webp')
       const res = await uploadBlogImage(fd)
-      update('ogImage', res.url)
+      isOg ? update('ogImage', res.url) : update('coverImage', res.url)
     } catch (e) {
-      console.error('OG Image upload failed:', e)
+      console.error('Upload failed:', e)
     } finally {
-      setIsUploadingOg(false)
+      isOg ? setIsUploadingOg(false) : setIsUploadingCover(false)
     }
   }
 
@@ -122,8 +143,23 @@ export function SEOPanel({ data, onChange, baseUrl = 'https://genestac.com/blog'
 
   const previewUrl = `${baseUrl}/${data.slug || 'your-blog-slug'}`
 
+  // Aspect ratios
+  const COVER_RATIO = 16 / 9
+  const OG_RATIO = 1200 / 630 // ≈ 1.905:1, standard OpenGraph
+
   return (
-    <aside className="w-full space-y-0 bg-card border border-border rounded-2xl overflow-hidden shadow-sm">
+    <>
+      {/* Cropper modal */}
+      {cropperSrc && cropperTarget && (
+        <ImageCropperModal
+          imageSrc={cropperSrc}
+          aspectRatio={cropperTarget === 'cover' ? COVER_RATIO : OG_RATIO}
+          ratioLabel={cropperTarget === 'cover' ? '16:9' : '1200:630'}
+          onConfirm={handleCropConfirm}
+          onCancel={() => { setCropperSrc(null); setCropperTarget(null) }}
+        />
+      )}
+      <aside className="w-full space-y-0 bg-card border border-border rounded-2xl overflow-hidden shadow-sm">
       {/* Header */}
       <div className="px-5 py-4 bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white">
         <h2 className="font-bold text-sm flex items-center gap-2">
@@ -185,6 +221,62 @@ export function SEOPanel({ data, onChange, baseUrl = 'https://genestac.com/blog'
               />
             </div>
           )}
+          
+          <div>
+            <label className="block text-xs font-semibold text-muted-foreground mb-1 uppercase tracking-wider flex items-center justify-between">
+              Cover Image (Hero)
+              <span className="text-[10px] font-normal text-violet-500 bg-violet-50 dark:bg-violet-900/20 px-1.5 py-0.5 rounded">16:9 crop</span>
+            </label>
+            {/* Cover image 4:3 preview */}
+            {data.coverImage && !isUploadingCover && (
+              <div className="relative aspect-[4/3] rounded-xl overflow-hidden bg-muted mb-2 group">
+                <img src={data.coverImage} alt="Cover preview" className="w-full h-full object-cover" />
+                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                  <button
+                    type="button"
+                    onClick={() => coverFileRef.current?.click()}
+                    className="text-white text-xs font-semibold bg-white/20 hover:bg-white/30 backdrop-blur-sm px-3 py-1.5 rounded-lg transition-colors"
+                  >
+                    Change Image
+                  </button>
+                </div>
+              </div>
+            )}
+            {isUploadingCover ? (
+              <div className="flex items-center justify-center gap-2 py-4 text-violet-600 dark:text-violet-400">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span className="text-xs font-semibold">Uploading...</span>
+              </div>
+            ) : !data.coverImage && (
+              <div
+                className="border-2 border-dashed rounded-xl transition-colors border-border hover:border-violet-400 bg-background cursor-pointer"
+                onDragOver={e => e.preventDefault()}
+                onDrop={e => { e.preventDefault(); openCropper(e.dataTransfer.files, 'cover') }}
+                onClick={() => coverFileRef.current?.click()}
+              >
+                <div className="p-4 flex flex-col items-center justify-center text-center">
+                  <UploadCloud className="w-6 h-6 text-muted-foreground mb-2" />
+                  <p className="text-sm font-medium text-foreground">Drop image or click to upload</p>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">Will be cropped to 16:9</p>
+                </div>
+              </div>
+            )}
+            <input
+              type="file" ref={coverFileRef} accept="image/*"
+              onChange={e => openCropper(e.target.files, 'cover')}
+              className="hidden"
+            />
+            {data.coverImage && !isUploadingCover && (
+              <button
+                type="button"
+                onClick={() => coverFileRef.current?.click()}
+                className="mt-1.5 text-[11px] text-muted-foreground hover:text-violet-500 transition-colors w-full text-center"
+              >
+                Click preview to change · Will re-open cropper
+              </button>
+            )}
+          </div>
+
         </SectionToggle>
 
         {/* Google SERP Preview */}
@@ -242,57 +334,56 @@ export function SEOPanel({ data, onChange, baseUrl = 'https://genestac.com/blog'
         {/* Open Graph / Social Preview */}
         <SectionToggle label="Social Preview (OG)" icon={Share2} defaultOpen={false}>
           <div>
-            <label className="block text-xs font-semibold text-muted-foreground mb-1 uppercase tracking-wider">
-              OG Image
+            <label className="block text-xs font-semibold text-muted-foreground mb-1 uppercase tracking-wider flex items-center justify-between">
+              Social Preview Image
+              <span className="text-[10px] font-normal text-violet-500 bg-violet-50 dark:bg-violet-900/20 px-1.5 py-0.5 rounded">1200:630 crop</span>
             </label>
-            <div
-              className={`relative border-2 border-dashed rounded-xl transition-colors ${
-                isUploadingOg ? 'bg-muted border-muted' : 'border-border hover:border-violet-400 bg-background'
-              }`}
-              onDragOver={e => e.preventDefault()}
-              onDrop={e => { e.preventDefault(); handleOgUpload(e.dataTransfer.files) }}
-            >
-              <input
-                type="file"
-                ref={ogFileRef}
-                accept="image/*"
-                onChange={e => handleOgUpload(e.target.files)}
-                className="hidden"
-              />
-              <div className="p-4 flex flex-col items-center justify-center text-center">
-                {isUploadingOg ? (
-                  <Loader2 className="w-6 h-6 text-muted-foreground animate-spin mb-2" />
-                ) : (
-                  <UploadCloud className="w-6 h-6 text-muted-foreground mb-2" />
-                )}
-                <p className="text-sm font-medium text-foreground">
-                  {isUploadingOg ? 'Uploading...' : 'Drop image or click to upload'}
-                </p>
-                {!isUploadingOg && (
+            {/* OG preview */}
+            {data.ogImage && !isUploadingOg && (
+              <div className="relative aspect-[1200/630] rounded-xl overflow-hidden bg-muted mb-2 group">
+                <img src={data.ogImage} alt="OG preview" className="w-full h-full object-cover" />
+                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                   <button
                     type="button"
                     onClick={() => ogFileRef.current?.click()}
-                    className="mt-2 text-xs font-semibold text-violet-600 dark:text-violet-400 hover:underline"
+                    className="text-white text-xs font-semibold bg-white/20 hover:bg-white/30 backdrop-blur-sm px-3 py-1.5 rounded-lg transition-colors"
                   >
-                    Browse Files
+                    Change Image
                   </button>
-                )}
+                </div>
               </div>
-            </div>
+            )}
+            {isUploadingOg ? (
+              <div className="flex items-center justify-center gap-2 py-4 text-violet-600 dark:text-violet-400">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span className="text-xs font-semibold">Uploading...</span>
+              </div>
+            ) : !data.ogImage && (
+              <div
+                className="border-2 border-dashed rounded-xl transition-colors border-border hover:border-violet-400 bg-background cursor-pointer"
+                onDragOver={e => e.preventDefault()}
+                onDrop={e => { e.preventDefault(); openCropper(e.dataTransfer.files, 'og') }}
+                onClick={() => ogFileRef.current?.click()}
+              >
+                <div className="p-4 flex flex-col items-center justify-center text-center">
+                  <UploadCloud className="w-6 h-6 text-muted-foreground mb-2" />
+                  <p className="text-sm font-medium text-foreground">Drop image or click to upload</p>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">Will be cropped to 1200×630</p>
+                </div>
+              </div>
+            )}
+            <input
+              type="file" ref={ogFileRef} accept="image/*"
+              onChange={e => openCropper(e.target.files, 'og')}
+              className="hidden"
+            />
           </div>
 
           {/* OG Card Preview */}
+          {data.ogImage && (
           <div className="rounded-xl border border-border overflow-hidden bg-white dark:bg-zinc-900 shadow-sm">
             <div className="relative aspect-[1200/630] bg-muted overflow-hidden">
-              {data.ogImage ? (
                 <img src={data.ogImage} alt="OG preview" className="w-full h-full object-cover" />
-              ) : (
-                <div className="absolute inset-0 flex flex-col items-center justify-center text-muted-foreground gap-2">
-                  <Share2 className="w-8 h-8 opacity-20" />
-                  <p className="text-xs">Upload OG image above</p>
-                  <p className="text-[10px] opacity-60">Recommended: 1200 × 630 px</p>
-                </div>
-              )}
             </div>
             <div className="px-3 py-2 border-t border-border">
               <p className="text-[10px] uppercase text-muted-foreground tracking-wider">genestac.com</p>
@@ -304,6 +395,7 @@ export function SEOPanel({ data, onChange, baseUrl = 'https://genestac.com/blog'
               </p>
             </div>
           </div>
+          )}
         </SectionToggle>
 
         {/* Keywords & Canonical */}
@@ -429,5 +521,6 @@ export function SEOPanel({ data, onChange, baseUrl = 'https://genestac.com/blog'
         </p>
       </div>
     </aside>
+    </>
   )
 }

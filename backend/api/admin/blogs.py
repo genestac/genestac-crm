@@ -39,7 +39,7 @@ def build_article_schema(blog: dict) -> dict:
         "@type": "Article",
         "headline": blog.get("title", ""),
         "description": blog.get("meta_description", ""),
-        "image": [blog["og_image"]] if blog.get("og_image") else [],
+        "image": [img for img in [blog.get("cover_image"), blog.get("og_image")] if img],
         "datePublished": published,
         "dateModified": updated,
         "author": {
@@ -101,7 +101,7 @@ async def list_blogs(
     require_dm_role(current_user)
     offset = (page - 1) * limit
     q = supabase.table("blogs").select(
-        "id, title, slug, status, published_at, author_id, meta_title, og_image, created_at, updated_at"
+        "id, title, slug, status, published_at, author_id, meta_title, cover_image, og_image, created_at, updated_at"
     ).order("created_at", desc=True).range(offset, offset + limit - 1)
     if status:
         q = q.eq("status", status)
@@ -138,6 +138,7 @@ async def create_blog(
     meta_title: str = Form(None),
     meta_description: str = Form(None),
     focus_keywords: str = Form(None),  # comma-separated
+    cover_image: str = Form(None),
     og_image: str = Form(None),
     canonical_url: str = Form(None),
     published_at: str = Form(None),
@@ -164,6 +165,7 @@ async def create_blog(
         "meta_title": meta_title,
         "meta_description": meta_description,
         "focus_keywords": keywords if keywords else None,
+        "cover_image": cover_image,
         "og_image": og_image,
         "canonical_url": canonical_url,
         "faqs": json.loads(faqs) if faqs else [],
@@ -187,6 +189,7 @@ async def update_blog(
     meta_title: str = Form(None),
     meta_description: str = Form(None),
     focus_keywords: str = Form(None),
+    cover_image: str = Form(None),
     og_image: str = Form(None),
     canonical_url: str = Form(None),
     published_at: str = Form(None),
@@ -213,6 +216,8 @@ async def update_blog(
         update["meta_description"] = meta_description
     if focus_keywords is not None:
         update["focus_keywords"] = [k.strip() for k in focus_keywords.split(",") if k.strip()]
+    if cover_image is not None:
+        update["cover_image"] = cover_image
     if og_image is not None:
         update["og_image"] = og_image
     if canonical_url is not None:
@@ -289,6 +294,11 @@ async def upload_blog_image(
             contents,
             folder="genestac/blogs",
             resource_type="image",
+            format="webp",
+            quality="auto:good",
+            transformation=[
+                {"fetch_format": "webp", "quality": "auto:good"},
+            ],
         )
         return {"success": True, "url": result["secure_url"], "public_id": result["public_id"]}
     except Exception as e:

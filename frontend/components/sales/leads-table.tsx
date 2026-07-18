@@ -351,7 +351,8 @@ export function LeadsTable({ initialLeads, initialTotal, statusOptions, sourceOp
                 {/* User Details */}
                 <td className="px-6 py-4">
                   <div className="font-semibold text-gray-900">{lead.name || 'Unnamed User'}</div>
-                  <div className="text-xs text-gray-500 mt-1">ID: {lead.id.substring(0, 8)}</div>
+                  {lead.city && <div className="text-xs text-gray-600 mt-0.5">{lead.city}</div>}
+                  <div className="text-xs text-gray-500 mt-0.5">ID: {lead.id.substring(0, 8)}</div>
                 </td>
 
                 {/* Date */}

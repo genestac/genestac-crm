@@ -1,7 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, Form, Body
+from fastapi.responses import Response
 from supabase import Client
 from db.supabase import get_supabase_client
 from api.deps import get_current_user
+from api.prescription_pdf_generator import generate_prescription_pdf
+from api.admin.crm_settings import get_global_settings_from_db
+from api.doctor.prescription_settings import _get_doc_settings
 from typing import Any, Dict, List
 import datetime
 router = APIRouter()
@@ -27,3 +31,54 @@ async def write_prescription(data: dict=Body(...), current_user: dict=Depends(ge
             items_payload.append({'prescription_id': rx_id, 'inventory_id': item.get('inventoryId'), 'dosage': item.get('dosage'), 'frequency': item.get('frequency'), 'duration_days': int(item.get('durationDays', 30)), 'total_quantity_prescribed': int(item.get('quantity', 1)), 'before_lunch': bool(item.get('beforeLunch', False)), 'after_lunch': bool(item.get('afterLunch', False)), 'time': item.get('time')})
         supabase.table('prescription_items').insert(items_payload).execute()
     return {'success': True}
+
+
+@router.get('/prescriptions/{id}/pdf')
+async def get_prescription_pdf(
+    id: str,
+    current_user: dict = Depends(get_current_user),
+    supabase: Client = Depends(get_supabase_client),
+):
+    try:
+        rx_res = supabase.table('prescriptions').select(
+            '*, '
+            'patients:users!patient_id(id, name, phone, email), '
+            'doctors:staffs!doctor_id(id, full_name, email, phone), '
+            'prescription_items(id, dosage, frequency, duration_days, total_quantity_prescribed, time, before_lunch, after_lunch, inventory(name, sku))'
+        ).eq('id', id).single().execute()
+
+        if not rx_res.data:
+            raise HTTPException(status_code=404, detail='Prescription not found')
+
+        rx = rx_res.data
+        patient = rx.get('patients') or {}
+        doctor  = rx.get('doctors')  or {}
+        items   = rx.get('prescription_items') or []
+
+        # Flatten inventory name into each item
+        for item in items:
+            if isinstance(item.get('inventory'), dict):
+                item['inventory_name'] = item['inventory'].get('name', '')
+
+        # Global company settings
+        global_settings = get_global_settings_from_db(supabase)
+        company_info    = global_settings.get('company_info', {})
+
+        # Doctor's personal prescription settings
+        doctor_id   = doctor.get('id') or current_user['id']
+        doc_settings = _get_doc_settings(doctor_id, supabase)
+
+        pdf_bytes = generate_prescription_pdf(rx, patient, doctor, items, company_info, doc_settings)
+        pat_name = str(patient.get('name', 'Patient')).replace(' ', '_')
+        filename = f'Prescription_{pat_name}_{str(id)[:8]}.pdf'
+        return Response(
+            content=pdf_bytes,
+            media_type='application/pdf',
+            headers={'Content-Disposition': f'attachment; filename="{filename}"'},
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))

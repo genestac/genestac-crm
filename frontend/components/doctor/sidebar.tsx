@@ -10,7 +10,8 @@ import {
   LogOut,
   Stethoscope,
   Users,
-  Pin
+  Pin,
+  FileText,
 } from 'lucide-react'
 import { logout } from '@/app/auth/actions'
 
@@ -20,6 +21,7 @@ const routes = [
   { name: 'Availability', path: '/doctor/availability', icon: Activity },
   { name: 'Patients', path: '/doctor/patients', icon: Users },
   { name: 'Consultations', path: '/doctor/consultations', icon: Stethoscope },
+  { name: 'Prescription Settings', path: '/doctor/prescription-settings', icon: FileText },
 ]
 
 export function DoctorSidebar() {

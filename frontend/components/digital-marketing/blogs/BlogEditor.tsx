@@ -22,6 +22,7 @@ const EMPTY_SEO: SEOData = {
   metaTitle: '',
   metaDescription: '',
   focusKeywords: '',
+  coverImage: '',
   ogImage: '',
   canonicalUrl: '',
   status: 'draft',
@@ -44,6 +45,7 @@ export function BlogEditor({ initialBlog }: Props) {
     metaTitle:        initialBlog?.meta_title        ?? '',
     metaDescription:  initialBlog?.meta_description  ?? '',
     focusKeywords:    (initialBlog?.focus_keywords ?? []).join(', '),
+    coverImage:       initialBlog?.cover_image       ?? '',
     ogImage:          initialBlog?.og_image          ?? '',
     canonicalUrl:     initialBlog?.canonical_url     ?? '',
     status:           (initialBlog?.status as SEOData['status']) ?? 'draft',
@@ -61,6 +63,7 @@ export function BlogEditor({ initialBlog }: Props) {
     fd.append('meta_title', seo.metaTitle.slice(0, 60))
     fd.append('meta_description', seo.metaDescription.slice(0, 160))
     fd.append('focus_keywords', seo.focusKeywords)
+    fd.append('cover_image', seo.coverImage)
     fd.append('og_image', seo.ogImage)
     fd.append('canonical_url', seo.canonicalUrl)
     fd.append('faqs', JSON.stringify(seo.faqs))
@@ -142,6 +145,19 @@ export function BlogEditor({ initialBlog }: Props) {
 
           <button
             type="button"
+            onClick={() => {
+              localStorage.setItem('blog_preview_data', JSON.stringify({ seo, blocks }))
+              window.open('/digital-marketing/blogs/preview', '_blank')
+            }}
+            disabled={isWorking}
+            className="flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-full border border-border hover:bg-muted transition-colors disabled:opacity-50"
+          >
+            <Eye className="w-4 h-4" />
+            Preview
+          </button>
+
+          <button
+            type="button"
             onClick={handleSaveDraft}
             disabled={isWorking}
             className="flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-full border border-border hover:bg-muted transition-colors disabled:opacity-50"
@@ -179,7 +195,7 @@ export function BlogEditor({ initialBlog }: Props) {
 
         {/* SEO Panel — 35% */}
         <div className="w-[340px] xl:w-[380px] shrink-0">
-          <div className="sticky top-[73px]">
+          <div className="sticky top-[73px] max-h-[calc(100vh-100px)] overflow-y-auto rounded-2xl scrollbar-hide">
             <SEOPanel data={seo} onChange={setSEO} />
           </div>
         </div>

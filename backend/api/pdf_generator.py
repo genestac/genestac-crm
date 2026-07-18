@@ -139,7 +139,7 @@ def generate_invoice_pdf(
             # ImageReader accepts HTTP URLs or file paths
             img = ImageReader(str(logo))
             iw, ih = img.getSize()
-            ratio = min(170 / iw, 55 / ih)
+            ratio = min(220 / iw, 65 / ih)
             dw, dh = iw * ratio, ih * ratio
             c.drawImage(
                 str(logo), MARGIN, hbot + (HEADER_H - dh) / 2,
@@ -315,24 +315,28 @@ def generate_invoice_pdf(
     
     # Check for dynamic signature from DB
     dynamic_sig_url = company_info.get("signature_url")
+    sig_drawn_h = 0
     if dynamic_sig_url:
         try:
             sig_img = ImageReader(dynamic_sig_url)
             sw, sh = sig_img.getSize()
-            s_ratio = min(100 / sw, 40 / sh)
+            s_ratio = min(160 / sw, 70 / sh)
             sdw, sdh = sw * s_ratio, sh * s_ratio
             c.drawImage(
-                dynamic_sig_url, W - MARGIN - sdw, st + 16,
+                dynamic_sig_url, W - MARGIN - sdw, st + 2,
                 width=sdw, height=sdh, preserveAspectRatio=True, mask="auto",
             )
+            sig_drawn_h = sdh
         except Exception:
             pass
 
-    t(W - MARGIN, st + 14, "for " + str(company_info.get("name", "")),
+    for_y = st + 5 + sig_drawn_h if sig_drawn_h > 0 else st + 14
+    t(W - MARGIN, for_y, "for " + str(company_info.get("name", "")),
       "Helvetica-Bold", 8, DARK, "right")
+    
     c.setStrokeColor(DARK)
     c.setLineWidth(0.5)
-    c.line(W - MARGIN - 120, st, W - MARGIN, st)
+    c.line(W - MARGIN - 160, st, W - MARGIN, st)
     t(W - MARGIN, st - 10, "Authorised Signatory", size=7, col=MUTED, align="right")
 
     vline(fmid, fy0, ftop)

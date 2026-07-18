@@ -7,6 +7,7 @@ from . import inventory
 from . import metrics
 from . import availability
 from . import notifications
+from . import prescription_settings
 router = APIRouter()
 router.include_router(appointments.router)
 router.include_router(patients.router)
@@ -16,3 +17,4 @@ router.include_router(inventory.router)
 router.include_router(metrics.router)
 router.include_router(availability.router)
 router.include_router(notifications.router)
+router.include_router(prescription_settings.router)

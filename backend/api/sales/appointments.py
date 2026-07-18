@@ -28,6 +28,25 @@ def is_admin(user: dict, supabase: Client) -> bool:
 
 @router.post('/appointments')
 async def book_appointment(lead_id: str=Form(...), doctor_id: str=Form(...), date: str=Form(...), time: str=Form(...), notes: Optional[str]=Form(None), current_user: dict=Depends(get_current_user), supabase: Client=Depends(get_supabase_client)):
+    # 1. Check if user exists in `users` table (since appointments.patient_id has an FK to users)
+    user_res = supabase.table('users').select('id').eq('id', lead_id).execute()
+    if not user_res.data:
+        # If not, fetch lead details and create a placeholder user record
+        lead_res = supabase.table('leads').select('name, phone_number, email').eq('id', lead_id).execute()
+        if lead_res.data:
+            lead = lead_res.data[0]
+            try:
+                supabase.table('users').insert({
+                    'id': lead_id,
+                    'name': lead.get('name'),
+                    'phone': lead.get('phone_number'),
+                    'email': lead.get('email'),
+                    'status': 'NEW'
+                }).execute()
+            except Exception as e:
+                print(f"Failed to create placeholder user: {e}")
+
+    # 2. Book appointment
     scheduled_at = f'{date}T{time}:00'
     payload = {'patient_id': lead_id, 'doctor_id': doctor_id, 'sales_rep_id': current_user['id'], 'scheduled_at': scheduled_at, 'notes': notes, 'status': 'pending', 'duration_minutes': 10}
     response = supabase.table('appointments').insert(payload).execute()

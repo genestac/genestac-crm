@@ -5,6 +5,7 @@ import { UploadCloud, X, LayoutGrid, Square, AlignLeft, AlignCenter, AlignRight 
 import Image from 'next/image'
 import { uploadBlogImage } from '@/app/digital-marketing/actions'
 import type { ImageData, ImageItem } from '../types'
+import { ImageCropperModal } from '../ImageCropperModal'
 
 interface Props {
   data: ImageData
@@ -40,23 +41,45 @@ export function ImageBlock({ data, onChange }: Props) {
   const [uploading, setUploading] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
-  const handleUpload = async (files: FileList | null) => {
+  // Cropper state
+  const [cropperQueue, setCropperQueue] = useState<File[]>([])
+  const [cropperSrc, setCropperSrc] = useState<string | null>(null)
+
+  const openCropperForFiles = (files: FileList | null) => {
     if (!files || files.length === 0) return
+    const arr = Array.from(files)
+    setCropperQueue(arr.slice(1))
+    setCropperSrc(URL.createObjectURL(arr[0]))
+  }
+
+  const handleCropConfirm = async (blob: Blob) => {
+    const src = cropperSrc
+    setCropperSrc(null)
     setUploading(true)
     try {
-      const uploads = Array.from(files).map(async file => {
-        const fd = new FormData()
-        fd.append('file', file)
-        const res = await uploadBlogImage(fd)
-        return { url: res.url, alt: file.name.replace(/\.[^.]+$/, ''), caption: '' } as ImageItem
-      })
-      const newImages = await Promise.all(uploads)
-      onChange({ ...data, images: [...data.images, ...newImages] })
+      const fd = new FormData()
+      fd.append('file', blob, 'image.webp')
+      const res = await uploadBlogImage(fd)
+      const newItem: ImageItem = { url: res.url, alt: '', caption: '' }
+      onChange({ ...data, images: [...data.images, newItem] })
     } catch (e) {
       console.error('Upload failed:', e)
     } finally {
       setUploading(false)
+      if (src) URL.revokeObjectURL(src)
     }
+    // Process next in queue
+    if (cropperQueue.length > 0) {
+      const next = cropperQueue[0]
+      setCropperQueue(q => q.slice(1))
+      setCropperSrc(URL.createObjectURL(next))
+    }
+  }
+
+  const handleCropCancel = () => {
+    if (cropperSrc) URL.revokeObjectURL(cropperSrc)
+    setCropperSrc(null)
+    setCropperQueue([])
   }
 
   const updateImage = (idx: number, field: keyof ImageItem, value: string) => {
@@ -82,6 +105,7 @@ export function ImageBlock({ data, onChange }: Props) {
   }
 
   return (
+    <>
     <div className="space-y-3">
       {/* Toolbar */}
       <div className="flex items-center gap-2 flex-wrap">
@@ -175,7 +199,7 @@ export function ImageBlock({ data, onChange }: Props) {
           accept="image/*"
           multiple
           className="hidden"
-          onChange={e => handleUpload(e.target.files)}
+          onChange={e => { openCropperForFiles(e.target.files); e.target.value = '' }}
         />
       </div>
 
@@ -245,9 +269,18 @@ export function ImageBlock({ data, onChange }: Props) {
         >
           <UploadCloud className="w-8 h-8" />
           <span className="text-sm font-medium">Click to upload image(s)</span>
-          <span className="text-xs">PNG, JPG, WebP — multi-select supported</span>
+          <span className="text-xs">PNG, JPG, WebP — each opens cropper</span>
         </button>
       )}
     </div>
+      {cropperSrc && (
+        <ImageCropperModal
+          imageSrc={cropperSrc}
+          aspectRatio={null}
+          onConfirm={handleCropConfirm}
+          onCancel={handleCropCancel}
+        />
+      )}
+    </>
   )
 }
