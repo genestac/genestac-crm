@@ -13,7 +13,7 @@ export const TableOfContents = ({ layout }: TableOfContentsProps) => {
   const headings = layout.filter(
     (block): block is HeadingBlock =>
       block.type === "heading" &&
-      block.data &&
+      !!block.data &&
       (block.data.level === "h2" || block.data.level === "h3")
   );
 
@@ -30,13 +30,13 @@ export const TableOfContents = ({ layout }: TableOfContentsProps) => {
     );
 
     headings.forEach((heading) => {
-      const element = document.getElementById(heading.data.id || heading.id);
+      const element = document.getElementById(heading.data!.id || heading.id);
       if (element) observer.observe(element);
     });
 
     return () => {
       headings.forEach((heading) => {
-        const element = document.getElementById(heading.data.id || heading.id);
+        const element = document.getElementById(heading.data!.id || heading.id);
         if (element) observer.unobserve(element);
       });
     };
@@ -59,9 +59,9 @@ export const TableOfContents = ({ layout }: TableOfContentsProps) => {
 
       <nav className="flex flex-col space-y-0.5">
         {headings.map((heading) => {
-          const anchorId = heading.data.id || heading.id;
+          const anchorId = heading.data!.id || heading.id;
           const isActive = activeId === anchorId;
-          const isH3 = heading.data.level === "h3";
+          const isH3 = heading.data!.level === "h3";
 
           return (
             <a
@@ -89,7 +89,7 @@ export const TableOfContents = ({ layout }: TableOfContentsProps) => {
                 }`}
               />
               <span className={isH3 ? "text-xs leading-snug" : "leading-snug"}>
-                {heading.data.text}
+                {heading.data!.text}
               </span>
             </a>
           );
