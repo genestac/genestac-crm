@@ -337,8 +337,8 @@ export function LeadsTable({ initialLeads, initialTotal, statusOptions, sourceOp
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
-            {leads.map((lead: any) => (
-              <tr key={lead.id} className="hover:bg-gray-50/50 transition-colors">
+            {leads.map((lead: any, index: number) => (
+              <tr key={`${lead.id}-${index}`} className="hover:bg-gray-50/50 transition-colors">
                 <td className="px-6 py-4">
                   <input 
                     type="checkbox" 
@@ -351,7 +351,7 @@ export function LeadsTable({ initialLeads, initialTotal, statusOptions, sourceOp
                 {/* User Details */}
                 <td className="px-6 py-4">
                   <div className="font-semibold text-gray-900">{lead.name || 'Unnamed User'}</div>
-                  {lead.city && <div className="text-xs text-gray-600 mt-0.5">{lead.city}</div>}
+                  {(lead.city || lead.metadata?.city) && <div className="text-xs text-gray-600 mt-0.5">{lead.city || lead.metadata?.city}</div>}
                   <div className="text-xs text-gray-500 mt-0.5">ID: {lead.id.substring(0, 8)}</div>
                 </td>
 

@@ -1145,6 +1145,75 @@ export function UserManagementSheet({
                   )}
                 </div>
 
+                {/* Sentiment Trend Chart */}
+                {(() => {
+                  const scoredLogs = [...aiCallLogs]
+                    .filter((l: any) => l.lead_score != null)
+                    .sort((a: any, b: any) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+                  if (scoredLogs.length < 1) return null
+                  const W = 500, H = 140, PAD = { top: 16, right: 20, bottom: 32, left: 40 }
+                  const innerW = W - PAD.left - PAD.right
+                  const innerH = H - PAD.top - PAD.bottom
+                  const toX = (i: number) => PAD.left + (scoredLogs.length > 1 ? (i / (scoredLogs.length - 1)) * innerW : innerW / 2)
+                  const toY = (s: number) => PAD.top + innerH - (s / 100) * innerH
+                  const pts = scoredLogs.map((l: any, i: number) => ({ x: toX(i), y: toY(l.lead_score), score: l.lead_score, label: l.score_label, date: new Date(l.created_at) }))
+                  const pathD = pts.map((p: any, i: number) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ')
+                  const fillD = pts.length > 1 ? `${pathD} L ${pts[pts.length-1].x} ${PAD.top+innerH} L ${pts[0].x} ${PAD.top+innerH} Z` : ''
+                  const col = (s: number) => s >= 70 ? '#10b981' : s >= 40 ? '#f59e0b' : '#ef4444'
+                  const latest = pts[pts.length - 1]
+                  const prev = pts.length > 1 ? pts[pts.length - 2] : null
+                  const trend = prev ? latest.score - prev.score : 0
+                  const labelCls = (lbl: string) => lbl === 'Hot' ? 'text-emerald-600 bg-emerald-50' : lbl === 'Warm' ? 'text-amber-600 bg-amber-50' : 'text-red-600 bg-red-50'
+                  return (
+                    <div className="bg-white border rounded-xl p-5 shadow-sm space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h4 className="text-sm font-semibold text-gray-800 flex items-center gap-1.5">
+                            <Activity className="w-4 h-4 text-indigo-500" />
+                            Sentiment Trend
+                          </h4>
+                          <p className="text-xs text-gray-500 mt-0.5">{scoredLogs.length} call{scoredLogs.length > 1 ? 's' : ''} analyzed</p>
+                        </div>
+                        <div className="text-right">
+                          <div className="flex items-center gap-2 justify-end">
+                            <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${labelCls(latest.label)}`}>{latest.label}</span>
+                            <span className="text-2xl font-bold" style={{ color: col(latest.score) }}>{latest.score}</span>
+                          </div>
+                          {prev && (
+                            <p className={`text-xs mt-0.5 font-medium ${trend > 0 ? 'text-emerald-600' : trend < 0 ? 'text-red-500' : 'text-gray-400'}`}>
+                              {trend > 0 ? `↑ +${trend}` : trend < 0 ? `↓ ${trend}` : '→ No change'} from last call
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: 140 }}>
+                        <defs>
+                          <linearGradient id={`sg-${lead.id}`} x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor={col(latest.score)} stopOpacity="0.2" />
+                            <stop offset="100%" stopColor={col(latest.score)} stopOpacity="0" />
+                          </linearGradient>
+                        </defs>
+                        {[0,25,50,75,100].map((v: number) => (
+                          <g key={v}>
+                            <line x1={PAD.left} y1={toY(v)} x2={PAD.left+innerW} y2={toY(v)} stroke="#f3f4f6" strokeWidth="1" />
+                            <text x={PAD.left-6} y={toY(v)+4} textAnchor="end" fontSize="9" fill="#9ca3af">{v}</text>
+                          </g>
+                        ))}
+                        {fillD && <path d={fillD} fill={`url(#sg-${lead.id})`} />}
+                        <path d={pathD} fill="none" stroke={col(latest.score)} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+                        {pts.map((p: any, i: number) => (
+                          <g key={i}>
+                            <circle cx={p.x} cy={p.y} r="5" fill="white" stroke={col(p.score)} strokeWidth="2.5" />
+                            <text x={p.x} y={PAD.top+innerH+18} textAnchor="middle" fontSize="9" fill="#9ca3af">
+                              {p.date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
+                            </text>
+                          </g>
+                        ))}
+                      </svg>
+                    </div>
+                  )
+                })()}
+
                 <div className="space-y-4">
                   {aiCallLogs.length === 0 ? (
                     <div className="text-center py-10 bg-gray-50 rounded-xl border border-dashed">
