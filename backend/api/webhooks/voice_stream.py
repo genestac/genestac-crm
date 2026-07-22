@@ -213,11 +213,14 @@ Clinical Headquarters: A Block, Unitech Business Zone, 106, Nirvana Country, Sec
     mem_data = "\n".join([m["memory_text"] for m in mem_res.data]) if mem_res.data else "No past memory available."
 
     lead_name = lead.get("name", "the customer")
+    lead_source = (lead.get("user_sources") or {}).get("name", None)
+    lead_source_phrase = f"hamare {lead_source} ke zariye" if lead_source else "hamare platform ke zariye"
 
     system_instruction = f"""{base_prompt}
 
 LEAD INFORMATION:
 Name: {lead_name}
+Source: {lead_source or 'Unknown'}
 Status: {lead.get('status', 'Unknown')}
 Context/Metadata: {json.dumps(lead.get('metadata', {}))}
 
@@ -232,11 +235,39 @@ AVAILABLE DOCTORS:
 INSTRUCTIONS:
 You are Aalya, a sales assistant calling from Genestac. You are speaking to {lead_name} on a live phone call via Exotel.
 CRITICAL IDENTITY RULE: NEVER refer to yourself as an "AI", an "AI Sales Representative", or a bot. You are a human sales assistant named Aalya.
-CRITICAL GENDER RULE: You are a woman. Speak, express, and refer to yourself in the feminine gender at all times. In Hindi, always use feminine verb forms — say "main bol rahi hu", "main batati hu", "main samjhati hu" — NEVER use masculine forms like "bol raha hu" or "bata raha hu". Your tone is warm, caring, and naturally feminine.
-Your primary goal is to actively pitch and sell Genestac's doctor-guided weight loss plans and health programs.
-You MUST speak with an energetic, engaging, persuasive, and professional tone with a warm Indian female accent.
-CRITICAL LIMIT: Keep responses brief (1-2 sentences) unless the user asks for specific plan/pricing details.
+CRITICAL GENDER RULE: You are a woman. Always use feminine verb forms in Hindi: "main bol rahi hu", "main batati hu", "main samjhati hu". NEVER use masculine forms.
+You MUST speak with an energetic, warm, empathetic, and persuasive tone with a natural Indian female accent.
+CRITICAL LIMIT: Keep responses brief (1-2 sentences) unless the user asks for details.
 If they want to book an appointment or transfer to a doctor, refer to the available doctors listed above.
+
+WRONG PERSON SCENARIO — VERY IMPORTANT:
+If the person who answers the call says they are NOT {lead_name} (e.g., 'main unka bhai hu', 'yeh meri wife ka number hai', 'woh ghar pe nahi hain'), do the following:
+1. Be polite and friendly: 'Oh, koi baat nahi! Kya main aapka naam jaan sakti hu?'
+2. Ask if the patient is available: 'Kya {lead_name} ji abhi available hain? Kya aap unhe phone de sakte hain?'
+3. If they cannot come to the phone, ask the relative about the patient's health goals: 'Kya aap bata sakte hain, unhe kya health concern hai? Kya woh weight loss ke baare mein soch rahe the?'
+4. Collect whatever information they share (name, weight goal, plan interest).
+5. End politely: 'Main unhe baad mein call karungi. Aapka bahut shukriya!'
+
+CONVERSATIONAL SALES FLOW — FOLLOW THIS EXACTLY:
+You must guide the user through a natural, empathetic discovery conversation before pitching. NEVER fire off multiple questions at once. Ask ONE question at a time and wait for the answer.
+
+STEP 1 — OPENING (Already done as the greeting):
+You already opened with the greeting that references where they came from. The exact line to say is:
+"Namaste {lead_name}! Main Aalya bol rahi hu, Genestac se. Humne dekha ki aapne {lead_source_phrase} hamare weight loss programs mein interest dikhaya tha. Kya main jaan sakti hu, kya aap wajan kam karne ka soch rahe hain, ya koi khaas health goal hai aapka?"
+
+STEP 2 — DIAGNOSTIC DISCOVERY (one question at a time, in order):
+- First, listen and validate empathetically: e.g. "Haan, wajan kam karna sach mein mushkil hota hai jab metabolism sath na de..."
+- Then ask: "Kya aapko wajan kam karne mein koi khaas dikkat aati hai, ya pichle kuch samay se wajan badh raha hai?"
+- After they answer, ask: "Ye problem aapko kab se feel ho rahi hai?"
+- Optionally: "Agar aap bura na maane, toh aapka current target wajan kitna hai?"
+
+STEP 3 — THE MEDICAL BRIDGE (connect their pain to Genestac's solution):
+- Explain why diets fail: "Wahi toh! Zyadatar log sirf khana kam karte hain, lekin hamare hormonal aur biological resistance ko koi doctor nahi dekhta."
+- Introduce the solution: "Genestac mein hum yahi karte hain — hamare medical experts aapke metabolism aur biology ko samajhkar ek personalized clinical protocol banate hain."
+
+STEP 4 — THE CALL TO ACTION:
+- Only after establishing trust, pitch the low-friction entry: "Main suggest karungi ki aap hamara 1,499 rupaye ka initial medical assessment book karein. Isme doctor aapke sabhi markers check karke batayenge ki aapke liye kaunsa plan best rahega. Kya main aapke liye yeh assessment book kar du?"
+- If they show interest in higher plans, present the Medical or Premium plan details conversationally.
 
 CRITICAL TOOL RULES — READ CAREFULLY:
 
@@ -258,7 +289,7 @@ schedule_call (doctor appointment):
 search_knowledge_base:
 - Use the information in your instructions first. Only call this if the user asks for pricing or program details not already provided."""
 
-    return system_instruction, lead_name
+    return system_instruction, lead_name, lead_source_phrase
 
 
 # ---------------------------------------------------------------------------
@@ -368,7 +399,7 @@ async def voice_stream(websocket: WebSocket):
     # -----------------------------------------------------------------------
     supabase = get_supabase_client()
     try:
-        system_instruction, lead_name = await build_rag_context(lead_id, supabase)
+        system_instruction, lead_name, lead_source_phrase = await build_rag_context(lead_id, supabase)
     except Exception as e:
         logger.error(f"Failed to build RAG context for lead_id={lead_id}: {e}")
         # Fall back to a generic prompt so the call can still proceed
@@ -542,7 +573,7 @@ async def voice_stream(websocket: WebSocket):
                     prefix_padding_ms=300
                 )
             ),
-            output=events.AudioOutput(voice="alloy")
+            output=events.AudioOutput(voice="coral")
         ),
         temperature=0.7
     )
@@ -1133,8 +1164,14 @@ async def voice_stream(websocket: WebSocket):
     async def on_client_connected(transport, client):
         logger.warning("Exotel client connected — sending greeting trigger")
         
-        # The trigger is in Hindi so the AI correctly identifies the call language as Hindi and responds in Hindi
-        trigger_text = f"{lead_name} ne phone utha liya hai. Ab tum apna introduction Hindi mein do. Sirf yeh bolo: 'Namaste {lead_name}! Main Aalya bol rahi hu Genestac se. Aapka weight loss journey mein hum kaise help kar sakte hain, yeh batane ke liye call kar rahi thi. Kya aap thoda time de sakte hain?'"
+        # Opening line references where the lead came from (website, Facebook, etc.)
+        trigger_text = (
+            f"{lead_name} ne phone utha liya hai. Ab tum apna sales script Step 1 follow karo aur sirf yeh ek line bolo: "
+            f"'Namaste {lead_name}! Main Aalya bol rahi hu, Genestac se. "
+            f"Humne dekha ki aapne {lead_source_phrase} hamare weight loss programs mein interest dikhaya tha. "
+            f"Kya main jaan sakti hu, kya aap wajan kam karne ka soch rahe hain, ya koi khaas health goal hai aapka?' "
+            f"— aur phir unka jawab suno."
+        )
         
         context.add_message({
             "role": "user",
@@ -1184,35 +1221,37 @@ async def voice_stream(websocket: WebSocket):
                     oai_client = _openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
                     summary_prompt = f"""You are a CRM analyst reviewing an AI sales call for a healthcare company (Genestac — weight loss programs).
 
-Analyze the transcript and return a JSON object with:
-1. A 3-4 bullet point summary for the sales rep
-2. Boolean flags for call outcome
-3. A lead warmth SCORE from 0 to 100
-
-Scoring rubric:
-- 0-39 (Cold): Lead was disinterested, hostile, or non-responsive
-- 40-69 (Warm): Lead showed curiosity, asked questions, didn't commit
-- 70-100 (Hot): Lead showed strong intent — asked about pricing, requested callback, asked about doctors, or booked
+Analyze the transcript and return a JSON object with ALL of the following fields.
 
 Call transcript:
 {full_transcript}
 
 Return ONLY a valid JSON object:
 {{
-  "summary": "bullet point summary (use • character)",
+  "summary": "3-4 bullet point summary using • character",
   "is_not_interested": true or false,
   "callback_requested": true or false,
   "appointment_booked": true or false,
   "lead_score": integer 0-100,
   "score_label": "Cold" or "Warm" or "Hot",
-  "score_reason": "1-2 sentence explanation for the score"
+  "score_reason": "1-2 sentence explanation",
+  "wrong_person": true or false,
+  "caller_name": "name of whoever actually spoke, if they introduced themselves, else null",
+  "patient_name": "actual patient name if different from lead, else null",
+  "relation_to_patient": "e.g. wife, brother, son — if a relative answered, else null",
+  "weight_goal": "their weight loss goal if mentioned, e.g. '10 kg in 3 months', else null",
+  "current_weight": "their current weight if mentioned, else null",
+  "interested_plan": "Starter or Medical or Premium or Initial Assessment — whichever they expressed most interest in, else null",
+  "health_concerns": "any health issues they mentioned, else null"
 }}
 Rules:
-- `is_not_interested`: true if lead said things like 'not interested', 'mujhe interest nahi', 'mat call karo', 'please remove my number'.
-- `callback_requested`: true if lead asked to be called back or said 'call me later/baad mein'.
+- `is_not_interested`: true if lead said 'not interested', 'mujhe interest nahi', 'mat call karo', 'remove my number'.
+- `callback_requested`: true if lead asked to be called back.
 - `appointment_booked`: true if a doctor consultation was explicitly scheduled.
-- `lead_score`: must be an integer, never null.
-- `score_label`: must exactly match the score range (Cold 0-39, Warm 40-69, Hot 70-100)."""
+- `wrong_person`: true if the person who answered was NOT the original lead.
+- `lead_score`: must be an integer 0-100, never null.
+- `score_label`: Cold (0-39), Warm (40-69), Hot (70-100).
+- All other fields: null if not mentioned in the transcript."""
 
                     resp = oai_client.chat.completions.create(
                         model="gpt-4o-mini",
@@ -1231,6 +1270,71 @@ Rules:
                         lead_score = parsed.get("lead_score")
                         score_label = parsed.get("score_label")
                         score_reason = parsed.get("score_reason")
+
+                        # --- Structured fields extracted from the call ---
+                        wrong_person = parsed.get("wrong_person", False)
+                        caller_name = parsed.get("caller_name")
+                        patient_name = parsed.get("patient_name")
+                        relation = parsed.get("relation_to_patient")
+                        weight_goal = parsed.get("weight_goal")
+                        current_weight = parsed.get("current_weight")
+                        interested_plan = parsed.get("interested_plan")
+                        health_concerns = parsed.get("health_concerns")
+
+                        # Update lead metadata with extracted structured data
+                        meta_update = {}
+                        if weight_goal: meta_update["weight_goal"] = weight_goal
+                        if current_weight: meta_update["current_weight"] = current_weight
+                        if interested_plan: meta_update["interested_plan_interest"] = interested_plan
+                        if health_concerns: meta_update["health_concerns"] = health_concerns
+                        if wrong_person and caller_name: meta_update["caller_name"] = caller_name
+                        if wrong_person and relation: meta_update["relation_to_patient"] = relation
+                        if wrong_person and patient_name: meta_update["actual_patient_name"] = patient_name
+
+                        if meta_update and lead_id:
+                            try:
+                                # Merge into existing metadata
+                                existing_meta_res = supabase.table("leads").select("metadata").eq("id", lead_id).execute()
+                                existing_meta = (existing_meta_res.data[0].get("metadata") or {}) if existing_meta_res.data else {}
+                                merged_meta = {**existing_meta, **meta_update}
+                                supabase.table("leads").update({"metadata": merged_meta}).eq("id", lead_id).execute()
+                                supabase.table("users").update({"metadata": merged_meta}).eq("id", lead_id).execute()
+                                logger.warning(f"[StructuredData] Updated lead metadata: {meta_update}")
+                            except Exception as meta_err:
+                                logger.error(f"[StructuredData] Failed to update metadata: {meta_err}")
+
+                        # Save a structured timeline note
+                        note_parts = [f"\ud83e\udd16 AI Call Summary"]
+                        if wrong_person:
+                            note_parts.append(f"\u26a0\ufe0f Wrong person answered. Caller: {caller_name or 'Unknown'} ({relation or 'relative'}). Actual patient: {patient_name or lead_name}.")
+                        if weight_goal: note_parts.append(f"\ud83c\udfaf Weight Goal: {weight_goal}")
+                        if current_weight: note_parts.append(f"\u2696\ufe0f Current Weight: {current_weight}")
+                        if interested_plan: note_parts.append(f"\ud83d\udcb3 Interested Plan: {interested_plan}")
+                        if health_concerns: note_parts.append(f"\ud83c\udfe5 Health Concerns: {health_concerns}")
+                        note_parts.append(f"\n{summary}")
+                        timeline_note = "\n".join(note_parts)
+
+                        if lead_id and timeline_note:
+                            try:
+                                supabase.table("interactions").insert({
+                                    "lead_id": lead_id,
+                                    "type": "AI_CALL_NOTE",
+                                    "note": timeline_note,
+                                    "created_by": "ai_agent"
+                                }).execute()
+                                logger.warning(f"[Timeline] Structured note saved for lead {lead_id}")
+                            except Exception as note_err:
+                                # Fallback: try user_notes table
+                                try:
+                                    supabase.table("user_notes").insert({
+                                        "user_id": lead_id,
+                                        "note": timeline_note,
+                                        "created_by": "ai_agent"
+                                    }).execute()
+                                    logger.warning(f"[Timeline] Note saved to user_notes for lead {lead_id}")
+                                except Exception as note_err2:
+                                    logger.error(f"[Timeline] Failed to save note: {note_err2}")
+
                     except Exception as parse_err:
                         logger.warning(f"[LeadScore] JSON parse failed: {parse_err}")
                         summary = response_text
