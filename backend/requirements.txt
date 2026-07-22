@@ -16,3 +16,4 @@ pipecat-ai[google]
 openai
 google-genai
 deepgram-sdk
+numpy==1.26.4
