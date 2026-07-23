@@ -164,6 +164,11 @@ async def build_rag_context(lead_id: str, supabase: Client):
 
     system_instruction = f"""{dynamic_base_prompt}
 
+CRITICAL INSTRUCTION FOR YOUR FIRST MESSAGE:
+Your VERY FIRST message to the user MUST be exactly this greeting (in Hinglish):
+"Namaste {lead_name}! Main Aalya bol rahi hu, Genestac se. Humne dekha ki aapne {lead_source_phrase} inquiry ki thi, kya main jaan sakti hu aapka main health goal kya hai?"
+Do NOT say "Understood", "Hello", or anything else before it. Just say the greeting exactly as written above.
+
 LEAD INFORMATION:
 Name: {lead_name}
 Source: {lead_source or 'Unknown'}
@@ -1074,13 +1079,8 @@ async def voice_stream(websocket: WebSocket):
     async def on_client_connected(transport, client):
         logger.warning("Exotel client connected — sending greeting trigger")
         
-        # Opening line references where the lead came from (website, Facebook, etc.)
-        trigger_text = (
-            f"{lead_name} ne phone utha liya hai. Ab tum apna sales script Step 1 follow karo aur sirf yeh ek line bolo: "
-            f"'Namaste {lead_name}! Main Aalya bol rahi hu, Genestac se. "
-            f"Humne dekha ki aapne {lead_source_phrase} inquiry ki thi, kya main jaan sakti hu aapka main health goal kya hai?' "
-            f"— aur phir unka jawab suno."
-        )
+        # Trigger the AI to speak its mandated first greeting
+        trigger_text = "Hello"
         
         context.add_message({
             "role": "user",
