@@ -653,7 +653,7 @@ export function AdminAICallingClient({ initialSettings, initialKnowledgeBase, in
               <p className="text-xs text-gray-500 mt-1">Drag pending calls to reorder priority.</p>
             </div>
             <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={fetchCallQueue} disabled={queueLoading}>
+              <Button variant="outline" size="sm" onClick={() => fetchCallQueue(false)} disabled={queueLoading}>
                 <RefreshCw className={`w-4 h-4 mr-2 ${queueLoading ? 'animate-spin' : ''}`} />
                 Refresh
               </Button>
