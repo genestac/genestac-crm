@@ -159,7 +159,13 @@ export function BlogEditor({ initialBlog }: Props) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ rawText }),
       })
-      const data = await res.json()
+      
+      let data;
+      try {
+        data = await res.json();
+      } catch (e) {
+        throw new Error(res.status === 504 ? 'AI request timed out. Try a shorter text.' : 'Invalid response from server.');
+      }
 
       if (!res.ok || data.error) {
         toast.error(data.error || 'NVIDIA formatting failed')

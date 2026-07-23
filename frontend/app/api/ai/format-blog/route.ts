@@ -54,8 +54,8 @@ OUTPUT FORMAT:
   ]
 }`
 
-  const payload = {
-    model: 'meta/llama-3.1-70b-instruct',
+    const payload = {
+      model: 'meta/llama-3.1-8b-instruct',
     messages: [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: 'Raw blog text to format:\n\n' + rawText }
