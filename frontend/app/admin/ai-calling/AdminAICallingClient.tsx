@@ -117,6 +117,16 @@ function CallLogRow({ log }: { log: any }) {
               </div>
             </div>
           )}
+          {log.recording_url && (
+            <div>
+              <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Voice Recording</h4>
+              <div className="bg-white p-3 rounded-lg border">
+                <audio controls className="w-full h-10" src={log.recording_url}>
+                  Your browser does not support the audio element.
+                </audio>
+              </div>
+            </div>
+          )}
           {log.transcript ? (
             <div>
               <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Transcript</h4>
@@ -198,16 +208,16 @@ export function AdminAICallingClient({ initialSettings, initialKnowledgeBase, in
         { value: "QUALIFIED", label: "Qualified" },
       ]
 
-  const fetchCallLogs = useCallback(async (page: number = logsPage) => {
-    setLogsLoading(true)
+  const fetchCallLogs = useCallback(async (page: number = logsPage, silent = false) => {
+    if (!silent) setLogsLoading(true)
     try {
       const res = await getCallLogs(page, limit)
       setCallLogs(res.data || [])
       setLogsTotal(res.total || 0)
     } catch {
-      toast.error('Failed to load call logs')
+      if (!silent) toast.error('Failed to load call logs')
     } finally {
-      setLogsLoading(false)
+      if (!silent) setLogsLoading(false)
     }
   }, [logsPage, limit])
 
@@ -220,24 +230,42 @@ export function AdminAICallingClient({ initialSettings, initialKnowledgeBase, in
     }
   }, [])
 
-  const fetchCallQueue = useCallback(async () => {
-    setQueueLoading(true)
+  const fetchCallQueue = useCallback(async (silent = false) => {
+    if (!silent) setQueueLoading(true)
     try {
       const queue = await getCallQueue()
       setCallQueue(queue)
     } catch {
-      toast.error('Failed to load call queue')
+      if (!silent) toast.error('Failed to load call queue')
     } finally {
-      setQueueLoading(false)
+      if (!silent) setQueueLoading(false)
     }
   }, [])
 
   useEffect(() => {
+    let interval: NodeJS.Timeout
+    
     if (activeTab === 'logs') {
       fetchCallLogs(logsPage)
       fetchCallStats()
+      interval = setInterval(() => {
+        if (document.visibilityState === 'visible') {
+          fetchCallLogs(logsPage, true)
+          fetchCallStats()
+        }
+      }, 10000)
+    } else if (activeTab === 'queue') {
+      fetchCallQueue()
+      interval = setInterval(() => {
+        if (document.visibilityState === 'visible') {
+          fetchCallQueue(true)
+        }
+      }, 10000)
     }
-    if (activeTab === 'queue') fetchCallQueue()
+    
+    return () => {
+      if (interval) clearInterval(interval)
+    }
   }, [activeTab, logsPage, fetchCallLogs, fetchCallQueue, fetchCallStats])
 
   const handleDragStart = (e: React.DragEvent, index: number) => {

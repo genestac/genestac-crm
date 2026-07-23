@@ -77,6 +77,9 @@ async def exotel_call_status(
                             elif exotel_status == "completed" and current_status in ["ringing", "initiating"]:
                                 update_data["status"] = "completed"
                             
+                            if RecordingUrl:
+                                update_data["recording_url"] = RecordingUrl
+                                
                             if update_data:
                                 supabase.table("ai_call_logs").update(update_data).eq("id", log_res.data[0]["id"]).execute()
 
