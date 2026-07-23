@@ -169,7 +169,7 @@ async def update_lead_details(lead_id: str, status: Optional[str]=Form(None), pr
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 @router.get('/leads')
-async def get_leads(statuses: Optional[str]=Query(None), exclude_statuses: Optional[str]=Query(None), require_followup: Optional[bool]=Query(False), page: int=Query(1), limit: int=Query(50), sort_by: str=Query('created_at'), sort_order: str=Query('desc'), search: Optional[str]=Query(None), source_id: Optional[str]=Query(None), current_user: dict=Depends(get_current_user), supabase: Client=Depends(get_supabase_client)):
+async def get_leads(statuses: Optional[str]=Query(None), exclude_statuses: Optional[str]=Query(None), require_followup: Optional[bool]=Query(False), page: int=Query(1), limit: int=Query(50), sort_by: str=Query('created_at'), sort_order: str=Query('desc'), search: Optional[str]=Query(None), source_id: Optional[str]=Query(None), hot_only: Optional[bool]=Query(False), current_user: dict=Depends(get_current_user), supabase: Client=Depends(get_supabase_client)):
     try:
         user_id = current_user['id']
         is_admin = current_user.get('role') in ['SUPER_ADMIN', 'superadmin', 'admin', 'master_admin']
@@ -257,7 +257,28 @@ async def get_leads(statuses: Optional[str]=Query(None), exclude_statuses: Optio
             deduped_combined.append(item)
             
         combined = deduped_combined
-        
+
+        # --- Enrich leads with latest AI call score ---
+        try:
+            all_ids = [item['id'] for item in combined]
+            if all_ids:
+                logs_res = supabase.table('ai_call_logs').select('lead_id, lead_score, score_label').in_('lead_id', all_ids).order('created_at', desc=True).execute()
+                # Keep only the most recent log per lead
+                score_map = {}
+                for log in (logs_res.data or []):
+                    lid = log['lead_id']
+                    if lid not in score_map and log.get('score_label'):
+                        score_map[lid] = {'lead_score': log.get('lead_score'), 'score_label': log.get('score_label')}
+                for item in combined:
+                    if item['id'] in score_map:
+                        item.update(score_map[item['id']])
+        except Exception as score_err:
+            print(f'[get_leads] Score enrichment failed: {score_err}')
+
+        # Filter to hot only if requested
+        if hot_only:
+            combined = [item for item in combined if item.get('score_label') == 'Hot']
+
         total_count = len(combined)
         start_idx = (page - 1) * limit
         end_idx = start_idx + limit

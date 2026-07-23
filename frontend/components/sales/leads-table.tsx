@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useMemo, useEffect, useRef } from 'react'
-import { Calendar, Mail, Phone, Settings2, ArrowUpDown, ArrowUp, ArrowDown, ChevronLeft, ChevronRight, Search, Filter, ChevronDown, FileText } from 'lucide-react'
+import { Calendar, Mail, Phone, Settings2, ArrowUpDown, ArrowUp, ArrowDown, ChevronLeft, ChevronRight, Search, Filter, ChevronDown, FileText, Flame, MapPin } from 'lucide-react'
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuCheckboxItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuGroup } from '@/components/ui/dropdown-menu'
 import { UserStatusUpdater } from '@/components/sales/user-status-updater'
 import { UserManagementSheet } from '@/components/sales/user-management-sheet'
@@ -53,6 +53,7 @@ export function LeadsTable({ initialLeads, initialTotal, statusOptions, sourceOp
     return s.split(',')
   })
   const [selectedSource, setSelectedSource] = useState<string>(() => searchParams.get('source') || '')
+  const [hotOnly, setHotOnly] = useState<boolean>(() => searchParams.get('hot') === 'true')
   const isInitialMount = useRef(true)
 
   // Debounce search
@@ -70,7 +71,7 @@ export function LeadsTable({ initialLeads, initialTotal, statusOptions, sourceOp
       const sortBy = sortColumn || 'created_at'
       const order = sortDirection || 'desc'
       const statusParam = selectedStatuses.length > 0 ? selectedStatuses.join(',') : ''
-      const response = await getPaginatedLeads(currentPage, pageSize, sortBy, order, debouncedSearch, selectedSource, statusParam)
+      const response = await getPaginatedLeads(currentPage, pageSize, sortBy, order, debouncedSearch, selectedSource, statusParam, hotOnly)
       if (response && response.data) {
         setLeads(response.data)
         setTotal(response.total || 0)
@@ -83,6 +84,7 @@ export function LeadsTable({ initialLeads, initialTotal, statusOptions, sourceOp
         if (selectedSource) params.set('source', selectedSource)
         if (selectedStatuses.length > 0) params.set('status', selectedStatuses.join(','))
         else params.set('status', '')
+        if (hotOnly) params.set('hot', 'true')
         if (sortBy !== 'created_at') params.set('sort', sortBy)
         if (order !== 'desc') params.set('order', order)
         
@@ -103,7 +105,7 @@ export function LeadsTable({ initialLeads, initialTotal, statusOptions, sourceOp
     fetchLeads()
     // Reset selected leads on fetch to avoid acting on invisible leads
     setSelectedLeadIds([])
-  }, [currentPage, pageSize, sortColumn, sortDirection, debouncedSearch, selectedStatuses, selectedSource])
+  }, [currentPage, pageSize, sortColumn, sortDirection, debouncedSearch, selectedStatuses, selectedSource, hotOnly])
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
 
@@ -238,6 +240,19 @@ export function LeadsTable({ initialLeads, initialTotal, statusOptions, sourceOp
             </DropdownMenu>
           )}
 
+          {/* 🔥 Hot Leads Filter */}
+          <button
+            onClick={() => { setHotOnly(h => !h); setCurrentPage(1) }}
+            className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-md border text-sm font-medium transition-all ${
+              hotOnly
+                ? 'bg-red-500 text-white border-red-500 shadow-sm'
+                : 'bg-white text-gray-600 border-gray-300 hover:bg-red-50 hover:border-red-300 hover:text-red-600'
+            }`}
+          >
+            <Flame className={`w-4 h-4 ${hotOnly ? 'text-white' : 'text-red-500'}`} />
+            Hot Leads
+          </button>
+
           <DropdownMenu>
             <DropdownMenuTrigger className={buttonVariants({ variant: "outline", size: "sm" }) + " h-[38px] border-gray-300 w-full sm:w-auto justify-between"}>
               <div className="flex items-center">
@@ -350,9 +365,19 @@ export function LeadsTable({ initialLeads, initialTotal, statusOptions, sourceOp
                 
                 {/* User Details */}
                 <td className="px-6 py-4">
-                  <div className="font-semibold text-gray-900">{lead.name || 'Unnamed User'}</div>
-                  {(lead.city || lead.metadata?.city) && <div className="text-xs text-gray-600 mt-0.5">{lead.city || lead.metadata?.city}</div>}
-                  <div className="text-xs text-gray-500 mt-0.5">ID: {lead.id.substring(0, 8)}</div>
+                  <div className="flex items-center gap-2">
+                    <div className="font-semibold text-gray-900">{lead.name || 'Unnamed User'}</div>
+                    {lead.score_label === 'Hot' && <span title="Hot Lead" className="text-base leading-none">🔥</span>}
+                    {lead.score_label === 'Warm' && <span title="Warm Lead" className="text-base leading-none">🌡️</span>}
+                    {lead.score_label === 'Cold' && <span title="Cold Lead" className="text-base leading-none">❄️</span>}
+                  </div>
+                  {(lead.city || lead.metadata?.city) && (
+                    <div className="flex items-center gap-1 text-xs text-gray-500 mt-0.5">
+                      <MapPin className="w-3 h-3" />
+                      {lead.city || lead.metadata?.city}
+                    </div>
+                  )}
+                  <div className="text-xs text-gray-400 mt-0.5">ID: {lead.id.substring(0, 8)}</div>
                 </td>
 
                 {/* Date */}

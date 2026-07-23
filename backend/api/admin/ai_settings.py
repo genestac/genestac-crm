@@ -372,8 +372,11 @@ async def process_next_in_queue(
         if exotel_res and "Call" in exotel_res:
             call_sid = exotel_res["Call"].get("Sid")
             supabase.table("ai_call_logs").update({"call_sid": call_sid, "status": "ringing"}).eq("id", call_log_id).execute()
-            # Remove from queue or mark completed
-            queue.pop(pending_idx)
+            # Mark as bot_called (keep in queue for status tracking)
+            queue[pending_idx]["status"] = "bot_called"
+            queue[pending_idx]["call_log_id"] = call_log_id
+            queue[pending_idx]["call_sid"] = call_sid
+            queue[pending_idx]["called_at"] = __import__('datetime').datetime.utcnow().isoformat()
             supabase.table("global_settings").upsert({"settings_key": "ai_call_queue", "settings_value": queue}, on_conflict="settings_key").execute()
             return {"success": True, "message": "Call initiated"}
         else:

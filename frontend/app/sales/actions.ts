@@ -136,7 +136,7 @@ export async function getCurrentUserRole() {
   return data?.user?.role || data?.role || 'USER'
 }
 
-export async function getPaginatedLeads(page: number, limit: number, sortBy: string, sortOrder: string, search: string, sourceId: string, status: string) {
+export async function getPaginatedLeads(page: number, limit: number, sortBy: string, sortOrder: string, search: string, sourceId: string, status: string, hotOnly: boolean = false) {
   const query = new URLSearchParams()
   query.append('page', page.toString())
   query.append('limit', limit.toString())
@@ -145,6 +145,7 @@ export async function getPaginatedLeads(page: number, limit: number, sortBy: str
   if (search) query.append('search', search)
   if (sourceId) query.append('source_id', sourceId)
   if (status) query.append('statuses', status)
+  if (hotOnly) query.append('hot_only', 'true')
 
   const data = await fetchAPI(`/api/sales/leads?${query.toString()}`, {
     headers: { 'Cookie': (await cookies()).toString() }

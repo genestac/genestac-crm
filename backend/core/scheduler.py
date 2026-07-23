@@ -121,7 +121,8 @@ def sweep_leads_for_auto_call():
         import uuid
         q_res = supabase.table("global_settings").select("settings_value").eq("settings_key", "ai_call_queue").execute()
         queue = q_res.data[0]["settings_value"] if q_res.data else []
-        queued_lead_ids = {item["lead_id"] for item in queue if "lead_id" in item}
+        # Only block re-queuing for leads that are still pending (not already called)
+        queued_lead_ids = {item["lead_id"] for item in queue if "lead_id" in item and item.get("status") == "pending"}
 
         new_items = []
         for lead in all_leads:
@@ -156,9 +157,10 @@ def sweep_leads_for_auto_call():
             queue.extend(new_items)
             supabase.table("global_settings").upsert({"settings_key": "ai_call_queue", "settings_value": queue}, on_conflict="settings_key").execute()
 
-        # Process the first item in the queue (if any)
-        if queue:
-            next_call = queue.pop(0)
+        # Find and process the first PENDING item only
+        pending_idx = next((i for i, item in enumerate(queue) if item.get("status") == "pending"), -1)
+        if pending_idx >= 0:
+            next_call = queue[pending_idx]
             lead_id = next_call["lead_id"]
             
             # Fetch phone number
@@ -170,7 +172,7 @@ def sweep_leads_for_auto_call():
                 phone = user_res.data[0].get("phone") if user_res.data else None
 
             if phone:
-                print(f"[AI Voice Scheduler] Popped queue, triggering call for lead {lead_id} ({phone})")
+                print(f"[AI Voice Scheduler] Triggering call for lead {lead_id} ({phone})")
                 log_res = supabase.table("ai_call_logs").insert({
                     "lead_id": lead_id,
                     "status": "initiating"
@@ -183,11 +185,22 @@ def sweep_leads_for_auto_call():
                     call_sid = exotel_res["Call"].get("Sid")
                     if call_log_id:
                         supabase.table("ai_call_logs").update({"call_sid": call_sid, "status": "ringing"}).eq("id", call_log_id).execute()
+                    # Mark as bot_called — keep in queue for status tracking
+                    queue[pending_idx]["status"] = "bot_called"
+                    queue[pending_idx]["call_log_id"] = call_log_id
+                    queue[pending_idx]["call_sid"] = call_sid
+                    queue[pending_idx]["called_at"] = datetime.datetime.utcnow().isoformat()
+                    print(f"[AI Voice Scheduler] ✅ Call initiated for lead {lead_id}, marked as bot_called")
                 else:
                     if call_log_id:
                         supabase.table("ai_call_logs").update({"status": "failed_to_initiate"}).eq("id", call_log_id).execute()
+                    queue[pending_idx]["status"] = "failed"
+                    print(f"[AI Voice Scheduler] ❌ Call failed for lead {lead_id}")
+            else:
+                queue[pending_idx]["status"] = "failed"
+                print(f"[AI Voice Scheduler] ❌ No phone found for lead {lead_id}")
             
-            # Save the queue with the item removed
+            # Save the updated queue
             supabase.table("global_settings").upsert({"settings_key": "ai_call_queue", "settings_value": queue}, on_conflict="settings_key").execute()
 
     except _NETWORK_ERRORS as e:

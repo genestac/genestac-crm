@@ -79,6 +79,23 @@ async def exotel_call_status(
                             
                             if update_data:
                                 supabase.table("ai_call_logs").update(update_data).eq("id", log_res.data[0]["id"]).execute()
+
+                            # --- Update queue item status ---
+                            try:
+                                q_res = supabase.table("global_settings").select("*").eq("settings_key", "ai_call_queue").execute()
+                                if q_res.data:
+                                    queue = q_res.data[0]["settings_value"] or []
+                                    for qi in queue:
+                                        if qi.get("call_sid") == CallSid or qi.get("call_log_id") == log_res.data[0]["id"]:
+                                            if exotel_status in ["no-answer", "canceled", "failed", "busy"]:
+                                                qi["status"] = "not_picked"
+                                            elif exotel_status == "completed":
+                                                qi["status"] = "in_call"
+                                            break
+                                    supabase.table("global_settings").upsert({"settings_key": "ai_call_queue", "settings_value": queue}, on_conflict="settings_key").execute()
+                            except Exception as qe:
+                                logger.error(f"[Exotel Webhook] Failed to update queue status: {qe}")
+
             except Exception as e:
                 logger.error(f"[Exotel Webhook] Failed to log missed call: {e}")
     else:

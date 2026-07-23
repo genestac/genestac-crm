@@ -27,11 +27,17 @@ function LeadScoreBadge({ score, label }: { score?: number | null; label?: strin
 // ─── Status badge helpers ────────────────────────────────────────────────────
 function CallStatusBadge({ status }: { status: string }) {
   const map: Record<string, { label: string; className: string; icon: React.ReactNode }> = {
-    completed:          { label: 'Completed',  className: 'bg-green-50 text-green-700 border-green-200',  icon: <CheckCircle2 className="w-3 h-3" /> },
-    ringing:            { label: 'Ringing',    className: 'bg-blue-50 text-blue-700 border-blue-200',    icon: <PhoneCall className="w-3 h-3 animate-pulse" /> },
-    failed_to_initiate: { label: 'Failed',     className: 'bg-red-50 text-red-700 border-red-200',       icon: <XCircle className="w-3 h-3" /> },
-    no_answer:          { label: 'No Answer',  className: 'bg-yellow-50 text-yellow-700 border-yellow-200', icon: <PhoneMissed className="w-3 h-3" /> },
-    busy:               { label: 'Busy',       className: 'bg-orange-50 text-orange-700 border-orange-200', icon: <PhoneOff className="w-3 h-3" /> },
+    completed:          { label: 'Completed',   className: 'bg-green-50 text-green-700 border-green-200',    icon: <CheckCircle2 className="w-3 h-3" /> },
+    ringing:            { label: 'Ringing',     className: 'bg-blue-50 text-blue-700 border-blue-200',      icon: <PhoneCall className="w-3 h-3 animate-pulse" /> },
+    failed_to_initiate: { label: 'Failed',      className: 'bg-red-50 text-red-700 border-red-200',         icon: <XCircle className="w-3 h-3" /> },
+    no_answer:          { label: 'No Answer',   className: 'bg-yellow-50 text-yellow-700 border-yellow-200', icon: <PhoneMissed className="w-3 h-3" /> },
+    busy:               { label: 'Busy',        className: 'bg-orange-50 text-orange-700 border-orange-200', icon: <PhoneOff className="w-3 h-3" /> },
+    pending:            { label: 'Pending',     className: 'bg-gray-50 text-gray-600 border-gray-200',      icon: <Clock className="w-3 h-3" /> },
+    bot_called:         { label: 'Bot Called',  className: 'bg-indigo-50 text-indigo-700 border-indigo-200', icon: <PhoneCall className="w-3 h-3 animate-pulse" /> },
+    in_call:            { label: 'In Call ✅',  className: 'bg-green-50 text-green-700 border-green-200',   icon: <CheckCircle2 className="w-3 h-3" /> },
+    not_picked:         { label: 'Not Picked',  className: 'bg-red-50 text-red-600 border-red-200',         icon: <PhoneMissed className="w-3 h-3" /> },
+    processing:         { label: 'Processing',  className: 'bg-purple-50 text-purple-700 border-purple-200', icon: <Loader2 className="w-3 h-3 animate-spin" /> },
+    failed:             { label: 'Failed',      className: 'bg-red-50 text-red-700 border-red-200',         icon: <XCircle className="w-3 h-3" /> },
   }
   const s = map[status] ?? { label: status, className: 'bg-gray-50 text-gray-600 border-gray-200', icon: null }
   return (
@@ -598,32 +604,32 @@ export function AdminAICallingClient({ initialSettings, initialKnowledgeBase, in
       {/* ── Call Queue Tab ── */}
       {activeTab === 'queue' && (
         <div className="space-y-6">
-          {/* Stats row for Queue tab as requested */}
+          {/* Stats row */}
           <div className="grid grid-cols-4 gap-4">
             {[
-              { label: 'Total Campaign Calls', value: totalCount + callQueue.length, color: 'text-gray-900', bg: 'bg-white' },
-              { label: 'Success / Picked Up',  value: completedCount, color: 'text-green-700',  bg: 'bg-green-50' },
-              { label: 'Failed',               value: failedCount,    color: 'text-red-700',    bg: 'bg-red-50' },
-              { label: 'In Queue (Pending)',   value: callQueue.length, color: 'text-indigo-700', bg: 'bg-indigo-50' },
+              { label: 'In Queue (Pending)',  value: callQueue.filter((q: any) => q.status === 'pending').length,     color: 'text-gray-900',   bg: 'bg-white' },
+              { label: 'Bot Called',          value: callQueue.filter((q: any) => q.status === 'bot_called').length,  color: 'text-indigo-700', bg: 'bg-indigo-50' },
+              { label: 'Picked Up (In Call)', value: callQueue.filter((q: any) => q.status === 'in_call').length,     color: 'text-green-700',  bg: 'bg-green-50' },
+              { label: 'Not Picked',          value: callQueue.filter((q: any) => q.status === 'not_picked').length,  color: 'text-red-700',    bg: 'bg-red-50' },
             ].map(s => (
               <div key={s.label} className={`${s.bg} rounded-xl border p-5 shadow-sm`}>
                 <p className="text-xs text-gray-500 font-medium">{s.label}</p>
-                <p className={`text-3xl font-bold mt-1 ${s.color}`}>{logsLoading || queueLoading ? '—' : s.value}</p>
+                <p className={`text-3xl font-bold mt-1 ${s.color}`}>{queueLoading ? '—' : s.value}</p>
               </div>
             ))}
           </div>
 
           <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-lg font-semibold text-gray-900">Upcoming Calls</h2>
-              <p className="text-xs text-gray-500 mt-1">Drag and drop to reorder the call priority.</p>
+              <h2 className="text-lg font-semibold text-gray-900">Call Queue</h2>
+              <p className="text-xs text-gray-500 mt-1">Drag pending calls to reorder priority.</p>
             </div>
             <div className="flex gap-2">
               <Button variant="outline" size="sm" onClick={fetchCallQueue} disabled={queueLoading}>
                 <RefreshCw className={`w-4 h-4 mr-2 ${queueLoading ? 'animate-spin' : ''}`} />
                 Refresh
               </Button>
-              <Button size="sm" onClick={handleProcessNext} disabled={processingQueue || queueLoading || callQueue.length === 0}>
+              <Button size="sm" onClick={handleProcessNext} disabled={processingQueue || queueLoading || callQueue.filter((q: any) => q.status === 'pending').length === 0}>
                 {processingQueue ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Play className="w-4 h-4 mr-2" />}
                 Process Next
               </Button>
@@ -641,35 +647,82 @@ export function AdminAICallingClient({ initialSettings, initialKnowledgeBase, in
               <p className="text-xs mt-1">Leads triggered for calling will appear here.</p>
             </div>
           ) : (
-            <div className="space-y-2">
-              {callQueue.map((item, index) => (
-                <div
-                  key={item.id}
-                  draggable
-                  onDragStart={(e) => handleDragStart(e, index)}
-                  onDragEnter={(e) => handleDragEnter(e, index)}
-                  onDragEnd={handleDragEnd}
-                  onDragOver={(e) => e.preventDefault()}
-                  className={`flex items-center gap-4 p-4 border rounded-xl bg-white shadow-sm transition-all cursor-grab active:cursor-grabbing ${
-                    draggedItemIndex === index ? 'opacity-50 scale-[0.99] border-indigo-300' : 'hover:border-indigo-200'
-                  }`}
-                >
-                  <GripVertical className="w-5 h-5 text-gray-400" />
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-semibold text-gray-900">{item.leads?.name || 'Unknown'}</span>
-                      {item.leads?.phone && <span className="text-xs text-gray-500">{item.leads.phone}</span>}
-                      <CrmStatusBadge status={item.leads?.crm_status} />
+            <div className="space-y-6">
+              {/* Pending Section (draggable) */}
+              {callQueue.filter((q: any) => q.status === 'pending').length > 0 && (
+                <div className="space-y-2">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 flex items-center gap-2">
+                    <Clock className="w-3.5 h-3.5" /> Pending ({callQueue.filter((q: any) => q.status === 'pending').length})
+                  </h3>
+                  {callQueue.map((item: any, index: number) => item.status === 'pending' && (
+                    <div
+                      key={item.id}
+                      draggable
+                      onDragStart={(e) => handleDragStart(e, index)}
+                      onDragEnter={(e) => handleDragEnter(e, index)}
+                      onDragEnd={handleDragEnd}
+                      onDragOver={(e) => e.preventDefault()}
+                      className={`flex items-center gap-4 p-4 border rounded-xl bg-white shadow-sm transition-all cursor-grab active:cursor-grabbing ${
+                        draggedItemIndex === index ? 'opacity-50 scale-[0.99] border-indigo-300' : 'hover:border-indigo-200'
+                      }`}
+                    >
+                      <GripVertical className="w-5 h-5 text-gray-400" />
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-semibold text-gray-900">{item.leads?.name || 'Unknown'}</span>
+                          {item.leads?.phone && <span className="text-xs text-gray-500">{item.leads.phone}</span>}
+                          <CrmStatusBadge status={item.leads?.crm_status} />
+                        </div>
+                        <p className="text-xs text-gray-400 mt-1">
+                          Added: {new Date(item.created_at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}
+                        </p>
+                      </div>
+                      <CallStatusBadge status={item.status} />
                     </div>
-                    <p className="text-xs text-gray-400 mt-1">
-                      Added: {new Date(item.created_at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}
-                    </p>
-                  </div>
-                  <div className="flex-shrink-0">
-                    <CallStatusBadge status={item.status} />
-                  </div>
+                  ))}
                 </div>
-              ))}
+              )}
+
+              {/* Bot Called / In Call / Not Picked History */}
+              {callQueue.filter((q: any) => ['bot_called', 'in_call', 'not_picked', 'processing', 'failed'].includes(q.status)).length > 0 && (
+                <div className="space-y-2">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 flex items-center gap-2">
+                    <PhoneCall className="w-3.5 h-3.5" /> Call History
+                  </h3>
+                  {callQueue.filter((q: any) => ['bot_called', 'in_call', 'not_picked', 'processing', 'failed'].includes(q.status)).map((item: any) => (
+                    <div
+                      key={item.id}
+                      className="flex items-center gap-4 p-4 border rounded-xl bg-white shadow-sm"
+                    >
+                      <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${
+                        item.status === 'in_call' ? 'bg-green-50' :
+                        item.status === 'not_picked' ? 'bg-red-50' :
+                        item.status === 'bot_called' ? 'bg-indigo-50' : 'bg-gray-50'
+                      }`}>
+                        <PhoneCall className={`w-4 h-4 ${
+                          item.status === 'in_call' ? 'text-green-600' :
+                          item.status === 'not_picked' ? 'text-red-400' :
+                          item.status === 'bot_called' ? 'text-indigo-500' : 'text-gray-400'
+                        }`} />
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-semibold text-gray-900">{item.leads?.name || 'Unknown'}</span>
+                          {item.leads?.phone && <span className="text-xs text-gray-500">{item.leads.phone}</span>}
+                          <CrmStatusBadge status={item.leads?.crm_status} />
+                        </div>
+                        <p className="text-xs text-gray-400 mt-1">
+                          {item.called_at
+                            ? `Called: ${new Date(item.called_at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}`
+                            : `Added: ${new Date(item.created_at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}`
+                          }
+                        </p>
+                      </div>
+                      <CallStatusBadge status={item.status} />
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>
