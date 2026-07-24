@@ -106,15 +106,45 @@ def sweep_leads_for_auto_call():
             print("[AI Voice Scheduler] Outside calling window. Skipping normal sweep.")
             return
 
-        # Fetch from leads table (phone_number column)
-        leads_from_leads = supabase.table("leads").select("id, phone_number").in_("status", enabled_statuses).is_("ai_callback_time", "null").execute().data or []
-        # Fetch from users table (phone column)
-        leads_from_users = supabase.table("users").select("id, phone").in_("status", enabled_statuses).is_("ai_callback_time", "null").execute().data or []
+        # Read optional filter settings
+        filter_created_from = settings.get("filter_created_from")      # e.g. "2026-07-01"
+        filter_created_to   = settings.get("filter_created_to")        # e.g. "2026-07-31"
+        filter_sources_raw  = settings.get("filter_sources", "")       # e.g. "facebook,instagram"
+        filter_sources      = [s.strip().lower() for s in filter_sources_raw.split(",") if s.strip()] if filter_sources_raw else []
+        max_calls_per_lead  = int(settings.get("max_calls_per_lead") or 3)
+        skip_not_interested = settings.get("skip_not_interested", True)
+        skip_consultation   = settings.get("skip_consultation_scheduled", True)
+
+        # Build the base query for leads table
+        leads_query = supabase.table("leads").select("id, phone_number, status, source, created_at").in_("status", enabled_statuses).is_("ai_callback_time", "null")
+        if filter_created_from:
+            leads_query = leads_query.gte("created_at", filter_created_from)
+        if filter_created_to:
+            leads_query = leads_query.lte("created_at", filter_created_to + "T23:59:59")
+        if skip_not_interested:
+            leads_query = leads_query.neq("status", "NOT_INTERESTED")
+        if skip_consultation:
+            leads_query = leads_query.neq("status", "CONSULTATION_SCHEDULED")
+
+        leads_from_leads = leads_query.execute().data or []
+
+        # Build the base query for users table
+        users_query = supabase.table("users").select("id, phone, status, source, created_at").in_("status", enabled_statuses).is_("ai_callback_time", "null")
+        if filter_created_from:
+            users_query = users_query.gte("created_at", filter_created_from)
+        if filter_created_to:
+            users_query = users_query.lte("created_at", filter_created_to + "T23:59:59")
+        if skip_not_interested:
+            users_query = users_query.neq("status", "NOT_INTERESTED")
+        if skip_consultation:
+            users_query = users_query.neq("status", "CONSULTATION_SCHEDULED")
+
+        leads_from_users = users_query.execute().data or []
 
         all_leads = [
-            {"id": l["id"], "phone": l.get("phone_number")} for l in leads_from_leads if l.get("phone_number")
+            {"id": l["id"], "phone": l.get("phone_number"), "source": l.get("source", "")} for l in leads_from_leads if l.get("phone_number")
         ] + [
-            {"id": l["id"], "phone": l.get("phone")} for l in leads_from_users if l.get("phone") and l["id"] not in {x["id"] for x in leads_from_leads}
+            {"id": l["id"], "phone": l.get("phone"), "source": l.get("source", "")} for l in leads_from_users if l.get("phone") and l["id"] not in {x["id"] for x in leads_from_leads}
         ]
 
         # Fetch current queue
@@ -131,10 +161,17 @@ def sweep_leads_for_auto_call():
             if not phone or lead_id in queued_lead_ids:
                 continue
 
-            # Skip if max 3 lifetime calls already made
+            # Apply lead source filter
+            if filter_sources:
+                lead_source = (lead.get("source") or "").lower()
+                if not any(fs in lead_source for fs in filter_sources):
+                    print(f"[AI Voice Scheduler] Skipping lead {lead_id} — source '{lead_source}' not in filter.")
+                    continue
+
+            # Skip if max lifetime calls already reached (configurable, default 3)
             total_logs = supabase.table("ai_call_logs").select("id").eq("lead_id", lead_id).execute()
-            if len(total_logs.data) >= 3:
-                print(f"[AI Voice Scheduler] Skipping lead {lead_id} — max 3 calls reached.")
+            if len(total_logs.data) >= max_calls_per_lead:
+                print(f"[AI Voice Scheduler] Skipping lead {lead_id} — max {max_calls_per_lead} calls reached.")
                 continue
 
             # Only 1 call per lead per day

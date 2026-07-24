@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { updateAISettings, addKnowledgeBaseItem, deleteKnowledgeBaseItem, getCallLogs, getCallQueue, updateCallQueue, processNextCall, getCallStats } from '../actions'
+import { updateAISettings, addKnowledgeBaseItem, deleteKnowledgeBaseItem, getCallLogs, getCallQueue, updateCallQueue, processNextCall, getCallStats, getEligibleLeadsPreview } from '../actions'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -65,6 +65,8 @@ function CallLogRow({ log }: { log: any }) {
   })
   const leadName = log.leads?.name ?? 'Unknown'
   const leadPhone = log.leads?.phone ?? ''
+  const statusBefore = log.status_before
+  const statusAfter = log.status_after
 
   return (
     <div className="border rounded-xl overflow-hidden bg-white shadow-sm">
@@ -81,10 +83,18 @@ function CallLogRow({ log }: { log: any }) {
             <span className="font-semibold text-gray-900">{leadName}</span>
             {leadPhone && <span className="text-xs text-gray-400">{leadPhone}</span>}
             <CallStatusBadge status={log.status} />
-            <CrmStatusBadge status={log.leads?.crm_status} />
             <LeadScoreBadge score={log.lead_score} label={log.score_label} />
           </div>
-          <p className="text-xs text-gray-400 mt-0.5">{date}</p>
+          <div className="flex items-center gap-2 mt-1 flex-wrap">
+            <p className="text-xs text-gray-400">{date}</p>
+            {statusBefore && statusAfter && (
+              <span className="inline-flex items-center gap-1 text-[10px] font-medium">
+                <span className="px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 uppercase tracking-wider">{statusBefore.replace(/_/g, ' ')}</span>
+                <span className="text-gray-400">→</span>
+                <span className="px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700 uppercase tracking-wider font-bold">{statusAfter.replace(/_/g, ' ')}</span>
+              </span>
+            )}
+          </div>
         </div>
         {log.summary && (
           <p className="hidden md:block text-xs text-gray-500 max-w-xs truncate flex-shrink-0">
@@ -177,6 +187,25 @@ export function AdminAICallingClient({ initialSettings, initialKnowledgeBase, in
   const [newKbContent, setNewKbContent] = useState('')
   const [addingKb, setAddingKb] = useState(false)
 
+  // Call log filters
+  const [logFilters, setLogFilters] = useState<Record<string, string>>({ status_filter: '', crm_status: '', date_from: '', date_to: '', score_label: '' })
+
+  // Eligible leads preview
+  const [preview, setPreview] = useState<any>(null)
+  const [previewLoading, setPreviewLoading] = useState(false)
+
+  const fetchPreview = async () => {
+    setPreviewLoading(true)
+    try {
+      const data = await getEligibleLeadsPreview()
+      setPreview(data)
+    } catch {
+      toast.error('Failed to load preview')
+    } finally {
+      setPreviewLoading(false)
+    }
+  }
+
   // Call logs state
   const [callLogs, setCallLogs] = useState<any[]>([])
   const [logsLoading, setLogsLoading] = useState(false)
@@ -208,10 +237,10 @@ export function AdminAICallingClient({ initialSettings, initialKnowledgeBase, in
         { value: "QUALIFIED", label: "Qualified" },
       ]
 
-  const fetchCallLogs = useCallback(async (page: number = logsPage, silent = false) => {
+  const fetchCallLogs = useCallback(async (page: number = logsPage, silent = false, filters?: Record<string, string>) => {
     if (!silent) setLogsLoading(true)
     try {
-      const res = await getCallLogs(page, limit)
+      const res = await getCallLogs(page, limit, filters ?? logFilters)
       setCallLogs(res.data || [])
       setLogsTotal(res.total || 0)
     } catch {
@@ -219,7 +248,7 @@ export function AdminAICallingClient({ initialSettings, initialKnowledgeBase, in
     } finally {
       if (!silent) setLogsLoading(false)
     }
-  }, [logsPage, limit])
+  }, [logsPage, limit, logFilters])
 
   const fetchCallStats = useCallback(async () => {
     try {
@@ -498,12 +527,140 @@ export function AdminAICallingClient({ initialSettings, initialKnowledgeBase, in
                 </div>
                 <p className="text-xs text-gray-500 mt-2">When a lead enters one of these statuses, the AI will queue a call.</p>
               </div>
+
+              {/* Lead Filters for Auto-Calling */}
+              <div className="space-y-4 bg-amber-50/30 p-5 rounded-2xl border border-amber-100/50">
+                <div>
+                  <Label className="font-semibold">Lead Filters (Auto-Call Eligibility)</Label>
+                  <p className="text-xs text-gray-500 mt-0.5">Only leads matching ALL of these criteria will be auto-called.</p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Lead Created From</Label>
+                    <Input
+                      type="date"
+                      value={settings.filter_created_from || ''}
+                      onChange={e => setSettings((s: any) => ({ ...s, filter_created_from: e.target.value }))}
+                      className="text-sm"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Lead Created To</Label>
+                    <Input
+                      type="date"
+                      value={settings.filter_created_to || ''}
+                      onChange={e => setSettings((s: any) => ({ ...s, filter_created_to: e.target.value }))}
+                      className="text-sm"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Max Calls Per Lead (Retry Limit)</Label>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={10}
+                    placeholder="e.g. 3"
+                    value={settings.max_calls_per_lead || ''}
+                    onChange={e => setSettings((s: any) => ({ ...s, max_calls_per_lead: Number(e.target.value) }))}
+                    className="text-sm w-32"
+                  />
+                  <p className="text-xs text-gray-400">Stop calling a lead after this many attempts.</p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Lead Source Filter (comma-separated)</Label>
+                  <Input
+                    type="text"
+                    placeholder="e.g. facebook,instagram,website"
+                    value={settings.filter_sources || ''}
+                    onChange={e => setSettings((s: any) => ({ ...s, filter_sources: e.target.value }))}
+                    className="text-sm"
+                  />
+                  <p className="text-xs text-gray-400">Leave blank to call leads from all sources.</p>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <Switch
+                    id="skip-not-interested"
+                    checked={settings.skip_not_interested !== false}
+                    onCheckedChange={v => setSettings((s: any) => ({ ...s, skip_not_interested: v }))}
+                  />
+                  <Label htmlFor="skip-not-interested" className="cursor-pointer text-sm">Skip leads marked as Not Interested</Label>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <Switch
+                    id="skip-consultation-scheduled"
+                    checked={settings.skip_consultation_scheduled !== false}
+                    onCheckedChange={v => setSettings((s: any) => ({ ...s, skip_consultation_scheduled: v }))}
+                  />
+                  <Label htmlFor="skip-consultation-scheduled" className="cursor-pointer text-sm">Skip leads who already have a Consultation Scheduled</Label>
+                </div>
+              </div>
             </div>
 
             <Button onClick={handleSaveSettings} disabled={saving} className="w-full">
               {saving && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
               Save Settings
             </Button>
+
+            {/* ── Eligible Leads Live Overview ── */}
+            <div className="bg-gradient-to-br from-indigo-50 to-purple-50 border border-indigo-100 rounded-2xl p-5 space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-bold text-indigo-800">📊 Live Eligibility Preview</h3>
+                  <p className="text-xs text-indigo-500 mt-0.5">How many leads match your current filters right now?</p>
+                </div>
+                <Button size="sm" variant="outline" onClick={fetchPreview} disabled={previewLoading} className="text-indigo-700 border-indigo-200 hover:bg-indigo-50">
+                  {previewLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : '🔍 Preview'}
+                </Button>
+              </div>
+
+              {preview && (
+                <div className="space-y-3">
+                  {preview.message && (
+                    <p className="text-xs text-amber-600 bg-amber-50 rounded-lg px-3 py-2 border border-amber-100">{preview.message}</p>
+                  )}
+                  {!preview.message && (
+                    <div className="grid grid-cols-3 gap-3">
+                      <div className="bg-white rounded-xl border border-indigo-100 p-3 text-center shadow-sm">
+                        <p className="text-2xl font-bold text-indigo-700">{preview.total_eligible}</p>
+                        <p className="text-[10px] text-gray-500 mt-0.5 font-medium uppercase tracking-wider">Eligible Now</p>
+                      </div>
+                      <div className="bg-white rounded-xl border border-green-100 p-3 text-center shadow-sm">
+                        <p className="text-2xl font-bold text-green-600">{preview.expected_calls_today}</p>
+                        <p className="text-[10px] text-gray-500 mt-0.5 font-medium uppercase tracking-wider">Expected Today</p>
+                      </div>
+                      <div className="bg-white rounded-xl border border-gray-100 p-3 text-center shadow-sm">
+                        <p className="text-2xl font-bold text-gray-500">{preview.already_called_today}</p>
+                        <p className="text-[10px] text-gray-500 mt-0.5 font-medium uppercase tracking-wider">Already Called</p>
+                      </div>
+                    </div>
+                  )}
+                  {preview.status_breakdown && preview.status_breakdown.length > 0 && (
+                    <div className="space-y-1.5">
+                      <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Breakdown by Status</p>
+                      {preview.status_breakdown.map((s: any) => (
+                        <div key={s.status} className="flex items-center justify-between bg-white rounded-lg px-3 py-1.5 border border-gray-100">
+                          <span className="text-xs text-gray-600">{s.status.replace(/_/g, ' ')}</span>
+                          <span className="text-xs font-bold text-indigo-700 bg-indigo-50 rounded-full px-2 py-0.5">{s.count}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {preview.filter_active && (
+                    <p className="text-[10px] text-indigo-400">✅ Active filters applied — showing filtered results only.</p>
+                  )}
+                </div>
+              )}
+
+              {!preview && !previewLoading && (
+                <p className="text-xs text-gray-400 text-center py-2">Click Preview to see how many leads will be auto-called based on your current saved settings.</p>
+              )}
+            </div>
           </div>
 
           {/* Right Column: Knowledge Base */}
@@ -570,6 +727,86 @@ export function AdminAICallingClient({ initialSettings, initialKnowledgeBase, in
                 <p className={`text-3xl font-bold mt-1 ${s.color}`}>{logsLoading ? '—' : s.value}</p>
               </div>
             ))}
+          </div>
+
+          {/* Filter Bar */}
+          <div className="bg-white border rounded-2xl p-4 shadow-sm">
+            <h3 className="text-sm font-semibold text-gray-700 mb-3">🔍 Filter Call Logs</h3>
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">Call Status</label>
+                <select
+                  className="w-full text-sm border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                  value={logFilters.status_filter}
+                  onChange={e => setLogFilters(f => ({ ...f, status_filter: e.target.value }))}
+                >
+                  <option value="">All Statuses</option>
+                  <option value="completed">Completed</option>
+                  <option value="no-answer">No Answer</option>
+                  <option value="failed">Failed</option>
+                  <option value="busy">Busy</option>
+                  <option value="ringing">Ringing</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">Lead Score</label>
+                <select
+                  className="w-full text-sm border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                  value={logFilters.score_label}
+                  onChange={e => setLogFilters(f => ({ ...f, score_label: e.target.value }))}
+                >
+                  <option value="">All Scores</option>
+                  <option value="Hot">🔥 Hot</option>
+                  <option value="Warm">🌡️ Warm</option>
+                  <option value="Cold">❄️ Cold</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">CRM Status After</label>
+                <select
+                  className="w-full text-sm border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                  value={logFilters.crm_status}
+                  onChange={e => setLogFilters(f => ({ ...f, crm_status: e.target.value }))}
+                >
+                  <option value="">All CRM Status</option>
+                  <option value="CONTACTED">Contacted</option>
+                  <option value="QUALIFIED">Qualified</option>
+                  <option value="NOT_INTERESTED">Not Interested</option>
+                  <option value="CONSULTATION_SCHEDULED">Consultation Scheduled</option>
+                  <option value="CONTACT_ATTEMPTED">Contact Attempted</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">From Date</label>
+                <input
+                  type="date"
+                  className="w-full text-sm border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                  value={logFilters.date_from}
+                  onChange={e => setLogFilters(f => ({ ...f, date_from: e.target.value }))}
+                />
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">To Date</label>
+                <input
+                  type="date"
+                  className="w-full text-sm border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                  value={logFilters.date_to}
+                  onChange={e => setLogFilters(f => ({ ...f, date_to: e.target.value }))}
+                />
+              </div>
+            </div>
+            <div className="flex gap-2 mt-3">
+              <Button size="sm" onClick={() => fetchCallLogs(1, false, logFilters)} disabled={logsLoading}>
+                Apply Filters
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => {
+                const cleared = { status_filter: '', crm_status: '', date_from: '', date_to: '', score_label: '' }
+                setLogFilters(cleared)
+                fetchCallLogs(1, false, cleared)
+              }}>
+                Clear
+              </Button>
+            </div>
           </div>
 
           {/* Toolbar */}

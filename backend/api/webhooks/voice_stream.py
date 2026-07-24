@@ -1253,18 +1253,54 @@ Rules:
                         f"not_interested={is_not_interested} callback={callback_requested} appt={appointment_booked}"
                     )
 
-                    if is_not_interested:
+                    # -----------------------------------------------------------
+                    # Automatic CRM status update based on call outcome
+                    # Priority order: appointment > not_interested > qualified > contacted
+                    # -----------------------------------------------------------
+                    if lead_id:
                         try:
-                            supabase.table("leads").update({"status": "NOT_INTERESTED"}).eq("id", lead_id).execute()
-                            supabase.table("users").update({"status": "NOT_INTERESTED"}).eq("id", lead_id).execute()
-                            logger.warning(f"[LeadScore] Lead {lead_id} -> NOT_INTERESTED")
+                            new_status = None
+
+                            if appointment_booked:
+                                new_status = "CONSULTATION_SCHEDULED"
+                                logger.warning(f"[Status] Lead {lead_id} -> CONSULTATION_SCHEDULED (appointment booked during call)")
+                            elif is_not_interested:
+                                new_status = "NOT_INTERESTED"
+                                logger.warning(f"[Status] Lead {lead_id} -> NOT_INTERESTED (lead asked not to be called)")
+                            elif interested_plan:
+                                new_status = "QUALIFIED"
+                                logger.warning(f"[Status] Lead {lead_id} -> QUALIFIED (interested in {interested_plan})")
+                            else:
+                                new_status = "CONTACTED"
+                                logger.warning(f"[Status] Lead {lead_id} -> CONTACTED (call was picked up and completed)")
+
+                            if new_status:
+                                # Fetch the current status BEFORE changing it
+                                status_before = None
+                                try:
+                                    before_res = supabase.table("leads").select("status").eq("id", lead_id).execute()
+                                    if before_res.data:
+                                        status_before = before_res.data[0].get("status")
+                                    else:
+                                        before_res2 = supabase.table("users").select("status").eq("id", lead_id).execute()
+                                        if before_res2.data:
+                                            status_before = before_res2.data[0].get("status")
+                                except Exception:
+                                    pass
+
+                                supabase.table("leads").update({"status": new_status}).eq("id", lead_id).execute()
+                                supabase.table("users").update({"status": new_status}).eq("id", lead_id).execute()
+                                logger.warning(f"[Status] ✅ Updated lead {lead_id} status: {status_before} -> {new_status}")
+
+                                # Store before/after in the call log payload for the UI
+                                log_payload["status_before"] = status_before
+                                log_payload["status_after"] = new_status
+
                         except Exception as status_err:
-                            logger.error(f"[LeadScore] Failed to update NOT_INTERESTED status: {status_err}")
+                            logger.error(f"[Status] Failed to update lead status: {status_err}")
 
                     if callback_requested:
                         logger.warning(f"[LeadScore] Lead {lead_id} requested callback — status already set during call.")
-                    if appointment_booked:
-                        logger.warning(f"[LeadScore] Lead {lead_id} appointment booked — status already set during call.")
 
                     # -------------------------------------------------------
                     # Hot Lead Alert: notify the assigned sales rep immediately

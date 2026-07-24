@@ -121,25 +121,150 @@ async def delete_knowledge_base_item(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+@router.get("/eligible-leads-preview")
+async def get_eligible_leads_preview(
+    current_user: dict = Depends(get_current_user),
+    supabase: Client = Depends(get_supabase_client)
+):
+    """Preview how many leads currently match the auto-call filter settings."""
+    try:
+        import datetime as dt
+
+        # Load current settings
+        res = supabase.table("global_settings").select("settings_value").eq("settings_key", "ai_call_settings").execute()
+        settings = res.data[0]["settings_value"] if res.data else {}
+
+        enabled_statuses     = settings.get("enabled_statuses", [])
+        filter_created_from  = settings.get("filter_created_from")
+        filter_created_to    = settings.get("filter_created_to")
+        filter_sources_raw   = settings.get("filter_sources", "")
+        filter_sources       = [s.strip().lower() for s in filter_sources_raw.split(",") if s.strip()] if filter_sources_raw else []
+        max_calls_per_lead   = int(settings.get("max_calls_per_lead") or 3)
+        skip_not_interested  = settings.get("skip_not_interested", True)
+        skip_consultation    = settings.get("skip_consultation_scheduled", True)
+
+        if not enabled_statuses:
+            return {
+                "total_eligible": 0,
+                "expected_calls_today": 0,
+                "already_called_today": 0,
+                "status_breakdown": [],
+                "filter_active": False,
+                "message": "No statuses selected — no leads will be auto-called."
+            }
+
+        today_str = dt.datetime.now().date().isoformat()
+
+        def build_query(table: str, phone_col: str):
+            q = supabase.table(table).select(f"id, {phone_col}, status, source, created_at").in_("status", enabled_statuses)
+            if filter_created_from:
+                q = q.gte("created_at", filter_created_from)
+            if filter_created_to:
+                q = q.lte("created_at", filter_created_to + "T23:59:59")
+            if skip_not_interested:
+                q = q.neq("status", "NOT_INTERESTED")
+            if skip_consultation:
+                q = q.neq("status", "CONSULTATION_SCHEDULED")
+            return q.execute().data or []
+
+        leads_raw   = build_query("leads", "phone_number")
+        users_raw   = build_query("users", "phone")
+
+        leads_ids = {l["id"] for l in leads_raw}
+        all_records = [
+            {"id": l["id"], "phone": l.get("phone_number"), "status": l.get("status"), "source": l.get("source", "")}
+            for l in leads_raw if l.get("phone_number")
+        ] + [
+            {"id": u["id"], "phone": u.get("phone"), "status": u.get("status"), "source": u.get("source", "")}
+            for u in users_raw if u.get("phone") and u["id"] not in leads_ids
+        ]
+
+        # Apply source filter
+        if filter_sources:
+            all_records = [r for r in all_records if any(fs in (r.get("source") or "").lower() for fs in filter_sources)]
+
+        # Get all lead ids that have been called today
+        today_called_res = supabase.table("ai_call_logs").select("lead_id").gte("created_at", today_str).execute()
+        today_called_ids = {row["lead_id"] for row in (today_called_res.data or [])}
+
+        # Get leads that have already hit max call limit
+        all_ids = [r["id"] for r in all_records]
+        max_reached_ids = set()
+        if all_ids:
+            # Batch count per lead
+            logs_res = supabase.table("ai_call_logs").select("lead_id").in_("lead_id", all_ids).execute()
+            from collections import Counter
+            call_counts = Counter(row["lead_id"] for row in (logs_res.data or []))
+            max_reached_ids = {lid for lid, cnt in call_counts.items() if cnt >= max_calls_per_lead}
+
+        # Build final eligible list and breakdown
+        status_counts: Dict[str, int] = {}
+        eligible = []
+        already_called_today = 0
+        for r in all_records:
+            if r["id"] in max_reached_ids:
+                continue
+            if r["id"] in today_called_ids:
+                already_called_today += 1
+                continue
+            eligible.append(r)
+            s = r.get("status") or "UNKNOWN"
+            status_counts[s] = status_counts.get(s, 0) + 1
+
+        status_breakdown = [{"status": k, "count": v} for k, v in sorted(status_counts.items())]
+
+        return {
+            "total_eligible": len(eligible),
+            "expected_calls_today": len(eligible),
+            "already_called_today": already_called_today,
+            "max_calls_per_lead": max_calls_per_lead,
+            "status_breakdown": status_breakdown,
+            "filter_active": bool(filter_created_from or filter_created_to or filter_sources),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.get("/call-logs")
 async def get_all_call_logs(
     page: int = 1,
     limit: int = 50,
+    status_filter: str = None,       # Filter by call status: completed, no-answer, failed, etc.
+    crm_status: str = None,          # Filter by lead CRM status after call
+    date_from: str = None,           # ISO date string e.g. 2026-07-01
+    date_to: str = None,             # ISO date string e.g. 2026-07-31
+    score_label: str = None,         # Hot, Warm, Cold
     current_user: dict = Depends(get_current_user),
     supabase: Client = Depends(get_supabase_client)
 ):
-    """Get all AI call logs across all leads for admin dashboard with pagination."""
+    """Get all AI call logs across all leads for admin dashboard with pagination and filters."""
     try:
         start = (page - 1) * limit
         end = start + limit - 1
 
-        logs_res = (
+        query = (
             supabase.table("ai_call_logs")
             .select("*", count="exact")
             .order("created_at", desc=True)
-            .range(start, end)
-            .execute()
         )
+
+        # Apply filters
+        if status_filter:
+            query = query.eq("status", status_filter)
+        if score_label:
+            query = query.eq("score_label", score_label)
+        if date_from:
+            query = query.gte("created_at", date_from)
+        if date_to:
+            # Add one day to make it inclusive of the end date
+            from datetime import datetime, timedelta
+            try:
+                dt_to = datetime.fromisoformat(date_to) + timedelta(days=1)
+                query = query.lt("created_at", dt_to.isoformat())
+            except Exception:
+                query = query.lte("created_at", date_to)
+
+        logs_res = query.range(start, end).execute()
         logs = logs_res.data or []
         total_count = logs_res.count if hasattr(logs_res, 'count') and logs_res.count is not None else len(logs)
 
@@ -165,7 +290,6 @@ async def get_all_call_logs(
                     .execute()
                 )
                 for u in (users_res.data or []):
-                    # Normalize the user data to match lead structure
                     lead_map[u["id"]] = {
                         "id": u["id"],
                         "name": u.get("name") or "Unknown",
@@ -173,18 +297,25 @@ async def get_all_call_logs(
                         "crm_status": u.get("status")
                     }
 
-        # Attach lead info to each log
+        # Attach lead info to each log; apply crm_status filter post-join
+        result_logs = []
         for log in logs:
             lead = lead_map.get(log.get("lead_id"), {})
+            current_crm_status = lead.get("status") or lead.get("crm_status")
             log["leads"] = {
-                "name": lead.get("name"), 
+                "name": lead.get("name"),
                 "phone": lead.get("phone_number"),
-                "crm_status": lead.get("status") or lead.get("crm_status")
+                "crm_status": current_crm_status
             }
+            # Post-join filter on CRM status (can't do server-side easily across two tables)
+            if crm_status and current_crm_status != crm_status:
+                continue
+            result_logs.append(log)
 
-        return {"data": logs, "total": total_count}
+        return {"data": result_logs, "total": total_count}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.get("/stats")
 async def get_ai_call_stats(

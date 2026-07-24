@@ -92,9 +92,11 @@ export async function deleteKnowledgeBaseItem(id: string) {
   }
 }
 
-export async function getCallLogs(page = 1, limit = 50) {
+export async function getCallLogs(page = 1, limit = 50, filters: Record<string, string> = {}) {
   try {
-    const response = await fetchAPI(`/api/admin/ai-settings/call-logs?page=${page}&limit=${limit}`, {
+    const params = new URLSearchParams({ page: String(page), limit: String(limit) })
+    Object.entries(filters).forEach(([k, v]) => { if (v) params.set(k, v) })
+    const response = await fetchAPI(`/api/admin/ai-settings/call-logs?${params.toString()}`, {
       headers: { 'Cookie': (await cookies()).toString() }
     })
     return response || { data: [], total: 0 }
@@ -162,5 +164,17 @@ export async function processNextCall() {
   } catch (error) {
     console.error('Failed to process next call:', error)
     throw error
+  }
+}
+
+export async function getEligibleLeadsPreview() {
+  try {
+    const response = await fetchAPI('/api/admin/ai-settings/eligible-leads-preview', {
+      headers: { 'Cookie': (await cookies()).toString() }
+    })
+    return response
+  } catch (error) {
+    console.error('Failed to fetch eligible leads preview:', error)
+    return null
   }
 }
