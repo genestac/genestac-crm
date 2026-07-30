@@ -1,0 +1,870 @@
+"""
+Sarvam AI Managed Mode — Webhook Handlers
+==========================================
+
+When Sarvam AI's managed voice agent (connected to Exotel) needs to execute
+a "tool" (function call), it sends an HTTP POST to the URL you configured in
+the Sarvam dashboard for that tool.
+
+When the call ends, Sarvam sends a POST to the post-call webhook URL you set,
+containing the full transcript, summary, call duration etc.
+
+All the heavy CRM logic that previously lived inside the Pipecat pipeline
+(doctor handoff, scheduling, lead scoring, memory vectorization) now lives
+here as simple REST endpoints.
+
+Endpoints registered under /api/webhooks/sarvam/:
+  POST /tool/connect-doctor       ← Sarvam calls this when user wants doctor
+  POST /tool/schedule-call        ← Sarvam calls this when user wants appointment
+  POST /tool/schedule-callback    ← Sarvam calls this when user wants callback later
+  POST /tool/search-kb            ← Sarvam calls this when user asks a question
+  POST /post-call                 ← Sarvam calls this when the call ends
+  POST /initiate-call             ← Our CRM calls this to start an outbound AI call
+
+Dashboard configuration (Sarvam AI → Your Agent → Tools):
+  Tool "connect_to_doctor"   → URL: https://<your-backend>/api/webhooks/sarvam/tool/connect-doctor
+  Tool "schedule_call"       → URL: https://<your-backend>/api/webhooks/sarvam/tool/schedule-call
+  Tool "schedule_callback"   → URL: https://<your-backend>/api/webhooks/sarvam/tool/schedule-callback
+  Tool "search_knowledge_base" → URL: https://<your-backend>/api/webhooks/sarvam/tool/search-kb
+  Post-call webhook          → URL: https://<your-backend>/api/webhooks/sarvam/post-call
+"""
+
+import os
+import json
+import logging
+import asyncio
+from datetime import datetime, timedelta
+from typing import Any, Optional
+
+import pytz
+import openai
+from fastapi import APIRouter, BackgroundTasks, Request
+from pydantic import BaseModel
+
+from db.supabase import get_supabase_client
+from services.exotel_service import bridge_doctor_and_customer, _get_exotel_creds, initiate_ai_call
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter()
+
+IST = pytz.timezone("Asia/Kolkata")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Helpers shared across handlers
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _is_doctor_available(doc: dict, current_time: datetime) -> bool:
+    """Checks if a doctor is active and within their scheduled hours."""
+    if not doc.get("allow_ai_calls", True):
+        return False
+    if not doc.get("is_active"):
+        return False
+    start_str = doc.get("start_time")
+    end_str = doc.get("end_time")
+    available_days = doc.get("available_days") or []
+    if not start_str or not end_str or not available_days:
+        return False
+    if current_time.strftime("%A") not in available_days:
+        return False
+    for fmt in ("%H:%M:%S", "%H:%M"):
+        try:
+            start = datetime.strptime(start_str, fmt).time()
+            end = datetime.strptime(end_str, fmt).time()
+            return start <= current_time.time() <= end
+        except ValueError:
+            continue
+    return False
+
+
+def _get_lead_id_from_body(body: dict) -> str:
+    """
+    Sarvam passes the lead_id through the tool call parameters or the
+    call metadata. Try several known keys in order of preference.
+    """
+    # Sarvam passes params sent by the agent's tool definition
+    params = body.get("parameters", body.get("params", body.get("arguments", {})))
+    if isinstance(params, str):
+        try:
+            params = json.loads(params)
+        except Exception:
+            params = {}
+
+    lead_id = (
+        params.get("lead_id")
+        or body.get("lead_id")
+        or body.get("custom_data", {}).get("lead_id")
+        or body.get("metadata", {}).get("lead_id")
+        or ""
+    )
+    return str(lead_id).strip()
+
+
+def _get_customer_phone_from_body(body: dict) -> str:
+    """Extract caller's phone from various Sarvam payload shapes."""
+    return (
+        body.get("caller_number")
+        or body.get("from_number")
+        or body.get("custom_data", {}).get("customer_phone")
+        or body.get("metadata", {}).get("customer_phone")
+        or ""
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tool: connect_to_doctor
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.post("/tool/connect-doctor")
+async def tool_connect_to_doctor(request: Request, background_tasks: BackgroundTasks):
+    """
+    Sarvam calls this when the user explicitly asks to speak with a doctor.
+    
+    Expected body (Sarvam tool call format):
+    {
+        "parameters": {
+            "lead_id": "<uuid>",
+            "user_explicitly_confirmed": true,
+            "reason": "user said doctor se baat karni hai"
+        },
+        "caller_number": "08312345678",
+        "call_id": "<sarvam-call-id>"
+    }
+    
+    Response tells Sarvam what message to speak to the user.
+    """
+    body: dict = await request.json()
+    logger.warning(f"[Sarvam/connect-doctor] Received: {json.dumps(body)[:500]}")
+
+    params = body.get("parameters", body.get("params", body.get("arguments", {})))
+    if isinstance(params, str):
+        try:
+            params = json.loads(params)
+        except Exception:
+            params = {}
+
+    lead_id = _get_lead_id_from_body(body)
+    customer_phone = _get_customer_phone_from_body(body)
+    user_confirmed = params.get("user_explicitly_confirmed", False)
+    reason = params.get("reason", "doctor connect requested")
+
+    logger.warning(
+        f"[Sarvam/connect-doctor] lead_id={lead_id!r}, confirmed={user_confirmed}, reason={reason!r}"
+    )
+
+    # Guard: LLM must have confirmed the user explicitly asked
+    if not user_confirmed:
+        return {
+            "response": (
+                "Pehle user se confirm karo: 'Kya aap abhi kisi doctor se baat karna chahenge?' "
+                "Wait for a clear yes before connecting."
+            )
+        }
+
+    supabase = get_supabase_client()
+
+    # Find an available doctor
+    try:
+        doc_res = (
+            supabase.table("doctor_schedules")
+            .select("*, staffs(full_name)")
+            .not_.is_("exotel_number", "null")
+            .execute()
+        )
+        current_dt_ist = datetime.now(IST)
+        available_docs = [
+            d for d in (doc_res.data or [])
+            if _is_doctor_available(d, current_dt_ist)
+        ]
+    except Exception as db_err:
+        logger.error(f"[Sarvam/connect-doctor] DB error: {db_err}")
+        available_docs = []
+
+    if not available_docs:
+        logger.warning("[Sarvam/connect-doctor] No active doctors found.")
+        return {
+            "response": (
+                "Abhi koi doctor available nahi hai. "
+                "Kya main aapke liye ek future appointment book kar sakti hu, "
+                "ya phir aapko callback schedule kar sakti hu?"
+            )
+        }
+
+    doctor = available_docs[0]
+    doctor_phone = doctor["exotel_number"]
+    doctor_name = (
+        doctor.get("staffs", {}).get("full_name", "our doctor")
+        if isinstance(doctor.get("staffs"), dict)
+        else "our doctor"
+    )
+
+    logger.warning(
+        f"[Sarvam/connect-doctor] Connecting lead {lead_id} with {doctor_name} ({doctor_phone})"
+    )
+
+    # Update lead status in CRM
+    if lead_id:
+        try:
+            supabase.table("leads").update({"status": "CONSULTATION_SCHEDULED"}).eq("id", lead_id).execute()
+            supabase.table("users").update({"status": "CONSULTATION_SCHEDULED"}).eq("id", lead_id).execute()
+        except Exception as e:
+            logger.error(f"[Sarvam/connect-doctor] Failed to update lead status: {e}")
+
+    # Schedule the bridge call in the background (give Sarvam time to speak the message first)
+    async def _do_bridge():
+        await asyncio.sleep(5)  # Let Sarvam speak the announcement first
+        if not customer_phone:
+            logger.error("[Sarvam/connect-doctor] customer_phone empty — cannot bridge!")
+            return
+        result = bridge_doctor_and_customer(
+            doctor_phone=doctor_phone,
+            customer_phone=customer_phone,
+        )
+        if result and result.get("success"):
+            logger.warning(f"[Sarvam/connect-doctor] ✅ Bridge initiated: {doctor_phone} ⇔ {customer_phone}")
+        else:
+            logger.error(f"[Sarvam/connect-doctor] ❌ Bridge failed: {result}")
+
+    background_tasks.add_task(_do_bridge)
+
+    return {
+        "response": (
+            f"Bilkul! Main abhi Dr. {doctor_name} ko connect kar rahi hu. "
+            f"Aapko hamare number se ek aur call aayegi. "
+            f"Is call ko aap band kar sakte hain. Thank you!"
+        )
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tool: schedule_call  (book a future doctor appointment)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.post("/tool/schedule-call")
+async def tool_schedule_call(request: Request):
+    """
+    Sarvam calls this when the user asks to book a future doctor consultation.
+
+    Expected body:
+    {
+        "parameters": {
+            "lead_id": "<uuid>",
+            "time_preference": "2026-07-31T15:00:00+05:30",
+            "reason": "weight loss consultation"
+        }
+    }
+    """
+    body: dict = await request.json()
+    logger.warning(f"[Sarvam/schedule-call] Received: {json.dumps(body)[:500]}")
+
+    params = body.get("parameters", body.get("params", body.get("arguments", {})))
+    if isinstance(params, str):
+        try:
+            params = json.loads(params)
+        except Exception:
+            params = {}
+
+    lead_id = _get_lead_id_from_body(body)
+    time_preference = params.get("time_preference", "")
+    reason = params.get("reason", "Consultation")
+
+    logger.warning(f"[Sarvam/schedule-call] lead_id={lead_id!r}, time={time_preference!r}, reason={reason!r}")
+
+    supabase = get_supabase_client()
+
+    # ── Parse time ──────────────────────────────────────────────────────────
+    ist = pytz.timezone("Asia/Kolkata")
+    try:
+        preferred_dt = datetime.fromisoformat(time_preference)
+    except Exception:
+        preferred_dt = datetime.now(ist).replace(hour=10, minute=0, second=0, microsecond=0) + timedelta(days=1)
+        logger.warning(f"[Sarvam/schedule-call] Could not parse '{time_preference}' — defaulting to tomorrow 10AM IST")
+
+    # ── Find lead details ───────────────────────────────────────────────────
+    sales_rep_id = None
+    patient_id = None
+    patient_phone_fallback = None
+    lead_name = "the customer"
+
+    user_res = supabase.table("users").select("id, assigned_sales_rep_id, phone, name").eq("id", lead_id).execute()
+    if user_res.data:
+        user = user_res.data[0]
+        patient_id = user["id"]
+        sales_rep_id = user.get("assigned_sales_rep_id")
+        patient_phone_fallback = user.get("phone")
+        lead_name = user.get("name") or "the customer"
+
+    if not sales_rep_id:
+        lead_res = supabase.table("leads").select("id, assigned_sales_rep_id, phone_number, name").eq("id", lead_id).execute()
+        if lead_res.data:
+            lead = lead_res.data[0]
+            sales_rep_id = lead.get("assigned_sales_rep_id")
+            patient_phone_fallback = lead.get("phone_number")
+            lead_name = lead.get("name") or lead_name
+
+    if not sales_rep_id:
+        admin_res = supabase.table("staffs").select("id").limit(1).execute()
+        if admin_res.data:
+            sales_rep_id = admin_res.data[0]["id"]
+
+    # ── Find a doctor with available slot ───────────────────────────────────
+    doc_res = supabase.table("doctor_schedules").select("staff_id, staffs(full_name), allow_scheduling").eq("allow_scheduling", True).execute()
+
+    if not doc_res.data:
+        return {"response": "Main appointment book nahi kar saki. Humari team aapse contact karegi jald hi."}
+
+    from services.slot_service import find_nearest_available_slot
+    best_slot = None
+    best_doctor_id = None
+    best_doctor_name = "our doctor"
+
+    for doc in doc_res.data:
+        did = doc["staff_id"]
+        slot = find_nearest_available_slot(
+            doctor_id=did,
+            preferred_dt=preferred_dt,
+            duration_minutes=10,
+            supabase=supabase,
+            search_days=7,
+        )
+        if slot:
+            slot_start = datetime.fromisoformat(slot["start"])
+            if slot_start.tzinfo and not preferred_dt.tzinfo:
+                preferred_dt = ist.localize(preferred_dt)
+            dist = abs((slot_start - preferred_dt).total_seconds())
+            if best_slot is None or dist < best_slot.get("_dist", float("inf")):
+                slot["_dist"] = dist
+                best_slot = slot
+                best_doctor_id = did
+                staff_info = doc.get("staffs")
+                if isinstance(staff_info, dict):
+                    best_doctor_name = staff_info.get("full_name", "our doctor")
+
+    if not best_slot:
+        return {
+            "response": (
+                "Mujhe agले 7 dino mein koi available slot nahi mili. "
+                "Humari team aapse personally contact karegi."
+            )
+        }
+
+    actual_scheduled_at = best_slot["start"]
+
+    # ── Insert appointment ───────────────────────────────────────────────────
+    appt_payload = {
+        "patient_id": patient_id,
+        "doctor_id": best_doctor_id,
+        "sales_rep_id": sales_rep_id,
+        "scheduled_at": actual_scheduled_at,
+        "status": "pending",
+        "notes": (
+            f"Booked via Sarvam AI Voice Agent. Patient requested: {time_preference}. Reason: {reason}"
+            + (f"\n[PHONE: {patient_phone_fallback}]" if patient_phone_fallback else "")
+        ),
+        "title": f"AI-Booked: Consultation with {lead_name}",
+        "type": "consultation",
+        "duration_minutes": 10,
+    }
+    appt_res = supabase.table("appointments").insert(appt_payload).execute()
+    appt_id = appt_res.data[0]["id"] if appt_res.data else None
+    logger.warning(f"[Sarvam/schedule-call] Appointment {appt_id} created for lead {lead_id}")
+
+    # Update lead status
+    supabase.table("leads").update({"status": "CONSULTATION_SCHEDULED"}).eq("id", lead_id).execute()
+    supabase.table("users").update({"status": "CONSULTATION_SCHEDULED"}).eq("id", lead_id).execute()
+
+    # Notify doctor
+    try:
+        supabase.table("system_notifications").insert({
+            "target_role": "doctor",
+            "target_id": best_doctor_id,
+            "notification_type": "in_app",
+            "title": "New Appointment via Sarvam AI Agent",
+            "message": f"{lead_name} requested a consultation: {time_preference}. Reason: {reason}. Appointment ID: {appt_id}"
+        }).execute()
+    except Exception as notif_err:
+        logger.error(f"[Sarvam/schedule-call] Failed to notify doctor: {notif_err}")
+
+    # Friendly time string
+    try:
+        friendly_time = datetime.fromisoformat(actual_scheduled_at).astimezone(IST).strftime("%d %B %Y at %I:%M %p IST")
+    except Exception:
+        friendly_time = time_preference
+
+    return {
+        "response": (
+            f"Aapka appointment Dr. {best_doctor_name} ke saath {friendly_time} ke liye book ho gaya hai. "
+            f"Aapko confirmation bheja jayega. Kya main aur kuch help kar sakti hu?"
+        )
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tool: schedule_callback  (user wants to be called back later)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.post("/tool/schedule-callback")
+async def tool_schedule_callback(request: Request):
+    """
+    Sarvam calls this when the user says they're busy and want a callback later.
+
+    Expected body:
+    {
+        "parameters": {
+            "lead_id": "<uuid>",
+            "callback_datetime": "2026-07-31T18:00:00+05:30"
+        }
+    }
+    """
+    body: dict = await request.json()
+    logger.warning(f"[Sarvam/schedule-callback] Received: {json.dumps(body)[:500]}")
+
+    params = body.get("parameters", body.get("params", body.get("arguments", {})))
+    if isinstance(params, str):
+        try:
+            params = json.loads(params)
+        except Exception:
+            params = {}
+
+    lead_id = _get_lead_id_from_body(body)
+    callback_time = params.get("callback_datetime", "")
+
+    logger.warning(f"[Sarvam/schedule-callback] lead_id={lead_id!r}, time={callback_time!r}")
+
+    if lead_id:
+        try:
+            supabase = get_supabase_client()
+            supabase.table("leads").update({
+                "ai_callback_time": callback_time,
+                "status": "CALLBACK_SCHEDULED"
+            }).eq("id", lead_id).execute()
+            supabase.table("users").update({
+                "ai_callback_time": callback_time,
+                "status": "CALLBACK_SCHEDULED"
+            }).eq("id", lead_id).execute()
+            logger.warning(f"[Sarvam/schedule-callback] Lead {lead_id} callback set to {callback_time}")
+        except Exception as e:
+            logger.error(f"[Sarvam/schedule-callback] DB update failed: {e}")
+
+    # Friendly time
+    friendly_time = callback_time
+    try:
+        parsed = datetime.fromisoformat(callback_time).astimezone(IST)
+        friendly_time = parsed.strftime("%d %B %Y at %I:%M %p IST")
+    except Exception:
+        pass
+
+    return {
+        "response": (
+            f"Bilkul, main note kar leti hu. "
+            f"Humari team aapko {friendly_time} par call karegi. "
+            f"Thank you aapke samay ke liye!"
+        )
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tool: search_knowledge_base  (RAG search)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.post("/tool/search-kb")
+async def tool_search_knowledge_base(request: Request):
+    """
+    Sarvam calls this when the user asks about pricing, program details, etc.
+
+    Expected body:
+    {
+        "parameters": {
+            "lead_id": "<uuid>",
+            "query": "What is the price of the medical program?"
+        }
+    }
+    """
+    body: dict = await request.json()
+    logger.warning(f"[Sarvam/search-kb] Received: {json.dumps(body)[:500]}")
+
+    params = body.get("parameters", body.get("params", body.get("arguments", {})))
+    if isinstance(params, str):
+        try:
+            params = json.loads(params)
+        except Exception:
+            params = {}
+
+    query = params.get("query", "")
+    logger.warning(f"[Sarvam/search-kb] Searching for: '{query}'")
+
+    if not query:
+        return {"response": "Mujhe aapka sawaal clearly samajh nahi aaya. Kya aap dobara pooch sakte hain?"}
+
+    try:
+        oai_client = openai.AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        embed_res = await oai_client.embeddings.create(
+            model="text-embedding-3-small",
+            input=query,
+        )
+        query_vector = embed_res.data[0].embedding
+
+        supabase = get_supabase_client()
+        search_res = supabase.rpc("match_knowledge_base", {
+            "query_embedding": query_vector,
+            "match_threshold": 0.5,
+            "match_count": 3
+        }).execute()
+
+        results = search_res.data or []
+        if results:
+            formatted = "\n\n".join([f"{r['title']}: {r['content']}" for r in results])
+            logger.warning(f"[Sarvam/search-kb] Found {len(results)} matches.")
+            return {"response": formatted}
+        else:
+            logger.warning("[Sarvam/search-kb] No matches found.")
+            return {
+                "response": (
+                    "Mujhe is sawaal ka exact jawab abhi nahi mila. "
+                    "Kya aap doctor se baat karna chahenge ya callback schedule karein?"
+                )
+            }
+    except Exception as e:
+        logger.error(f"[Sarvam/search-kb] Error: {e}")
+        return {"response": "Abhi knowledge base search mein dikkat aa rahi hai. Kripya thodi der baad try karein."}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Post-call webhook  (Sarvam sends transcript + metadata when call ends)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.post("/post-call")
+async def sarvam_post_call(request: Request, background_tasks: BackgroundTasks):
+    """
+    Sarvam sends this when a call ends.
+    
+    Expected body (approximate — confirm exact shape from your Sarvam dashboard):
+    {
+        "call_id": "<sarvam-call-id>",
+        "duration_seconds": 120,
+        "transcript": "assistant: Namaste...\nuser: Haan main baat karna chahta hu...",
+        "summary": "...",
+        "recording_url": "https://...",
+        "custom_data": {
+            "lead_id": "<uuid>"
+        }
+    }
+    """
+    body: dict = await request.json()
+    logger.warning(f"[Sarvam/post-call] Received post-call event. Keys: {list(body.keys())}")
+
+    background_tasks.add_task(_process_post_call, body)
+    return {"status": "received"}
+
+
+async def _process_post_call(body: dict):
+    """Background task: score lead, save transcript, vectorize memory."""
+    call_id = body.get("call_id", "")
+    transcript = body.get("transcript", "")
+    recording_url = body.get("recording_url", "")
+    duration_seconds = body.get("duration_seconds", 0)
+
+    # Extract lead_id from various possible locations
+    lead_id = (
+        body.get("custom_data", {}).get("lead_id")
+        or body.get("metadata", {}).get("lead_id")
+        or body.get("lead_id")
+        or ""
+    )
+    lead_id = str(lead_id).strip()
+
+    logger.warning(f"[Sarvam/post-call] Processing: call_id={call_id!r}, lead_id={lead_id!r}, transcript_len={len(transcript)}")
+
+    if not transcript or not lead_id:
+        logger.warning("[Sarvam/post-call] Skipping — transcript empty or lead_id missing.")
+        return
+
+    supabase = get_supabase_client()
+
+    # Get lead name for context
+    lead_name = "the customer"
+    try:
+        lr = supabase.table("leads").select("name").eq("id", lead_id).execute()
+        if lr.data:
+            lead_name = lr.data[0].get("name") or lead_name
+        else:
+            ur = supabase.table("users").select("name").eq("id", lead_id).execute()
+            if ur.data:
+                lead_name = ur.data[0].get("name") or lead_name
+    except Exception:
+        pass
+
+    # ── Lead scoring + structured analysis via GPT-4o-mini ──────────────────
+    summary = f"AI Call (Sarvam) with {lead_name}."
+    lead_score: Optional[int] = None
+    score_label: Optional[str] = None
+    score_reason: Optional[str] = None
+    is_not_interested = False
+    callback_requested = False
+    appointment_booked = False
+
+    try:
+        oai_client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        summary_prompt = f"""You are a CRM analyst reviewing an AI sales call for a healthcare company (Genestac — weight loss programs).
+
+Analyze the transcript and return a JSON object with ALL of the following fields.
+
+Call transcript:
+{transcript}
+
+Return ONLY a valid JSON object:
+{{
+  "summary": "3-4 bullet point summary using • character",
+  "is_not_interested": true or false,
+  "callback_requested": true or false,
+  "appointment_booked": true or false,
+  "lead_score": integer 0-100,
+  "score_label": "Cold" or "Warm" or "Hot",
+  "score_reason": "1-2 sentence explanation",
+  "wrong_person": true or false,
+  "caller_name": "name of whoever actually spoke, if they introduced themselves, else null",
+  "patient_name": "actual patient name if different from lead, else null",
+  "relation_to_patient": "e.g. wife, brother, son — if a relative answered, else null",
+  "weight_goal": "their weight loss goal if mentioned, else null",
+  "current_weight": "their current weight if mentioned, else null",
+  "interested_plan": "Starter or Medical or Premium or Initial Assessment — whichever they expressed most interest in, else null",
+  "health_concerns": "any health issues they mentioned, else null"
+}}
+Rules:
+- `is_not_interested`: true if lead said 'not interested', 'mujhe interest nahi', 'mat call karo', 'remove my number'.
+- `callback_requested`: true if lead asked to be called back.
+- `appointment_booked`: true if a doctor consultation was explicitly scheduled.
+- `wrong_person`: true if the person who answered was NOT the original lead.
+- `lead_score`: must be an integer 0-100, never null.
+- `score_label`: Cold (0-39), Warm (40-69), Hot (70-100).
+- All other fields: null if not mentioned in the transcript."""
+
+        resp = oai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": summary_prompt}],
+            max_tokens=400,
+            response_format={"type": "json_object"}
+        )
+
+        response_text = resp.choices[0].message.content.strip()
+        parsed = json.loads(response_text)
+
+        summary = parsed.get("summary", summary)
+        is_not_interested = parsed.get("is_not_interested", False)
+        callback_requested = parsed.get("callback_requested", False)
+        appointment_booked = parsed.get("appointment_booked", False)
+        lead_score = parsed.get("lead_score")
+        score_label = parsed.get("score_label")
+        score_reason = parsed.get("score_reason")
+
+        # Structured data extracted from the call
+        wrong_person = parsed.get("wrong_person", False)
+        caller_name = parsed.get("caller_name")
+        patient_name = parsed.get("patient_name")
+        relation = parsed.get("relation_to_patient")
+        weight_goal = parsed.get("weight_goal")
+        current_weight = parsed.get("current_weight")
+        interested_plan = parsed.get("interested_plan")
+        health_concerns = parsed.get("health_concerns")
+
+        # Merge structured data into lead metadata
+        meta_update = {}
+        if weight_goal: meta_update["weight_goal"] = weight_goal
+        if current_weight: meta_update["current_weight"] = current_weight
+        if interested_plan: meta_update["interested_plan_interest"] = interested_plan
+        if health_concerns: meta_update["health_concerns"] = health_concerns
+        if wrong_person and caller_name: meta_update["caller_name"] = caller_name
+        if wrong_person and relation: meta_update["relation_to_patient"] = relation
+        if wrong_person and patient_name: meta_update["actual_patient_name"] = patient_name
+
+        if meta_update:
+            try:
+                existing_meta_res = supabase.table("leads").select("metadata").eq("id", lead_id).execute()
+                existing_meta = (existing_meta_res.data[0].get("metadata") or {}) if existing_meta_res.data else {}
+                merged = {**existing_meta, **meta_update}
+                supabase.table("leads").update({"metadata": merged}).eq("id", lead_id).execute()
+                supabase.table("users").update({"metadata": merged}).eq("id", lead_id).execute()
+                logger.warning(f"[Sarvam/post-call] Updated lead metadata: {meta_update}")
+            except Exception as me:
+                logger.error(f"[Sarvam/post-call] Metadata update failed: {me}")
+
+        # Timeline note
+        note_parts = ["🤖 AI Call Summary (Sarvam)"]
+        if wrong_person:
+            note_parts.append(f"⚠️ Wrong person answered. Caller: {caller_name or 'Unknown'} ({relation or 'relative'}). Actual patient: {patient_name or lead_name}.")
+        if weight_goal: note_parts.append(f"🎯 Weight Goal: {weight_goal}")
+        if current_weight: note_parts.append(f"⚖️ Current Weight: {current_weight}")
+        if interested_plan: note_parts.append(f"💳 Interested Plan: {interested_plan}")
+        if health_concerns: note_parts.append(f"🏥 Health Concerns: {health_concerns}")
+        note_parts.append(f"\n{summary}")
+        if recording_url:
+            note_parts.append(f"\n[▶️ Listen to Recording]({recording_url})")
+        timeline_note = "\n".join(note_parts)
+
+        try:
+            supabase.table("interactions").insert({
+                "lead_id": lead_id,
+                "type": "AI_CALL_NOTE",
+                "note": timeline_note,
+                "created_by": "sarvam_ai_agent"
+            }).execute()
+            logger.warning(f"[Sarvam/post-call] Timeline note saved for lead {lead_id}")
+        except Exception as note_err:
+            try:
+                supabase.table("user_notes").insert({
+                    "user_id": lead_id,
+                    "note": timeline_note,
+                    "created_by": "sarvam_ai_agent"
+                }).execute()
+            except Exception as note_err2:
+                logger.error(f"[Sarvam/post-call] Failed to save timeline note: {note_err2}")
+
+        logger.warning(
+            f"[Sarvam/post-call] lead={lead_id} score={lead_score} ({score_label}) | "
+            f"not_interested={is_not_interested} callback={callback_requested} appt={appointment_booked}"
+        )
+
+        # ── CRM status update ──────────────────────────────────────────────
+        new_status = None
+        if appointment_booked:
+            new_status = "CONSULTATION_SCHEDULED"
+        elif is_not_interested:
+            new_status = "NOT_INTERESTED"
+        elif interested_plan:
+            new_status = "QUALIFIED"
+        else:
+            new_status = "CONTACTED"
+
+        if new_status:
+            supabase.table("leads").update({"status": new_status}).eq("id", lead_id).execute()
+            supabase.table("users").update({"status": new_status}).eq("id", lead_id).execute()
+            logger.warning(f"[Sarvam/post-call] ✅ Lead {lead_id} status → {new_status}")
+
+        # ── Hot lead alert ─────────────────────────────────────────────────
+        if lead_score is not None and lead_score >= 70:
+            try:
+                rep_id = None
+                rep_res = supabase.table("users").select("assigned_sales_rep_id").eq("id", lead_id).execute()
+                if rep_res.data and rep_res.data[0].get("assigned_sales_rep_id"):
+                    rep_id = rep_res.data[0]["assigned_sales_rep_id"]
+                else:
+                    rep_res2 = supabase.table("leads").select("assigned_sales_rep_id").eq("id", lead_id).execute()
+                    if rep_res2.data and rep_res2.data[0].get("assigned_sales_rep_id"):
+                        rep_id = rep_res2.data[0]["assigned_sales_rep_id"]
+
+                if rep_id:
+                    supabase.table("system_notifications").insert({
+                        "target_role": "sales",
+                        "target_id": rep_id,
+                        "notification_type": "in_app",
+                        "title": f"🔥 Hot Lead: {lead_name} ({lead_score}/100)",
+                        "message": (
+                            f"{lead_name} scored {lead_score}/100 ({score_label}). "
+                            f"{score_reason or ''} Call them now before they go cold!"
+                        ),
+                    }).execute()
+                    logger.warning(f"[Sarvam/post-call] 🔥 Hot lead alert sent to sales rep {rep_id}")
+            except Exception as notif_err:
+                logger.error(f"[Sarvam/post-call] Hot lead alert failed: {notif_err}")
+
+    except Exception as score_err:
+        logger.error(f"[Sarvam/post-call] Lead scoring failed: {score_err}", exc_info=True)
+
+    # ── Save call log ──────────────────────────────────────────────────────
+    log_payload: dict[str, Any] = {
+        "transcript": transcript,
+        "summary": summary,
+        "status": "completed",
+        "provider": "sarvam",
+    }
+    if lead_score is not None: log_payload["lead_score"] = lead_score
+    if score_label is not None: log_payload["score_label"] = score_label
+    if score_reason is not None: log_payload["score_reason"] = score_reason
+    if recording_url: log_payload["recording_url"] = recording_url
+
+    try:
+        log_res = supabase.table("ai_call_logs").select("id").eq("lead_id", lead_id).order("created_at", desc=True).limit(1).execute()
+        if log_res.data:
+            supabase.table("ai_call_logs").update(log_payload).eq("id", log_res.data[0]["id"]).execute()
+            log_id = log_res.data[0]["id"]
+            logger.warning(f"[Sarvam/post-call] Updated call log {log_id}")
+        else:
+            new_log = supabase.table("ai_call_logs").insert({"lead_id": lead_id, **log_payload}).execute()
+            log_id = new_log.data[0]["id"] if new_log.data else None
+            logger.warning(f"[Sarvam/post-call] Created new call log {log_id}")
+    except Exception as log_err:
+        logger.error(f"[Sarvam/post-call] Failed to save call log: {log_err}")
+        log_id = None
+
+    # ── Vectorize memory ───────────────────────────────────────────────────
+    memory_text = f"Call summary (Sarvam AI):\n{summary}"
+    if score_label and score_reason:
+        memory_text += f"\nLead warmth: {score_label} ({lead_score}/100). {score_reason}"
+
+    memory_embedding = None
+    try:
+        oai_embed = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        embed_res = oai_embed.embeddings.create(
+            model="text-embedding-3-small",
+            input=memory_text,
+        )
+        memory_embedding = embed_res.data[0].embedding
+        logger.warning(f"[Sarvam/post-call] Embedding generated ({len(memory_embedding)} dims) for lead {lead_id}")
+    except Exception as embed_err:
+        logger.error(f"[Sarvam/post-call] Embedding failed — storing raw text only: {embed_err}")
+
+    memory_payload: dict[str, Any] = {
+        "lead_id": lead_id,
+        "memory_text": memory_text,
+        "source_call_id": log_id,
+    }
+    if memory_embedding is not None:
+        memory_payload["embedding"] = memory_embedding
+
+    try:
+        supabase.table("lead_context_memory").insert(memory_payload).execute()
+        logger.warning(f"[Sarvam/post-call] ✅ Vectorized memory saved for lead {lead_id}")
+    except Exception as mem_err:
+        logger.error(f"[Sarvam/post-call] Memory save failed: {mem_err}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Initiate outbound call  (called by our CRM frontend/backend)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class InitiateCallRequest(BaseModel):
+    lead_id: str
+    to_number: str
+    from_number: Optional[str] = None  # Defaults to Exotel virtual number from DB settings
+
+
+@router.post("/initiate-call")
+async def initiate_call(payload: InitiateCallRequest):
+    """
+    Triggers an outbound AI call via Exotel → Sarvam AI.
+
+    The Exotel AppletID should now point to the Sarvam AI agent (configured in
+    the Sarvam dashboard). The lead_id is passed as CustomField so Sarvam's
+    post-call webhook can identify the lead.
+
+    NOTE: This replaces the old `/api/admin/ai-settings` → Exotel call trigger.
+    """
+    creds = _get_exotel_creds()
+    from_number = payload.from_number or creds.get("number", "")
+
+    if not from_number:
+        return {"success": False, "error": "Exotel 'from' number not configured."}
+
+    result = initiate_ai_call(
+        from_number=from_number,
+        to_number=payload.to_number,
+        lead_id=payload.lead_id,
+    )
+
+    if result:
+        logger.warning(f"[Sarvam/initiate-call] ✅ Call initiated: lead={payload.lead_id}, to={payload.to_number}")
+        return {"success": True, "data": result}
+    else:
+        logger.error(f"[Sarvam/initiate-call] ❌ Failed to initiate call for lead {payload.lead_id}")
+        return {"success": False, "error": "Failed to initiate call via Exotel."}

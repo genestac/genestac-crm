@@ -62,6 +62,11 @@ app.include_router(voice_stream.router, prefix="/api/webhooks/exotel", tags=["we
 app.include_router(conference.router, prefix="/api/webhooks/exotel", tags=["webhooks-exotel"])
 app.include_router(call_status.router, prefix="/api/webhooks/exotel", tags=["webhooks-exotel"])
 
+# ── Sarvam AI Managed Mode Webhooks ──────────────────────────────────────────
+# Tool-call handlers + post-call transcript/scoring webhook
+from api.webhooks import sarvam as sarvam_webhooks
+app.include_router(sarvam_webhooks.router, prefix="/api/webhooks/sarvam", tags=["webhooks-sarvam"])
+
 from api import templates, custom_fields
 from app.routes import admin_proforma_routes, invoice_settings_routes
 
