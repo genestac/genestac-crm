@@ -842,29 +842,106 @@ class InitiateCallRequest(BaseModel):
 @router.post("/initiate-call")
 async def initiate_call(payload: InitiateCallRequest):
     """
-    Triggers an outbound AI call via Exotel → Sarvam AI.
+    Triggers an outbound AI call using Sarvam AI's Outbound Call API.
 
-    The Exotel AppletID should now point to the Sarvam AI agent (configured in
-    the Sarvam dashboard). The lead_id is passed as CustomField so Sarvam's
-    post-call webhook can identify the lead.
+    Sarvam dials the lead via its configured Exotel connection and runs the
+    AI agent conversation entirely on their managed platform. No Exotel
+    connect.json is used here — Sarvam handles telephony routing.
 
-    NOTE: This replaces the old `/api/admin/ai-settings` → Exotel call trigger.
+    lead_name and lead_source_phrase are fetched from the DB and passed as
+    agent_variables so the agent can personalise the opening greeting.
     """
-    creds = _get_exotel_creds()
-    from_number = payload.from_number or creds.get("number", "")
+    supabase = get_supabase_client()
 
-    if not from_number:
-        return {"success": False, "error": "Exotel 'from' number not configured."}
+    # ── Sarvam config from env ───────────────────────────────────────────────
+    api_key       = os.getenv("SARVAM_API_KEY", "")
+    org_id        = os.getenv("SARVAM_ORG_ID", "")
+    workspace_id  = os.getenv("SARVAM_WORKSPACE_ID", "")
+    app_id        = os.getenv("SARVAM_APP_ID", "")
+    app_version   = int(os.getenv("SARVAM_APP_VERSION", "1"))
+    connection_id = os.getenv("SARVAM_CONNECTION_ID", "")
+    agent_phone   = os.getenv("SARVAM_AGENT_PHONE_NUMBER", "")
+    backend_url   = os.getenv("BACKEND_PUBLIC_URL", "")
 
-    result = initiate_ai_call(
-        from_number=from_number,
-        to_number=payload.to_number,
-        lead_id=payload.lead_id,
-    )
+    if not all([api_key, org_id, workspace_id, app_id, connection_id, agent_phone]):
+        return {"success": False, "error": "Sarvam config incomplete. Check .env SARVAM_* variables."}
 
-    if result:
-        logger.warning(f"[Sarvam/initiate-call] ✅ Call initiated: lead={payload.lead_id}, to={payload.to_number}")
-        return {"success": True, "data": result}
+    # ── Lead details for personalised greeting ───────────────────────────────
+    lead_name = "ji"
+    lead_source_phrase = "humari website pe"
+    src = ""
+
+    u = supabase.table("users").select("name, source").eq("id", payload.lead_id).execute()
+    if u.data:
+        lead_name = u.data[0].get("name") or "ji"
+        src = (u.data[0].get("source") or "").lower()
     else:
-        logger.error(f"[Sarvam/initiate-call] ❌ Failed to initiate call for lead {payload.lead_id}")
-        return {"success": False, "error": "Failed to initiate call via Exotel."}
+        l = supabase.table("leads").select("name, source").eq("id", payload.lead_id).execute()
+        if l.data:
+            lead_name = l.data[0].get("name") or "ji"
+            src = (l.data[0].get("source") or "").lower()
+
+    source_map = {
+        "facebook": "Facebook pe", "instagram": "Instagram pe",
+        "google": "Google pe", "website": "hamare website pe",
+        "whatsapp": "WhatsApp pe", "referral": "apne ek jaankaar se",
+    }
+    for key, phrase in source_map.items():
+        if key in src:
+            lead_source_phrase = phrase
+            break
+
+    # Normalise to E.164
+    to_number = payload.to_number.strip()
+    if not to_number.startswith("+"):
+        to_number = "+91" + to_number.lstrip("0")
+
+    # ── Sarvam Outbound API payload ──────────────────────────────────────────
+    sarvam_payload = {
+        "app_config": {
+            "app_id": app_id,
+            "app_version": app_version,
+            "app_type": "agent",
+            "connection_config": {
+                "connection_id": connection_id,
+                "agent_phone_number": agent_phone,
+            },
+            "agent_variables": {
+                "lead_id": payload.lead_id,
+                "lead_name": lead_name,
+                "lead_source_phrase": lead_source_phrase
+            },
+        },
+        "user_config": {"user_phone_number": to_number},
+    }
+    if backend_url:
+        sarvam_payload["webhook_config"] = {
+            "url": f"{backend_url}/api/webhooks/sarvam/post-call",
+            "metadata": {"lead_id": payload.lead_id},
+        }
+
+    # ── POST to Sarvam ───────────────────────────────────────────────────────
+    import urllib.request as _ur
+    import urllib.error as _ue
+    api_url = (
+        f"https://apps.sarvam.ai/api/outbounds/v1/orgs/{org_id}"
+        f"/workspaces/{workspace_id}/outbounds"
+    )
+    req = _ur.Request(
+        api_url,
+        data=json.dumps(sarvam_payload).encode(),
+        headers={"Content-Type": "application/json", "X-API-Key": api_key},
+        method="POST",
+    )
+    try:
+        with _ur.urlopen(req, timeout=15) as resp:
+            result = json.loads(resp.read().decode())
+            logger.info(f"[Sarvam/initiate-call] ✅ Call queued via Sarvam API: lead={payload.lead_id}, to={to_number}")
+            return {"success": True, "data": result}
+    except _ue.HTTPError as e:
+        err = e.read().decode()
+        logger.error(f"[Sarvam/initiate-call] ❌ HTTP {e.code}: {err}")
+        return {"success": False, "error": f"Sarvam API {e.code}: {err}"}
+    except Exception as e:
+        logger.error(f"[Sarvam/initiate-call] ❌ {e}")
+        return {"success": False, "error": str(e)}

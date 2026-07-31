@@ -32,49 +32,124 @@ def _get_exotel_creds() -> dict:
 
 def initiate_ai_call(from_number: str, to_number: str, lead_id: str):
     """
-    Initiates an AI outbound call using Exotel's connect.json API.
-    - from_number: Exotel virtual number (caller ID)
-    - to_number:   Customer's phone number (who gets called)
-
-    Uses connect.json with the Exotel-hosted applet URL.
-    The applet (configured in Exotel dashboard) streams audio to our
-    WebSocket endpoint at wss://{ngrok}/api/webhooks/exotel/stream.
-
-    NOTE: Calls.json returns 403 on this account — don't use it.
+    Routes the outbound call to either Sarvam AI or Pipecat based on the global settings toggle.
     """
+    supabase = get_supabase_client()
+    settings_res = supabase.table("global_settings").select("settings_value").eq("settings_key", "ai_call_settings").execute()
+    ai_settings = settings_res.data[0]["settings_value"] if settings_res.data else {}
+    ai_provider = ai_settings.get("ai_provider", "sarvam")  # Default to sarvam if not set
+    
+    if ai_provider == "pipecat":
+        return _initiate_pipecat_call(from_number, to_number, lead_id)
+    else:
+        return _initiate_sarvam_call(to_number, lead_id, supabase)
+
+
+def _initiate_pipecat_call(from_number: str, to_number: str, lead_id: str):
+    """Legacy Exotel connect.json API for Genestac's internal Pipecat integration."""
     creds = _get_exotel_creds()
     sid, token, api_key, subdomain = creds["sid"], creds["token"], creds["api_key"], creds["subdomain"]
-    app_id = creds["app_id"] or "1286769"   # Fallback to known working app ID
+    app_id = creds["app_id"] or "1286769"
 
     if not sid or not token or not api_key:
         logger.error("EXOTEL credentials not found.")
         return None
 
     url = f"https://{api_key}:{token}@{subdomain}/v1/Accounts/{sid}/Calls/connect.json"
-    
     backend_url = os.environ.get("BACKEND_PUBLIC_URL", "").rstrip("/")
     status_callback = f"{backend_url}/api/webhooks/exotel/call-status" if backend_url else ""
 
     payload = {
-        "From": to_number,             # Customer's number (called first)
-        "CallerId": from_number,        # Exotel virtual number (caller ID)
-        "CustomField": str(lead_id),    # Passed to WebSocket stream's start event
+        "From": to_number,
+        "CallerId": from_number,
+        "CustomField": str(lead_id),
         "Url": f"http://my.exotel.com/{sid}/exoml/start_voice/{app_id}",
         "Record": "true",
     }
-    
     if status_callback:
         payload["StatusCallback"] = status_callback
 
-    logger.warning(f"Initiating Exotel Call with payload: {payload}")
+    logger.warning(f"Initiating Exotel (Pipecat) Call with payload: {payload}")
     try:
         response = requests.post(url, data=payload)
         response.raise_for_status()
         return response.json()
     except Exception as e:
         logger.error(f"Exotel call failed: {e}")
-        if hasattr(e, "response") and e.response is not None:
-            logger.error(f"Exotel response: {e.response.text}")
+        return None
+
+
+def _initiate_sarvam_call(to_number: str, lead_id: str, supabase):
+    """Initiates an AI outbound call using Sarvam AI's Outbound Call API."""
+    api_key       = os.getenv("SARVAM_API_KEY", "")
+    org_id        = os.getenv("SARVAM_ORG_ID", "")
+    workspace_id  = os.getenv("SARVAM_WORKSPACE_ID", "")
+    app_id        = os.getenv("SARVAM_APP_ID", "")
+    app_version   = int(os.getenv("SARVAM_APP_VERSION", "1"))
+    connection_id = os.getenv("SARVAM_CONNECTION_ID", "")
+    agent_phone   = os.getenv("SARVAM_AGENT_PHONE_NUMBER", "")
+
+    if not all([api_key, org_id, workspace_id, app_id, connection_id, agent_phone]):
+        logger.error("SARVAM credentials not found or incomplete.")
+        return None
+
+    # Get lead details for agent variables
+    lead_name, lead_source_phrase, src = "ji", "humari website pe", ""
+    u = supabase.table("users").select("name, source").eq("id", lead_id).execute()
+    if u.data:
+        lead_name, src = u.data[0].get("name") or "ji", (u.data[0].get("source") or "").lower()
+    else:
+        l = supabase.table("leads").select("name, source").eq("id", lead_id).execute()
+        if l.data:
+            lead_name, src = l.data[0].get("name") or "ji", (l.data[0].get("source") or "").lower()
+
+    source_map = {
+        "facebook": "Facebook pe", "instagram": "Instagram pe",
+        "google": "Google pe", "website": "hamare website pe",
+        "whatsapp": "WhatsApp pe", "referral": "apne ek jaankaar se",
+    }
+    for key, phrase in source_map.items():
+        if key in src:
+            lead_source_phrase = phrase
+            break
+
+    to_number = to_number.strip()
+    if not to_number.startswith("+"):
+        to_number = "+91" + to_number.lstrip("0")
+
+    payload = {
+        "app_config": {
+            "app_id": app_id,
+            "app_version": app_version,
+            "app_type": "agent",
+            "connection_config": {
+                "connection_id": connection_id,
+                "agent_phone_number": agent_phone,
+            },
+            "agent_variables": {
+                "lead_id": lead_id,
+                "lead_name": lead_name,
+                "lead_source_phrase": lead_source_phrase,
+                "company_name": "Genestac",
+                "gender": "female",
+                "call_disposition": "",
+                "call_summary": ""
+            }
+        },
+        "user_config": {"user_phone_number": to_number}
+    }
+
+    url = f"https://apps.sarvam.ai/api/outbounds/v1/orgs/{org_id}/workspaces/{workspace_id}/outbounds"
+    headers = {"Content-Type": "application/json", "X-API-Key": api_key}
+
+    logger.warning(f"Initiating Sarvam Outbound Call: {to_number}")
+    try:
+        response = requests.post(url, json=payload, headers=headers)
+        response.raise_for_status()
+        data = response.json()
+        return {"Call": {"Sid": data.get("attempt_id")}}
+    except Exception as e:
+        logger.error(f"Sarvam call failed: {e}")
         return None
 
 

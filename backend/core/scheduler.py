@@ -1,4 +1,5 @@
 import os
+import logging
 import datetime
 import httpx
 import httpcore
@@ -6,6 +7,8 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from db.supabase import get_supabase_client
 from supabase import Client
 from services.exotel_service import initiate_ai_call, bridge_doctor_and_customer
+
+logger = logging.getLogger(__name__)
 
 # Network errors that indicate a transient DNS / connectivity issue in Docker.
 # We silence these to a single warning line instead of a full traceback.
@@ -154,6 +157,28 @@ def sweep_leads_for_auto_call():
         # Only block re-queuing for leads that are still pending (not already called)
         queued_lead_ids = {item["lead_id"] for item in queue if "lead_id" in item and item.get("status") == "pending"}
 
+        # ── Batch-fetch call counts for all candidate leads (single DB query) ──
+        all_lead_ids = [l["id"] for l in all_leads]
+        today = datetime.datetime.now().date().isoformat()
+        skipped_max = 0
+        skipped_today = 0
+        skipped_source = 0
+
+        if all_lead_ids:
+            logs_res = supabase.table("ai_call_logs").select("lead_id, created_at").in_("lead_id", all_lead_ids).execute()
+            all_logs = logs_res.data or []
+            # Total call count per lead
+            total_call_counts = {}
+            today_call_counts = {}
+            for log in all_logs:
+                lid = log["lead_id"]
+                total_call_counts[lid] = total_call_counts.get(lid, 0) + 1
+                if (log.get("created_at") or "")[:10] == today:
+                    today_call_counts[lid] = today_call_counts.get(lid, 0) + 1
+        else:
+            total_call_counts = {}
+            today_call_counts = {}
+
         new_items = []
         for lead in all_leads:
             lead_id = lead["id"]
@@ -165,19 +190,19 @@ def sweep_leads_for_auto_call():
             if filter_sources:
                 lead_source = (lead.get("source") or "").lower()
                 if not any(fs in lead_source for fs in filter_sources):
-                    print(f"[AI Voice Scheduler] Skipping lead {lead_id} — source '{lead_source}' not in filter.")
+                    skipped_source += 1
+                    logger.debug(f"[AI Voice Scheduler] Skipping lead {lead_id} — source '{lead_source}' not in filter.")
                     continue
 
-            # Skip if max lifetime calls already reached (configurable, default 3)
-            total_logs = supabase.table("ai_call_logs").select("id").eq("lead_id", lead_id).execute()
-            if len(total_logs.data) >= max_calls_per_lead:
-                print(f"[AI Voice Scheduler] Skipping lead {lead_id} — max {max_calls_per_lead} calls reached.")
+            # Skip if max lifetime calls already reached
+            if total_call_counts.get(lead_id, 0) >= max_calls_per_lead:
+                skipped_max += 1
+                logger.debug(f"[AI Voice Scheduler] Skipping lead {lead_id} — max {max_calls_per_lead} calls reached.")
                 continue
 
             # Only 1 call per lead per day
-            today = datetime.datetime.now().date().isoformat()
-            today_logs = supabase.table("ai_call_logs").select("id").eq("lead_id", lead_id).gte("created_at", today).execute()
-            if len(today_logs.data) > 0:
+            if today_call_counts.get(lead_id, 0) > 0:
+                skipped_today += 1
                 continue
 
             new_items.append({
@@ -187,6 +212,9 @@ def sweep_leads_for_auto_call():
                 "created_at": datetime.datetime.now().isoformat()
             })
             queued_lead_ids.add(lead_id)
+
+        if skipped_max or skipped_today or skipped_source:
+            logger.info(f"[AI Voice Scheduler] Sweep summary — skipped: {skipped_max} (max calls), {skipped_today} (already called today), {skipped_source} (source filter). Queuing {len(new_items)} new leads.")
 
         # Add new items to queue and save
         if new_items:

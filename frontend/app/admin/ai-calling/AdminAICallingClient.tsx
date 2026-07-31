@@ -458,6 +458,37 @@ export function AdminAICallingClient({ initialSettings, initialKnowledgeBase, in
                 </div>
               </div>
 
+              <div className="space-y-4">
+                <Label>AI Provider Engine</Label>
+                <div className="flex bg-gray-100 p-1 rounded-xl w-fit">
+                  <button
+                    onClick={() => setSettings({...settings, ai_provider: 'sarvam'})}
+                    className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
+                      (!settings.ai_provider || settings.ai_provider === 'sarvam') 
+                        ? 'bg-white shadow-sm text-indigo-700' 
+                        : 'text-gray-500 hover:text-gray-700'
+                    }`}
+                  >
+                    Sarvam AI (Managed)
+                  </button>
+                  <button
+                    onClick={() => setSettings({...settings, ai_provider: 'pipecat'})}
+                    className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
+                      settings.ai_provider === 'pipecat'
+                        ? 'bg-white shadow-sm text-indigo-700'
+                        : 'text-gray-500 hover:text-gray-700'
+                    }`}
+                  >
+                    OpenAI (Pipecat)
+                  </button>
+                </div>
+                <p className="text-xs text-gray-500">
+                  {(!settings.ai_provider || settings.ai_provider === 'sarvam') 
+                    ? "Uses Sarvam's outbound API for regional language models." 
+                    : "Uses Genestac's internal Pipecat service and Exotel WebSockets."}
+                </p>
+              </div>
+
               <div className="space-y-3">
                 <Label>Exotel Source Number (ExoPhone)</Label>
                 <Input
