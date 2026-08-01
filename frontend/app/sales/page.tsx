@@ -29,12 +29,12 @@ export default async function SalesDashboard() {
   }
 
   return (
-    <div className="max-w-[1200px] mx-auto flex flex-col gap-5 font-sans bg-[#f7f9fa] text-[#1a1d20]">
+    <div className="max-w-[1200px] mx-auto flex flex-col gap-4 md:gap-5 font-sans bg-[#f7f9fa] text-[#1a1d20]">
       {/* Header */}
       <header className="flex justify-between items-center pb-2.5 pt-2">
-        <h1 className="text-2xl font-semibold">Dashboard Overview</h1>
-        <div className="flex gap-4 items-center">
-          <div className="border border-[#e5e7eb] px-3 py-2 rounded-md text-sm text-[#6b7280] bg-white cursor-pointer hover:bg-gray-50">
+        <h1 className="text-xl md:text-2xl font-semibold">Dashboard Overview</h1>
+        <div className="flex gap-2 md:gap-4 items-center">
+          <div className="hidden sm:block border border-[#e5e7eb] px-3 py-2 rounded-md text-sm text-[#6b7280] bg-white cursor-pointer hover:bg-gray-50">
             01 May - 31 May 2024 ▼
           </div>
           <div className="border border-[#e5e7eb] px-3 py-2 rounded-md bg-white cursor-pointer hover:bg-gray-50 text-[#6b7280]">
@@ -44,38 +44,38 @@ export default async function SalesDashboard() {
       </header>
 
       {/* KPI Grid */}
-      <section className="grid grid-cols-4 gap-4">
-        <div className="bg-white border border-[#e5e7eb] rounded-xl p-5 shadow-sm flex flex-col gap-2">
-          <span className="text-sm text-[#6b7280] font-medium">Total Leads</span>
-          <span className="text-2xl font-bold">{totalLeads}</span>
+      <section className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
+        <div className="bg-white border border-[#e5e7eb] rounded-xl p-4 md:p-5 shadow-sm flex flex-col gap-2">
+          <span className="text-xs md:text-sm text-[#6b7280] font-medium">Total Leads</span>
+          <span className="text-xl md:text-2xl font-bold">{totalLeads}</span>
         </div>
-        <div className="bg-white border border-[#e5e7eb] rounded-xl p-5 shadow-sm flex flex-col gap-2">
-          <span className="text-sm text-[#6b7280] font-medium">New Leads Today</span>
-          <span className="text-2xl font-bold">{newLeadsToday}</span>
+        <div className="bg-white border border-[#e5e7eb] rounded-xl p-4 md:p-5 shadow-sm flex flex-col gap-2">
+          <span className="text-xs md:text-sm text-[#6b7280] font-medium">New Leads Today</span>
+          <span className="text-xl md:text-2xl font-bold">{newLeadsToday}</span>
         </div>
-        <div className="bg-white border border-[#e5e7eb] rounded-xl p-5 shadow-sm flex flex-col gap-2">
-          <span className="text-sm text-[#6b7280] font-medium">Follow-ups Due</span>
-          <span className="text-2xl font-bold">{followUpsDueCount}</span>
+        <div className="bg-white border border-[#e5e7eb] rounded-xl p-4 md:p-5 shadow-sm flex flex-col gap-2">
+          <span className="text-xs md:text-sm text-[#6b7280] font-medium">Follow-ups Due</span>
+          <span className="text-xl md:text-2xl font-bold">{followUpsDueCount}</span>
         </div>
-        <div className="bg-white border border-[#e5e7eb] rounded-xl p-5 shadow-sm flex flex-col gap-2">
-          <span className="text-sm text-[#6b7280] font-medium">Appointments Booked</span>
-          <span className="text-2xl font-bold">{appointmentsBooked}</span>
+        <div className="bg-white border border-[#e5e7eb] rounded-xl p-4 md:p-5 shadow-sm flex flex-col gap-2">
+          <span className="text-xs md:text-sm text-[#6b7280] font-medium">Appointments</span>
+          <span className="text-xl md:text-2xl font-bold">{appointmentsBooked}</span>
         </div>
-        <div className="bg-white border border-[#e5e7eb] rounded-xl p-5 shadow-sm flex flex-col gap-2">
-          <span className="text-sm text-[#6b7280] font-medium">Converted Patients</span>
-          <span className="text-2xl font-bold">{convertedCount}</span>
+        <div className="bg-white border border-[#e5e7eb] rounded-xl p-4 md:p-5 shadow-sm flex flex-col gap-2">
+          <span className="text-xs md:text-sm text-[#6b7280] font-medium">Converted Patients</span>
+          <span className="text-xl md:text-2xl font-bold">{convertedCount}</span>
         </div>
-        <div className="bg-white border border-[#e5e7eb] rounded-xl p-5 shadow-sm flex flex-col gap-2">
-          <span className="text-sm text-[#6b7280] font-medium">Revenue Generated</span>
-          <span className="text-2xl font-bold">{formatCurrency(revenueGenerated)}</span>
+        <div className="bg-white border border-[#e5e7eb] rounded-xl p-4 md:p-5 shadow-sm flex flex-col gap-2">
+          <span className="text-xs md:text-sm text-[#6b7280] font-medium">Revenue Generated</span>
+          <span className="text-lg md:text-2xl font-bold">{formatCurrency(revenueGenerated)}</span>
         </div>
-        <div className="bg-white border border-[#e5e7eb] rounded-xl p-5 shadow-sm flex flex-col gap-2">
-          <span className="text-sm text-[#6b7280] font-medium">Monthly Target</span>
-          <span className="text-2xl font-bold">{formatCurrency(monthlyTarget)}</span>
+        <div className="bg-white border border-[#e5e7eb] rounded-xl p-4 md:p-5 shadow-sm flex flex-col gap-2">
+          <span className="text-xs md:text-sm text-[#6b7280] font-medium">Monthly Target</span>
+          <span className="text-lg md:text-2xl font-bold">{formatCurrency(monthlyTarget)}</span>
         </div>
-        <div className="bg-white border border-[#e5e7eb] rounded-xl p-5 shadow-sm flex flex-col gap-2">
-          <span className="text-sm text-[#6b7280] font-medium">Achievement %</span>
-          <span className="text-2xl font-bold">{achievementPercentage}%</span>
+        <div className="bg-white border border-[#e5e7eb] rounded-xl p-4 md:p-5 shadow-sm flex flex-col gap-2">
+          <span className="text-xs md:text-sm text-[#6b7280] font-medium">Achievement %</span>
+          <span className="text-xl md:text-2xl font-bold">{achievementPercentage}%</span>
           <div className="w-full bg-[#e5e7eb] h-1.5 rounded-full mt-1.5 overflow-hidden">
             <div className="bg-blue-500 h-full rounded-full" style={{ width: `${Math.min(achievementPercentage, 100)}%` }}></div>
           </div>
@@ -83,16 +83,16 @@ export default async function SalesDashboard() {
       </section>
 
       {/* Middle Section (Charts) */}
-      <section className="grid grid-cols-2 gap-5">
+      <section className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-5">
         <div className="bg-white border border-[#e5e7eb] rounded-xl p-5 shadow-sm">
           <div className="text-base font-semibold mb-5">Leads Summary</div>
-          <div className="flex items-center gap-10">
+          <div className="flex items-center gap-6 md:gap-10">
             <div 
-              className="w-[150px] h-[150px] rounded-full flex items-center justify-center shrink-0"
+              className="w-[130px] h-[130px] md:w-[150px] md:h-[150px] rounded-full flex items-center justify-center shrink-0"
               style={{ background: conicGradient }}
             >
-              <div className="w-[110px] h-[110px] bg-white rounded-full flex flex-col items-center justify-center">
-                <h3 className="text-2xl font-bold">{totalLeads}</h3>
+              <div className="w-[95px] h-[95px] md:w-[110px] md:h-[110px] bg-white rounded-full flex flex-col items-center justify-center">
+                <h3 className="text-xl md:text-2xl font-bold">{totalLeads}</h3>
                 <span className="text-xs text-[#6b7280]">Total Leads</span>
               </div>
             </div>
@@ -118,11 +118,11 @@ export default async function SalesDashboard() {
           <div className="flex flex-col gap-[15px]">
             {topLeadSources.map((item: any, i: number) => (
               <div key={i} className="flex items-center justify-between text-[13px] text-[#6b7280]">
-                <span className="w-[120px] truncate">{item.label}</span>
-                <div className="grow bg-transparent h-2 rounded-full mx-[15px] flex">
+                <span className="w-[100px] md:w-[120px] truncate shrink-0">{item.label}</span>
+                <div className="grow bg-transparent h-2 rounded-full mx-[10px] md:mx-[15px] flex">
                   <div className="bg-blue-500 h-full rounded-full" style={{ width: `${item.percentage}%` }}></div>
                 </div>
-                <span className="w-[30px] text-right">{item.percentage}%</span>
+                <span className="w-[30px] text-right shrink-0">{item.percentage}%</span>
               </div>
             ))}
             {topLeadSources.length === 0 && (
@@ -136,7 +136,7 @@ export default async function SalesDashboard() {
       <RecentLeadsTable initialLeads={recentLeads} />
 
       {/* Bottom Section */}
-      <section className="grid grid-cols-2 gap-5 mb-8">
+      <section className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-5 mb-8">
         {/* Calendar */}
         <div className="bg-white border border-[#e5e7eb] rounded-xl p-5 shadow-sm">
           <div className="text-base font-semibold mb-5">Follow-up Calendar</div>
@@ -152,8 +152,9 @@ export default async function SalesDashboard() {
               const isToday = d.toDateString() === new Date().toDateString()
               return (
                 <div key={i} className="flex flex-col items-center gap-2">
-                  <span>{d.toLocaleDateString('en-US', { weekday: 'short' })}</span>
-                  <span className={`w-[30px] h-[30px] flex items-center justify-center rounded-full ${isToday ? 'bg-blue-500 text-white' : ''}`}>
+                  <span className="hidden sm:block">{d.toLocaleDateString('en-US', { weekday: 'short' })}</span>
+                  <span className="sm:hidden">{d.toLocaleDateString('en-US', { weekday: 'narrow' })}</span>
+                  <span className={`w-[28px] h-[28px] md:w-[30px] md:h-[30px] flex items-center justify-center rounded-full text-xs md:text-sm ${isToday ? 'bg-blue-500 text-white' : ''}`}>
                     {d.getDate()}
                   </span>
                 </div>
@@ -163,7 +164,7 @@ export default async function SalesDashboard() {
           <div className="bg-gray-50 rounded-lg p-[15px] flex flex-col gap-[15px] text-[13px] min-h-[120px]">
             {timelineEvents.map((event: any, i: number) => (
               <div key={i} className="flex gap-[15px]">
-                <span className="text-[#6b7280] w-[60px]">{event.time}</span>
+                <span className="text-[#6b7280] w-[60px] shrink-0">{event.time}</span>
                 <span className="text-[#1a1d20]">{event.title}</span>
               </div>
             ))}
@@ -176,38 +177,38 @@ export default async function SalesDashboard() {
         {/* Quick Actions */}
         <div className="bg-white border border-[#e5e7eb] rounded-xl p-5 shadow-sm">
           <div className="text-base font-semibold mb-5">Quick Actions</div>
-          <div className="grid grid-cols-4 gap-5 text-center mt-2.5">
-            <div className="flex flex-col items-center gap-2.5 cursor-pointer hover:opacity-80">
-              <div className="w-[50px] h-[50px] rounded-xl flex items-center justify-center text-xl bg-[#dcfce7] text-[#16a34a]">📞</div>
-              <span className="text-xs text-[#6b7280] font-medium">Call</span>
+          <div className="grid grid-cols-4 gap-3 md:gap-5 text-center mt-2.5">
+            <div className="flex flex-col items-center gap-2 md:gap-2.5 cursor-pointer hover:opacity-80">
+              <div className="w-[44px] h-[44px] md:w-[50px] md:h-[50px] rounded-xl flex items-center justify-center text-lg md:text-xl bg-[#dcfce7] text-[#16a34a]">📞</div>
+              <span className="text-[10px] md:text-xs text-[#6b7280] font-medium">Call</span>
             </div>
-            <div className="flex flex-col items-center gap-2.5 cursor-pointer hover:opacity-80">
-              <div className="w-[50px] h-[50px] rounded-xl flex items-center justify-center text-xl bg-[#dcfce7] text-[#22c55e]">💬</div>
-              <span className="text-xs text-[#6b7280] font-medium">WhatsApp</span>
+            <div className="flex flex-col items-center gap-2 md:gap-2.5 cursor-pointer hover:opacity-80">
+              <div className="w-[44px] h-[44px] md:w-[50px] md:h-[50px] rounded-xl flex items-center justify-center text-lg md:text-xl bg-[#dcfce7] text-[#22c55e]">💬</div>
+              <span className="text-[10px] md:text-xs text-[#6b7280] font-medium">WhatsApp</span>
             </div>
-            <div className="flex flex-col items-center gap-2.5 cursor-pointer hover:opacity-80">
-              <div className="w-[50px] h-[50px] rounded-xl flex items-center justify-center text-xl bg-[#dbeafe] text-[#3b82f6]">✉️</div>
-              <span className="text-xs text-[#6b7280] font-medium">SMS</span>
+            <div className="flex flex-col items-center gap-2 md:gap-2.5 cursor-pointer hover:opacity-80">
+              <div className="w-[44px] h-[44px] md:w-[50px] md:h-[50px] rounded-xl flex items-center justify-center text-lg md:text-xl bg-[#dbeafe] text-[#3b82f6]">✉️</div>
+              <span className="text-[10px] md:text-xs text-[#6b7280] font-medium">SMS</span>
             </div>
-            <div className="flex flex-col items-center gap-2.5 cursor-pointer hover:opacity-80">
-              <div className="w-[50px] h-[50px] rounded-xl flex items-center justify-center text-xl bg-[#f3f4f6] text-[#3b82f6]">📧</div>
-              <span className="text-xs text-[#6b7280] font-medium">Email</span>
+            <div className="flex flex-col items-center gap-2 md:gap-2.5 cursor-pointer hover:opacity-80">
+              <div className="w-[44px] h-[44px] md:w-[50px] md:h-[50px] rounded-xl flex items-center justify-center text-lg md:text-xl bg-[#f3f4f6] text-[#3b82f6]">📧</div>
+              <span className="text-[10px] md:text-xs text-[#6b7280] font-medium">Email</span>
             </div>
-            <div className="flex flex-col items-center gap-2.5 cursor-pointer hover:opacity-80">
-              <div className="w-[50px] h-[50px] rounded-xl flex items-center justify-center text-xl bg-[#f3e8ff] text-[#8b5cf6]">👤+</div>
-              <span className="text-xs text-[#6b7280] font-medium">Add Lead</span>
+            <div className="flex flex-col items-center gap-2 md:gap-2.5 cursor-pointer hover:opacity-80">
+              <div className="w-[44px] h-[44px] md:w-[50px] md:h-[50px] rounded-xl flex items-center justify-center text-lg md:text-xl bg-[#f3e8ff] text-[#8b5cf6]">👤+</div>
+              <span className="text-[10px] md:text-xs text-[#6b7280] font-medium">Add Lead</span>
             </div>
-            <div className="flex flex-col items-center gap-2.5 cursor-pointer hover:opacity-80">
-              <div className="w-[50px] h-[50px] rounded-xl flex items-center justify-center text-xl bg-[#ffedd5] text-[#f97316]">📅</div>
-              <span className="text-xs text-[#6b7280] font-medium">Schedule<br/>Follow-up</span>
+            <div className="flex flex-col items-center gap-2 md:gap-2.5 cursor-pointer hover:opacity-80">
+              <div className="w-[44px] h-[44px] md:w-[50px] md:h-[50px] rounded-xl flex items-center justify-center text-lg md:text-xl bg-[#ffedd5] text-[#f97316]">📅</div>
+              <span className="text-[10px] md:text-xs text-[#6b7280] font-medium">Schedule<br/>Follow-up</span>
             </div>
-            <div className="flex flex-col items-center gap-2.5 cursor-pointer hover:opacity-80">
-              <div className="w-[50px] h-[50px] rounded-xl flex items-center justify-center text-xl bg-[#fce7f3] text-[#ec4899]">📆</div>
-              <span className="text-xs text-[#6b7280] font-medium">Book<br/>Appointment</span>
+            <div className="flex flex-col items-center gap-2 md:gap-2.5 cursor-pointer hover:opacity-80">
+              <div className="w-[44px] h-[44px] md:w-[50px] md:h-[50px] rounded-xl flex items-center justify-center text-lg md:text-xl bg-[#fce7f3] text-[#ec4899]">📆</div>
+              <span className="text-[10px] md:text-xs text-[#6b7280] font-medium">Book<br/>Appointment</span>
             </div>
-            <div className="flex flex-col items-center gap-2.5 cursor-pointer hover:opacity-80">
-              <div className="w-[50px] h-[50px] rounded-xl flex items-center justify-center text-xl bg-[#fef3c7] text-[#eab308]">📝</div>
-              <span className="text-xs text-[#6b7280] font-medium">Add Note</span>
+            <div className="flex flex-col items-center gap-2 md:gap-2.5 cursor-pointer hover:opacity-80">
+              <div className="w-[44px] h-[44px] md:w-[50px] md:h-[50px] rounded-xl flex items-center justify-center text-lg md:text-xl bg-[#fef3c7] text-[#eab308]">📝</div>
+              <span className="text-[10px] md:text-xs text-[#6b7280] font-medium">Add Note</span>
             </div>
           </div>
         </div>

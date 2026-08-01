@@ -15,7 +15,9 @@ import {
   Kanban,
   FileText,
   ShoppingCart,
-  Pin
+  Pin,
+  Menu,
+  X
 } from 'lucide-react'
 import { logout } from '@/app/auth/actions'
 
@@ -36,6 +38,7 @@ export function SalesSidebar() {
   const [isPinned, setIsPinned] = useState(true)
   const [isHovered, setIsHovered] = useState(false)
   const [isMounted, setIsMounted] = useState(false)
+  const [mobileOpen, setMobileOpen] = useState(false)
 
   useEffect(() => {
     setIsMounted(true)
@@ -45,6 +48,11 @@ export function SalesSidebar() {
     }
   }, [])
 
+  // Close mobile sidebar on route change
+  useEffect(() => {
+    setMobileOpen(false)
+  }, [pathname])
+
   const togglePin = () => {
     setIsPinned(!isPinned)
     localStorage.setItem('sales-sidebar-pinned', String(!isPinned))
@@ -52,23 +60,37 @@ export function SalesSidebar() {
 
   const isCollapsed = isMounted ? (!isPinned && !isHovered) : false
 
-  return (
-    <div 
-      className={`flex flex-col bg-card/95 backdrop-blur-md text-foreground border-r border-border/50 min-h-screen shrink-0 relative shadow-xl z-20 transition-[width] duration-300 ${isCollapsed ? 'w-20' : 'w-64'}`}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
+  const SidebarContent = ({ mobile = false }: { mobile?: boolean }) => (
+    <div
+      className={`flex flex-col bg-card/95 backdrop-blur-md text-foreground border-r border-border/50 h-full relative shadow-xl transition-[width] duration-300 ${
+        mobile ? 'w-64' : (isCollapsed ? 'w-20' : 'w-64')
+      }`}
+      onMouseEnter={() => !mobile && setIsHovered(true)}
+      onMouseLeave={() => !mobile && setIsHovered(false)}
     >
       {/* Brand Gradient Top Border */}
       <div className="absolute top-0 left-0 w-full h-[3px] bg-gradient-to-r from-[var(--color-brand-green)] via-[var(--color-brand-teal)] to-[var(--color-brand-ocean)] shadow-[0_0_15px_rgba(29,182,178,0.5)]"></div>
       
-      {/* Pin Button */}
-      <button 
-        onClick={togglePin}
-        className={`absolute top-6 -right-3.5 bg-white border border-gray-200 rounded-full p-1 shadow-md text-gray-400 hover:text-gray-700 transition-all z-30 ${isCollapsed ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}
-        title={isPinned ? "Unpin sidebar" : "Pin sidebar"}
-      >
-        <Pin className={`w-3.5 h-3.5 transition-transform ${isPinned ? 'rotate-0' : '-rotate-45'}`} />
-      </button>
+      {/* Pin Button (desktop only) */}
+      {!mobile && (
+        <button 
+          onClick={togglePin}
+          className={`absolute top-6 -right-3.5 bg-white border border-gray-200 rounded-full p-1 shadow-md text-gray-400 hover:text-gray-700 transition-all z-30 ${isCollapsed ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}
+          title={isPinned ? "Unpin sidebar" : "Pin sidebar"}
+        >
+          <Pin className={`w-3.5 h-3.5 transition-transform ${isPinned ? 'rotate-0' : '-rotate-45'}`} />
+        </button>
+      )}
+
+      {/* Mobile close button */}
+      {mobile && (
+        <button
+          onClick={() => setMobileOpen(false)}
+          className="absolute top-4 right-4 z-30 text-gray-400 hover:text-gray-700 transition-colors"
+        >
+          <X className="w-5 h-5" />
+        </button>
+      )}
 
       <div className="flex items-center justify-center h-20 border-b border-border/50 shrink-0 mt-1 transition-transform hover:scale-105 duration-500 overflow-hidden">
         <Image 
@@ -78,7 +100,7 @@ export function SalesSidebar() {
           height={28} 
           priority 
           style={{ height: 'auto' }} 
-          className={`object-contain dark:invert drop-shadow-md transition-all duration-300 ${isCollapsed ? 'w-8 h-8 object-cover object-left' : 'w-[100px]'}`} 
+          className={`object-contain dark:invert drop-shadow-md transition-all duration-300 ${(!mobile && isCollapsed) ? 'w-8 h-8 object-cover object-left' : 'w-[100px]'}`} 
         />
       </div>
       
@@ -101,7 +123,7 @@ export function SalesSidebar() {
               )}
               
               <route.icon className={`w-5 h-5 mr-3 shrink-0 relative z-10 transition-transform duration-300 ${isActive ? 'text-white scale-110' : 'group-hover:text-[var(--color-brand-teal)] group-hover:scale-110'}`} />
-              <span className={`font-medium tracking-wide relative z-10 whitespace-nowrap transition-opacity duration-300 ${isCollapsed ? 'opacity-0 w-0 hidden' : 'opacity-100'}`}>
+              <span className={`font-medium tracking-wide relative z-10 whitespace-nowrap transition-opacity duration-300 ${(!mobile && isCollapsed) ? 'opacity-0 w-0 hidden' : 'opacity-100'}`}>
                 {route.name}
               </span>
             </Link>
@@ -116,12 +138,45 @@ export function SalesSidebar() {
             className="group flex w-full items-center px-4 py-3 text-destructive/80 hover:bg-destructive/10 hover:text-destructive rounded-xl transition-all duration-300 hover:scale-[1.02]"
           >
             <LogOut className="w-5 h-5 mr-3 shrink-0 transition-transform group-hover:-translate-x-1" />
-            <span className={`font-medium tracking-wide whitespace-nowrap transition-opacity duration-300 ${isCollapsed ? 'opacity-0 w-0 hidden' : 'opacity-100'}`}>
+            <span className={`font-medium tracking-wide whitespace-nowrap transition-opacity duration-300 ${(!mobile && isCollapsed) ? 'opacity-0 w-0 hidden' : 'opacity-100'}`}>
               Logout
             </span>
           </button>
         </form>
       </div>
     </div>
+  )
+
+  return (
+    <>
+      {/* Desktop sidebar */}
+      <div className="hidden md:flex flex-col min-h-screen shrink-0 z-20">
+        <SidebarContent />
+      </div>
+
+      {/* Mobile hamburger button */}
+      <button
+        onClick={() => setMobileOpen(true)}
+        className="md:hidden fixed top-4 left-4 z-40 p-2 rounded-lg bg-card border border-border shadow-md text-foreground hover:bg-muted transition-colors"
+        aria-label="Open navigation menu"
+      >
+        <Menu className="w-5 h-5" />
+      </button>
+
+      {/* Mobile sidebar overlay */}
+      {mobileOpen && (
+        <div className="md:hidden fixed inset-0 z-50 flex">
+          {/* Backdrop */}
+          <div
+            className="fixed inset-0 bg-black/50 backdrop-blur-sm"
+            onClick={() => setMobileOpen(false)}
+          />
+          {/* Drawer */}
+          <div className="relative w-64 min-h-screen z-50 animate-in slide-in-from-left duration-300">
+            <SidebarContent mobile />
+          </div>
+        </div>
+      )}
+    </>
   )
 }

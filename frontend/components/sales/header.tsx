@@ -35,19 +35,19 @@ export function SalesHeader({ user }: { user?: any }) {
   const isAdminRole = ADMIN_ROLES.includes(role || '')
 
   return (
-    <header className="sticky top-0 z-10 flex items-center justify-between h-20 px-8 bg-card/80 backdrop-blur-xl border-b border-border/50 shrink-0 shadow-sm">
-      <div className="flex items-center gap-3">
+    <header className="sticky top-0 z-10 flex items-center justify-between h-16 md:h-20 pl-16 md:pl-8 pr-3 md:pr-8 bg-card/80 backdrop-blur-xl border-b border-border/50 shrink-0 shadow-sm overflow-hidden">
+      <div className="flex items-center gap-2 min-w-0">
         {isAdminRole ? (
           <DropdownMenu>
             <DropdownMenuTrigger
               className={cn(
                 buttonVariants({ variant: "outline" }),
-                "flex items-center gap-2 h-9 px-4 rounded-full border-primary/30 bg-primary/5 hover:bg-primary/10 text-primary font-medium text-sm shadow-sm transition-all"
+                "flex items-center gap-1.5 h-8 md:h-9 px-2 md:px-4 rounded-full border-primary/30 bg-primary/5 hover:bg-primary/10 text-primary font-medium text-xs md:text-sm shadow-sm transition-all"
               )}
             >
-              <ShoppingBag className="w-4 h-4" />
-              Sales Dashboard
-              <ChevronDown className="w-3 h-3 opacity-60" />
+              <ShoppingBag className="w-4 h-4 shrink-0" />
+              <span className="hidden sm:inline">Sales Dashboard</span>
+              <ChevronDown className="w-3 h-3 opacity-60 shrink-0" />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="w-52">
               <DropdownMenuGroup>
@@ -78,32 +78,32 @@ export function SalesHeader({ user }: { user?: any }) {
             </DropdownMenuContent>
           </DropdownMenu>
         ) : (
-          <h2 className="text-2xl font-bold bg-gradient-to-r from-[var(--color-brand-teal)] to-[var(--color-brand-ocean)] bg-clip-text text-transparent tracking-tight">Sales Hub</h2>
+          <h2 className="text-lg md:text-2xl font-bold bg-gradient-to-r from-[var(--color-brand-teal)] to-[var(--color-brand-ocean)] bg-clip-text text-transparent tracking-tight truncate">Sales Hub</h2>
         )}
       </div>
 
-      <div className="flex items-center space-x-6">
+      <div className="flex items-center gap-1 md:gap-2">
         <Button 
           variant="ghost" 
           size="icon" 
           onClick={handleRefresh}
-          className="text-foreground hover:bg-muted/80 rounded-full transition-transform hover:scale-105"
+          className="text-foreground hover:bg-muted/80 rounded-full transition-transform hover:scale-105 w-8 h-8 md:w-10 md:h-10"
           title="Refresh Data"
         >
-          <RefreshCw className={cn("w-5 h-5 text-muted-foreground hover:text-foreground", isRefreshing && "animate-spin text-primary")} />
+          <RefreshCw className={cn("w-4 h-4 text-muted-foreground hover:text-foreground", isRefreshing && "animate-spin text-primary")} />
         </Button>
         <ThemeToggle />
         <NotificationBell />
 
         <DropdownMenu>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1.5 md:gap-3">
             <div className="hidden md:flex flex-col items-end">
               <span className="text-sm font-semibold leading-none">{user?.name || user?.email || 'User'}</span>
               <span className="text-xs text-muted-foreground uppercase tracking-wider mt-1">{role.replace(/_/g, ' ')}</span>
             </div>
-            <DropdownMenuTrigger className={cn(buttonVariants({ variant: "ghost" }), "relative h-10 w-10 rounded-full bg-gradient-to-br from-[var(--color-brand-teal)] to-[var(--color-brand-ocean)] p-[2px] transition-transform hover:scale-105 shadow-md")}>
+            <DropdownMenuTrigger className={cn(buttonVariants({ variant: "ghost" }), "relative h-8 w-8 md:h-10 md:w-10 rounded-full bg-gradient-to-br from-[var(--color-brand-teal)] to-[var(--color-brand-ocean)] p-[2px] transition-transform hover:scale-105 shadow-md")}>
               <div className="h-full w-full rounded-full bg-card flex items-center justify-center">
-                <User className="w-5 h-5 text-primary" />
+                <User className="w-4 h-4 md:w-5 md:h-5 text-primary" />
               </div>
             </DropdownMenuTrigger>
           </div>
