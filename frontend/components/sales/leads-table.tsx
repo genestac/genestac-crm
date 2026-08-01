@@ -1,14 +1,14 @@
 'use client'
 
 import { useState, useMemo, useEffect, useRef } from 'react'
-import { Calendar, Mail, Phone, Settings2, ArrowUpDown, ArrowUp, ArrowDown, ChevronLeft, ChevronRight, Search, Filter, ChevronDown, FileText, Flame, MapPin } from 'lucide-react'
+import { Calendar, Mail, Phone, Settings2, ArrowUpDown, ArrowUp, ArrowDown, ChevronLeft, ChevronRight, Search, Filter, ChevronDown, FileText, Flame, MapPin, Clock } from 'lucide-react'
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuCheckboxItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuGroup } from '@/components/ui/dropdown-menu'
 import { UserStatusUpdater } from '@/components/sales/user-status-updater'
 import { UserManagementSheet } from '@/components/sales/user-management-sheet'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { AICallButton } from '@/components/sales/ai-call-button'
 import { useRouter, useSearchParams, usePathname } from 'next/navigation'
-import { getPaginatedLeads, bulkUpdateLeadsStatus } from '@/app/sales/actions'
+import { getPaginatedLeads, bulkUpdateLeadsStatus, quickSetFollowup } from '@/app/sales/actions'
 import { toast } from 'sonner'
 
 export function LeadsTable({ initialLeads, initialTotal, statusOptions, sourceOptions = [] }: { initialLeads: any[], initialTotal: number, statusOptions: {value: string, label: string}[], sourceOptions?: {value: string, label: string}[] }) {
@@ -31,6 +31,8 @@ export function LeadsTable({ initialLeads, initialTotal, statusOptions, sourceOp
   const [selectedLeadIds, setSelectedLeadIds] = useState<string[]>([])
   const [isUpdating, setIsUpdating] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [savingFollowup, setSavingFollowup] = useState<string | null>(null) // leadId being saved
+  const [inlineNotes, setInlineNotes] = useState<Record<string, string>>({}) // per-lead note text
   const router = useRouter()
   const searchParams = useSearchParams()
   const pathname = usePathname()
@@ -178,6 +180,24 @@ export function LeadsTable({ initialLeads, initialTotal, statusOptions, sourceOp
     } finally {
       setIsUpdating(false)
       e.target.value = "" // reset select
+    }
+  }
+
+  const handleQuickFollowup = async (leadId: string, hoursFromNow: number) => {
+    const followupTime = new Date(Date.now() + hoursFromNow * 60 * 60 * 1000)
+    const note = inlineNotes[leadId] || ''
+    setSavingFollowup(leadId)
+    try {
+      await quickSetFollowup(leadId, followupTime.toISOString(), note)
+      setLeads((prev: any[]) => prev.map((l: any) =>
+        l.id === leadId ? { ...l, next_followup_date: followupTime.toISOString() } : l
+      ))
+      setInlineNotes(prev => ({ ...prev, [leadId]: '' }))
+      toast.success(`Follow-up set for ${followupTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}${note ? ' with note' : ''}`)
+    } catch (err: any) {
+      toast.error('Failed to set follow-up: ' + err.message)
+    } finally {
+      setSavingFollowup(null)
     }
   }
 
@@ -419,18 +439,49 @@ export function LeadsTable({ initialLeads, initialTotal, statusOptions, sourceOp
                 </td>
 
                 {/* Next Follow-up */}
-                <td className="px-6 py-4">
+                <td className="px-6 py-4 min-w-[220px]">
+                  {/* Current followup date display */}
                   {lead.next_followup_date ? (
-                    <div className="flex items-center text-amber-700 bg-amber-50 px-2 py-1 rounded w-fit border border-amber-200">
-                      <Calendar className="w-3 h-3 mr-2" />
-                      {new Date(lead.next_followup_date).toLocaleString([], { 
-                        month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' 
-                      })}
+                    <div className="flex items-center text-amber-700 bg-amber-50 px-2 py-1 rounded w-fit border border-amber-200 mb-2">
+                      <Calendar className="w-3 h-3 mr-2 flex-shrink-0" />
+                      <span className="text-xs font-medium">
+                        {new Date(lead.next_followup_date).toLocaleString([], { 
+                          month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' 
+                        })}
+                      </span>
                     </div>
                   ) : (
-                    <span className="text-gray-400 text-xs italic">Not scheduled</span>
+                    <span className="text-gray-400 text-xs italic block mb-2">Not scheduled</span>
                   )}
+                  {/* Inline note input */}
+                  <input
+                    type="text"
+                    placeholder="Add a note (optional)..."
+                    value={inlineNotes[lead.id] || ''}
+                    onChange={(e) => setInlineNotes(prev => ({ ...prev, [lead.id]: e.target.value }))}
+                    className="w-full text-xs border border-gray-200 rounded px-2 py-1 mb-1.5 bg-gray-50 focus:outline-none focus:ring-1 focus:ring-blue-400 focus:bg-white placeholder-gray-400"
+                  />
+                  {/* Quick follow-up buttons */}
+                  <div className="flex items-center gap-1 flex-wrap">
+                    {[1, 2, 3].map(h => (
+                      <button
+                        key={h}
+                        disabled={savingFollowup === lead.id}
+                        onClick={() => handleQuickFollowup(lead.id, h)}
+                        className="inline-flex items-center gap-0.5 px-2 py-1 rounded text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        title={`Set follow-up ${h}hr from now`}
+                      >
+                        {savingFollowup === lead.id ? (
+                          <span className="animate-spin w-3 h-3 border-2 border-blue-500 border-t-transparent rounded-full inline-block" />
+                        ) : (
+                          <Clock className="w-3 h-3" />
+                        )}
+                        +{h}hr
+                      </button>
+                    ))}
+                  </div>
                 </td>
+
 
                 {/* Status */}
                 <td className="px-6 py-4">

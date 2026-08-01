@@ -87,6 +87,13 @@ export function UserManagementSheet({
   const [aiCallLogs, setAiCallLogs] = useState<any[]>([])
   const [initiatingCall, setInitiatingCall] = useState(false)
 
+  // Helper: convert ISO/UTC date to local datetime string for datetime-local inputs (YYYY-MM-DDTHH:mm)
+  const toLocalDatetimeInput = (isoStr: string) => {
+    const d = new Date(isoStr)
+    const pad = (n: number) => String(n).padStart(2, '0')
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+  }
+
   // Form state to make inputs controlled
   const [formData, setFormData] = useState({
     name: lead.name || '',
@@ -97,7 +104,7 @@ export function UserManagementSheet({
     state: lead.state || '',
     postal_code: lead.postal_code || '',
     country: lead.country || 'India',
-    next_followup_date: lead.next_followup_date ? new Date(lead.next_followup_date).toISOString().slice(0, 16) : ''
+    next_followup_date: lead.next_followup_date ? toLocalDatetimeInput(lead.next_followup_date) : ''
   })
   
   const [metaData, setMetaData] = useState<Record<string, any>>(lead.metadata || {})
@@ -126,7 +133,7 @@ export function UserManagementSheet({
         state: lead.state || '',
         postal_code: lead.postal_code || '',
         country: lead.country || 'India',
-        next_followup_date: lead.next_followup_date ? new Date(lead.next_followup_date).toISOString().slice(0, 16) : ''
+        next_followup_date: lead.next_followup_date ? toLocalDatetimeInput(lead.next_followup_date) : ''
       })
       setMetaData(lead.metadata || {})
       getLeadDocuments(lead.id).then(setDocuments).catch(console.error)

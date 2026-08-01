@@ -49,6 +49,25 @@ export async function updateLeadDetails(formData: FormData) {
   revalidatePath('/sales/followups')
 }
 
+export async function quickSetFollowup(leadId: string, followupIso: string, note?: string) {
+  const formData = new FormData()
+  formData.append('lead_id', leadId)
+  formData.append('next_followup_date', followupIso)
+  await fetchAPI(`/api/sales/leads/${leadId}`, {
+    method: 'PUT',
+    body: formData
+  })
+  if (note && note.trim()) {
+    await fetchAPI(`/api/sales/leads/${leadId}/notes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: note.trim() })
+    })
+  }
+  revalidatePath('/sales/leads')
+  revalidatePath('/sales/followups')
+}
+
 export async function bulkUpdateLeadsStatus(leadIds: string[], status: string) {
   await fetchAPI('/api/sales/leads/bulk-status', {
     method: 'PUT',
