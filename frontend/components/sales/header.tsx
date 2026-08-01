@@ -2,8 +2,9 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Bell, User, RefreshCw, LayoutDashboard, ChevronDown, ShoppingBag, Settings, Megaphone } from 'lucide-react'
+import { User, RefreshCw, LayoutDashboard, ChevronDown, ShoppingBag, Settings, Megaphone } from 'lucide-react'
 import { ThemeToggle } from '@/components/theme-toggle'
+import { NotificationBell } from '@/components/notifications/NotificationBell'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -92,11 +93,7 @@ export function SalesHeader({ user }: { user?: any }) {
           <RefreshCw className={cn("w-5 h-5 text-muted-foreground hover:text-foreground", isRefreshing && "animate-spin text-primary")} />
         </Button>
         <ThemeToggle />
-        <Button variant="ghost" size="icon" className="relative text-foreground hover:bg-muted/80 rounded-full transition-transform hover:scale-105">
-          <Bell className="w-5 h-5" />
-          <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full ring-2 ring-card"></span>
-          <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full animate-ping opacity-75"></span>
-        </Button>
+        <NotificationBell />
 
         <DropdownMenu>
           <div className="flex items-center gap-3">

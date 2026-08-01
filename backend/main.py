@@ -5,6 +5,7 @@ from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from core.config import settings
 from api import sales, auth, doctor
 from api.admin import staffs, roles, crm_settings, logs, lead_assignment, coupons, metrics, ai_settings, blogs, doctors
+from api.admin import notifications, lead_scoring
 from api import public
 
 from core.scheduler import start_scheduler
@@ -58,6 +59,10 @@ app.include_router(doctors.router, prefix="/api/admin/doctors", tags=["admin-doc
 from api.admin import consultations
 from api.admin import system_logs
 app.include_router(system_logs.router, prefix="/api/admin/system-logs", tags=["admin-system-logs"])
+app.include_router(notifications.router, prefix="/api/admin/notifications", tags=["admin-notifications"])
+app.include_router(lead_scoring.router, prefix="/api/admin/lead-scoring", tags=["admin-lead-scoring"])
+from api.sales import scheduled_calls as scheduled_calls_router
+app.include_router(scheduled_calls_router.router, prefix="/api/sales/scheduled-calls", tags=["sales-scheduled-calls"])
 app.include_router(consultations.router, prefix="/api/admin/consultations", tags=["admin-consultations"])
 from api.webhooks import voice_stream, conference, call_status
 app.include_router(voice_stream.router, prefix="/api/webhooks/exotel", tags=["webhooks-exotel"])

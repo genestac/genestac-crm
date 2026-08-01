@@ -9,6 +9,7 @@ from api.deps import get_current_user
 from services.whatsapp_service import send_whatsapp_text, send_whatsapp_interactive
 from services.exotel_service import initiate_ai_call
 from services.openai_agent import process_whatsapp_message
+from services.notification_service import notify_new_wa_message, notify_lead_abused
 
 router = APIRouter()
 
@@ -464,6 +465,19 @@ async def webhook_handler(payload: dict, background_tasks: BackgroundTasks, supa
                                 "sender_type": "lead",
                                 "wa_message_id": wa_message_id
                             }).execute()
+
+                            # ── Notify team of new message ──────────────────
+                            _lead_name = existing.get("name") or existing.get("phone_number") or existing.get("phone") or "Unknown"
+                            background_tasks.add_task(
+                                notify_new_wa_message,
+                                supabase, _lead_name, existing["id"], text_body
+                            )
+
+                            # ── Score lead from chat (non-blocking) ─────────
+                            async def _score_in_bg(lid, lname, tbl):
+                                from services.lead_scoring_service import score_lead_from_chat
+                                await score_lead_from_chat(lid, lname, supabase, table=tbl)
+                            background_tasks.add_task(_score_in_bg, existing["id"], _lead_name, table)
                             
                             if is_bot_paused:
                                 print(f"[WhatsApp Webhook] Bot paused for {clean_phone}, skipping AI reply.")

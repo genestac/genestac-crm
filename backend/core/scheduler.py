@@ -37,12 +37,19 @@ def is_within_calling_window(windows):
     return False
 
 
-def _trigger_callback_call(supabase: Client, lead_id: str, phone: str, exotel_number: str):
+def _trigger_callback_call(supabase: Client, lead_id: str, phone: str, exotel_number: str, lead_name: str = "Lead"):
     """Helper: fire an AI callback for a lead and clear the ai_callback_time field."""
     print(f"[AI Voice Scheduler] Triggering scheduled callback for lead {lead_id} ({phone})")
     # Clear the callback time immediately to prevent duplicate calls
     supabase.table("leads").update({"ai_callback_time": None}).eq("id", lead_id).execute()
     supabase.table("users").update({"ai_callback_time": None}).eq("id", lead_id).execute()
+
+    # Notify the team
+    try:
+        from services.notification_service import notify_callback_due
+        notify_callback_due(supabase, lead_name, lead_id)
+    except Exception as ne:
+        print(f"[AI Voice Scheduler] Notification error: {ne}")
 
     log_res = supabase.table("ai_call_logs").insert({
         "lead_id": lead_id,
@@ -90,8 +97,8 @@ def sweep_leads_for_auto_call():
 
         # ─── PRIORITY QUEUE: Fire explicitly scheduled AI callbacks that are due ───
         # Check both the leads table (phone_number) and users table (phone)
-        callback_leads_from_leads = supabase.table("leads").select("id, phone_number").lte("ai_callback_time", now_iso).not_.is_("ai_callback_time", "null").execute().data or []
-        callback_leads_from_users = supabase.table("users").select("id, phone").lte("ai_callback_time", now_iso).not_.is_("ai_callback_time", "null").execute().data or []
+        callback_leads_from_leads = supabase.table("leads").select("id, name, phone_number").lte("ai_callback_time", now_iso).not_.is_("ai_callback_time", "null").execute().data or []
+        callback_leads_from_users = supabase.table("users").select("id, name, phone").lte("ai_callback_time", now_iso).not_.is_("ai_callback_time", "null").execute().data or []
 
         already_fired = set()
 
@@ -99,13 +106,13 @@ def sweep_leads_for_auto_call():
             phone = lead.get("phone_number")
             if phone and lead["id"] not in already_fired:
                 already_fired.add(lead["id"])
-                _trigger_callback_call(supabase, lead["id"], phone, exotel_number)
+                _trigger_callback_call(supabase, lead["id"], phone, exotel_number, lead.get("name") or "Lead")
 
         for lead in callback_leads_from_users:
             phone = lead.get("phone")
             if phone and lead["id"] not in already_fired:
                 already_fired.add(lead["id"])
-                _trigger_callback_call(supabase, lead["id"], phone, exotel_number)
+                _trigger_callback_call(supabase, lead["id"], phone, exotel_number, lead.get("name") or "Lead")
 
         # ─── NORMAL QUEUE: Sweep enabled-status leads inside the calling window ───
         if not enabled_statuses:

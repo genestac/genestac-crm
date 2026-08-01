@@ -1,6 +1,6 @@
 'use client'
 import { useState, useEffect, useRef } from 'react'
-import { Loader2, Send, Bot, User, CheckCheck, Trash2, Pencil, Check, X, Phone, ShieldOff, ShieldAlert } from 'lucide-react'
+import { Loader2, Send, Bot, User, CheckCheck, Trash2, Pencil, Check, X, Phone, ShieldOff, ShieldAlert, Flame, Thermometer, Snowflake, RefreshCw } from 'lucide-react'
 import {
   getWhatsappChats,
   sendWhatsappChat,
@@ -19,6 +19,9 @@ export function WhatsappChat({ leadId, leadName: initialLeadName }: { leadId: st
   const [sending, setSending] = useState(false)
   const [isBlocked, setIsBlocked] = useState(false)
   const [abuseStrikes, setAbuseStrikes] = useState(0)
+  const [scoreLabel, setScoreLabel] = useState<string | null>(null)
+  const [scoreValue, setScoreValue] = useState<number | null>(null)
+  const [rescoring, setRescoring] = useState(false)
 
   // Per-message delete
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
@@ -52,6 +55,8 @@ export function WhatsappChat({ leadId, leadName: initialLeadName }: { leadId: st
         setMessages(res.data)
         setIsBlocked(!!res.is_blocked)
         setAbuseStrikes(res.abuse_strikes ?? 0)
+        setScoreLabel(res.score_label ?? null)
+        setScoreValue(res.score ?? null)
       }
     } catch (e) {
       console.error('Failed to fetch WA chat:', e)
@@ -222,9 +227,24 @@ export function WhatsappChat({ leadId, leadName: initialLeadName }: { leadId: st
                 </button>
               </div>
             ) : (
-              <div className="flex items-center gap-1.5 group cursor-pointer" onClick={() => setEditingName(true)}>
-                <h3 className="font-semibold text-base truncate">{leadName}</h3>
-                <Pencil className="w-3 h-3 opacity-0 group-hover:opacity-60 transition-opacity shrink-0" />
+              <div className="flex items-center gap-2 flex-wrap">
+                <div className="flex items-center gap-1.5 group cursor-pointer" onClick={() => setEditingName(true)}>
+                  <h3 className="font-semibold text-base truncate">{leadName}</h3>
+                  <Pencil className="w-3 h-3 opacity-0 group-hover:opacity-60 transition-opacity shrink-0" />
+                </div>
+                {/* Score Badge */}
+                {scoreLabel && (
+                  <span className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                    scoreLabel === 'hot'  ? 'bg-red-500/80 text-white' :
+                    scoreLabel === 'warm' ? 'bg-yellow-400/80 text-yellow-900' :
+                                           'bg-blue-400/80 text-white'
+                  }`}>
+                    {scoreLabel === 'hot'  ? <Flame className="w-2.5 h-2.5" /> :
+                     scoreLabel === 'warm' ? <Thermometer className="w-2.5 h-2.5" /> :
+                                             <Snowflake className="w-2.5 h-2.5" />}
+                    {scoreLabel.toUpperCase()} {scoreValue != null ? `·${scoreValue}` : ''}
+                  </span>
+                )}
               </div>
             )}
             <p className="text-[11px] text-white/70">End-to-End Synced</p>
@@ -233,6 +253,26 @@ export function WhatsappChat({ leadId, leadName: initialLeadName }: { leadId: st
 
         {/* Right: action buttons */}
         <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
+
+          {/* ── Re-score ── */}
+          <button
+            onClick={async () => {
+              setRescoring(true)
+              try {
+                const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
+                const res = await fetch(`${BACKEND_URL}/api/admin/lead-scoring/${leadId}/score`, { method: 'POST', credentials: 'include' })
+                const data = await res.json()
+                if (data.label) { setScoreLabel(data.label) }
+              } catch { /* silent */ }
+              finally { setRescoring(false) }
+            }}
+            disabled={rescoring}
+            className="flex items-center gap-1 text-[10px] bg-white/10 hover:bg-white/20 px-2 py-1 rounded-lg transition"
+            title="Re-analyse chat and update hot/cold score"
+          >
+            {rescoring ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+            <span>Score</span>
+          </button>
 
           {/* ── Unblock (only shown when blocked) ── */}
           {isBlocked && (

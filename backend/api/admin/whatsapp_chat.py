@@ -115,6 +115,8 @@ async def get_whatsapp_chat(
             "data": chat_res.data,
             "is_blocked": bool(metadata.get("abuse_blocked")),
             "abuse_strikes": int(metadata.get("abuse_strikes", 0)),
+            "score_label": metadata.get("lead_score_label"),
+            "score": metadata.get("lead_score"),
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

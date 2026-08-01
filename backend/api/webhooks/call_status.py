@@ -83,6 +83,18 @@ async def exotel_call_status(
                             if update_data:
                                 supabase.table("ai_call_logs").update(update_data).eq("id", log_res.data[0]["id"]).execute()
 
+                            # ── Fire call notification ───────────────────────
+                            try:
+                                from services.notification_service import notify_call_completed
+                                lead_name_res = supabase.table("leads").select("name").eq("id", target_id).execute()
+                                if not lead_name_res.data:
+                                    lead_name_res = supabase.table("users").select("name").eq("id", target_id).execute()
+                                _lname = (lead_name_res.data[0].get("name") or "Lead") if lead_name_res.data else "Lead"
+                                final_status = update_data.get("status", Status or "completed")
+                                background_tasks.add_task(notify_call_completed, supabase, _lname, target_id, final_status)
+                            except Exception as ne:
+                                logger.error(f"[Exotel Webhook] Notification error: {ne}")
+
                             # --- Update queue item status ---
                             try:
                                 q_res = supabase.table("global_settings").select("*").eq("settings_key", "ai_call_queue").execute()
