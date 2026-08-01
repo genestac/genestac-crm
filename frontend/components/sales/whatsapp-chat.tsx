@@ -79,6 +79,11 @@ export function WhatsappChat({ leadId, leadName: initialLeadName }: { leadId: st
   }, [messages])
 
   useEffect(() => {
+    setLeadName(initialLeadName || 'Lead')
+    setNameInput(initialLeadName || 'Lead')
+  }, [initialLeadName, leadId])
+
+  useEffect(() => {
     if (editingName) {
       setNameInput(leadName)
       setTimeout(() => nameInputRef.current?.focus(), 50)
