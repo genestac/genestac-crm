@@ -36,10 +36,11 @@ async def login_for_access_token(
             key="access_token",
             value=access_token,
             httponly=True,
-            secure=is_prod, # Enforce HTTPS only in prod
+            secure=is_prod,       # HTTPS-only in production
             samesite="lax",
-            domain=".genestac.com" if is_prod else None, # Omit domain locally
+            domain=".genestac.com" if is_prod else None,
             max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+            path="/",
         )
         
         return {"success": True, "access_token": access_token}
@@ -51,7 +52,12 @@ async def login_for_access_token(
 
 @router.post("/logout")
 async def logout(response: Response):
-    response.delete_cookie(key="access_token")
+    is_prod = settings.ENVIRONMENT == "production"
+    response.delete_cookie(
+        key="access_token",
+        path="/",
+        domain=".genestac.com" if is_prod else None,
+    )
     return {"success": True}
 
 @router.get("/me")
