@@ -36,12 +36,76 @@ async def get_rag_context(query: str, supabase: Client) -> str:
         print(f"[OpenAI Agent] Failed to fetch RAG context: {e}")
         return ""
 
+ABUSE_WARNING_MSG = (
+    "⚠️ We noticed your message was inappropriate. Please keep the conversation respectful. "
+    "One more such message and our support team will take over."
+)
+
+ABUSE_FINAL_MSG = (
+    "Our team will contact you shortly. This automated assistant has stopped responding to this conversation. 🙏"
+)
+
+async def is_abusive(text: str) -> bool:
+    """
+    Uses OpenAI's free Moderation API to detect harassment, hate, sexual content,
+    violence, or self-harm. Returns True if the message is flagged.
+    """
+    try:
+        mod_res = oai_client.moderations.create(input=text)
+        result = mod_res.results[0]
+        cats = result.categories
+        return any([
+            cats.harassment,
+            cats.harassment_threatening,
+            cats.hate,
+            cats.hate_threatening,
+            cats.sexual,
+            cats.sexual_minors,
+            cats.violence,
+            cats.violence_graphic,
+            cats.self_harm,
+            cats.self_harm_intent,
+            cats.self_harm_instructions,
+        ])
+    except Exception as e:
+        print(f"[Moderation] API error: {e}")
+        return False
+
+
 async def process_whatsapp_message(lead: dict, message: str, supabase: Client) -> Tuple[str, bool]:
     """
     Processes the incoming WhatsApp message using GPT-4o-mini and RAG context.
     Returns a tuple of (AI_Response_Text, Should_Trigger_Call).
     """
-    metadata = lead.get("metadata", {})
+    metadata = lead.get("metadata", {}) or {}
+    table = "users" if "phone" in lead else "leads"
+
+    # ── Two-Strike Abuse Guard ───────────────────────────────────────────────
+    # If already hard-blocked from a previous session, stay silent
+    if metadata.get("abuse_blocked"):
+        print(f"[Abuse Guard] Lead {lead['id']} is hard-blocked. Ignoring message.")
+        return "", False
+
+    flagged = await is_abusive(message)
+    if flagged:
+        strikes = int(metadata.get("abuse_strikes", 0)) + 1
+        metadata["abuse_strikes"] = strikes
+        print(f"[Abuse Guard] Lead {lead['id']} — strike {strikes}")
+
+        if strikes >= 2:
+            # Hard limit: pause bot permanently
+            metadata["bot_paused"] = True
+            metadata["abuse_blocked"] = True
+            supabase.table(table).update({"metadata": metadata}).eq("id", lead["id"]).execute()
+            print(f"[Abuse Guard] Lead {lead['id']} — HARD BLOCKED after {strikes} strikes.")
+            return ABUSE_FINAL_MSG, False
+        else:
+            # First strike: warn and save count, do not pass to GPT
+            supabase.table(table).update({"metadata": metadata}).eq("id", lead["id"]).execute()
+            return ABUSE_WARNING_MSG, False
+    # ─────────────────────────────────────────────────────────────────────────
+
+
     
     # 1. Fetch Chat History from Database
     lead_col = "user_id" if "phone" in lead else "lead_id"

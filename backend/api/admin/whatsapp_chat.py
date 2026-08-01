@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Body
+from pydantic import BaseModel
 from supabase import Client
 from db.supabase import get_supabase_client
 from api.deps import get_current_user
@@ -87,26 +88,58 @@ async def get_whatsapp_chat(
     current_user: dict = Depends(get_current_user),
     supabase: Client = Depends(get_supabase_client)
 ):
-    """Get the full chat history for a lead/user."""
+    """Get the full chat history for a lead/user, plus abuse-block status."""
     try:
-        # Check if it's a lead or user
-        lead_res = supabase.table("leads").select("id").eq("id", lead_id).execute()
+        # Check if it's a lead or user and fetch metadata
         is_user = False
+        metadata = {}
+        lead_res = supabase.table("leads").select("id, metadata").eq("id", lead_id).execute()
         if not lead_res.data:
-            user_res = supabase.table("users").select("id").eq("id", lead_id).execute()
+            user_res = supabase.table("users").select("id, metadata").eq("id", lead_id).execute()
             if not user_res.data:
                 raise HTTPException(status_code=404, detail="Lead/User not found")
             is_user = True
-            
+            metadata = user_res.data[0].get("metadata") or {}
+        else:
+            metadata = lead_res.data[0].get("metadata") or {}
+
         lead_col = "user_id" if is_user else "lead_id"
-        
+
         chat_res = supabase.table("whatsapp_messages") \
             .select("*") \
             .eq(lead_col, lead_id) \
             .order("created_at", desc=False) \
             .execute()
-            
-        return {"data": chat_res.data}
+
+        return {
+            "data": chat_res.data,
+            "is_blocked": bool(metadata.get("abuse_blocked")),
+            "abuse_strikes": int(metadata.get("abuse_strikes", 0)),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/{lead_id}/unblock")
+async def unblock_lead(
+    lead_id: str,
+    current_user: dict = Depends(get_current_user),
+    supabase: Client = Depends(get_supabase_client)
+):
+    """Remove the abuse block from a lead/user so the AI bot can respond again."""
+    try:
+        # Try users table first, then leads
+        for tbl in ("users", "leads"):
+            res = supabase.table(tbl).select("id, metadata").eq("id", lead_id).execute()
+            if res.data:
+                metadata = res.data[0].get("metadata") or {}
+                metadata.pop("abuse_blocked", None)
+                metadata.pop("abuse_strikes", None)
+                metadata["bot_paused"] = False
+                supabase.table(tbl).update({"metadata": metadata}).eq("id", lead_id).execute()
+                return {"success": True}
+        raise HTTPException(status_code=404, detail="Lead/User not found")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -193,5 +226,64 @@ async def resume_bot(
         supabase.table(table).update({"metadata": metadata}).eq("id", lead_id).execute()
         
         return {"success": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/{lead_id}/message/{message_id}")
+async def delete_whatsapp_message(
+    lead_id: str,
+    message_id: str,
+    current_user: dict = Depends(get_current_user),
+    supabase: Client = Depends(get_supabase_client)
+):
+    """Delete a specific WhatsApp message by its ID."""
+    try:
+        # Note: Supabase delete does NOT reliably return rows when RLS policies are active,
+        # so we don't check res.data for existence — we just fire the delete and trust it.
+        supabase.table("whatsapp_messages").delete().eq("id", message_id).execute()
+        return {"success": True, "deleted_id": message_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/{lead_id}/all")
+async def delete_all_whatsapp_messages(
+    lead_id: str,
+    current_user: dict = Depends(get_current_user),
+    supabase: Client = Depends(get_supabase_client)
+):
+    """Delete the entire chat history for a lead/user."""
+    try:
+        # Try deleting by lead_id first, then user_id
+        res_lead = supabase.table("whatsapp_messages").delete().eq("lead_id", lead_id).execute()
+        res_user = supabase.table("whatsapp_messages").delete().eq("user_id", lead_id).execute()
+        return {"success": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+class RenamePayload(BaseModel):
+    name: str
+
+
+@router.patch("/{lead_id}/rename")
+async def rename_lead(
+    lead_id: str,
+    payload: RenamePayload,
+    current_user: dict = Depends(get_current_user),
+    supabase: Client = Depends(get_supabase_client)
+):
+    """Rename a lead or user directly from the chat UI."""
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Name cannot be empty")
+    try:
+        # Try users table first, then leads
+        res = supabase.table("users").update({"name": name}).eq("id", lead_id).execute()
+        if not res.data:
+            res = supabase.table("leads").update({"name": name}).eq("id", lead_id).execute()
+        if not res.data:
+            raise HTTPException(status_code=404, detail="Lead/User not found")
+        return {"success": True, "name": name}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

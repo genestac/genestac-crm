@@ -1275,7 +1275,7 @@ export function UserManagementSheet({
             {/* WHATSAPP TAB */}
             {activeTab === "whatsapp" && (
               <div className="p-0">
-                <WhatsappChat leadId={lead.id} />
+                <WhatsappChat leadId={lead.id} leadName={lead.name || 'Lead'} />
               </div>
             )}
           </div>

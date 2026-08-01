@@ -72,6 +72,12 @@ def sweep_leads_for_auto_call():
             return
 
         settings = res.data[0]["settings_value"]
+
+        # Hard-stop: both providers exhausted — don't attempt any calls until re-enabled
+        if settings.get("ai_calling_disabled"):
+            print("[AI Voice Scheduler] AI calling is DISABLED (both providers failed). Skipping sweep.")
+            return
+
         enabled_statuses = settings.get("enabled_statuses", [])
         windows = settings.get("allowed_time_windows", [])
         exotel_number = settings.get("exotel_number")

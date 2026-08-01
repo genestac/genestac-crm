@@ -19,7 +19,8 @@ import {
   ShoppingCart,
   FileText,
   Pin,
-  MessageCircle
+  MessageCircle,
+  Terminal
 } from 'lucide-react'
 import { logout } from '@/app/auth/actions'
 
@@ -63,6 +64,7 @@ const modules = [
       { name: 'Staff Management', path: '/admin/staffs', icon: Users },
       { name: 'Roles & Permissions', path: '/admin/roles', icon: ShieldCheck },
       { name: 'Audit Logs', path: '/admin/logs', icon: Activity },
+      { name: 'System Logs', path: '/admin/system-logs', icon: Terminal },
     ]
   },
   {

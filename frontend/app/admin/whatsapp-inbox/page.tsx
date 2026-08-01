@@ -9,6 +9,7 @@ export default function WhatsappInboxPage() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [activeLeadId, setActiveLeadId] = useState<string | null>(null)
+  const [activeLeadName, setActiveLeadName] = useState<string>('Lead')
 
   useEffect(() => {
     const fetchConvos = async () => {
@@ -69,7 +70,7 @@ export default function WhatsappInboxPage() {
             filteredConversations.map(conv => (
               <div 
                 key={conv.id}
-                onClick={() => setActiveLeadId(conv.id)}
+                onClick={() => { setActiveLeadId(conv.id); setActiveLeadName(conv.name || 'Lead') }}
                 className={`flex items-center px-4 py-3 cursor-pointer hover:bg-[#f5f6f6] transition group border-b border-gray-100 ${activeLeadId === conv.id ? 'bg-[#f0f2f5]' : ''}`}
               >
                 <div className="w-12 h-12 bg-gray-200 rounded-full flex items-center justify-center flex-shrink-0 mr-3">
@@ -95,7 +96,7 @@ export default function WhatsappInboxPage() {
         {activeLeadId ? (
           // Re-use the existing component, but stretch it to full height
           <div className="absolute inset-0 [&>div]:h-full [&>div]:border-0 [&>div]:rounded-none">
-            <WhatsappChat leadId={activeLeadId} />
+            <WhatsappChat leadId={activeLeadId} leadName={activeLeadName} />
           </div>
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center text-gray-500 bg-[#f0f2f5] border-b-8 border-[#00a884]">

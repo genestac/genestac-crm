@@ -445,6 +445,47 @@ export function AdminAICallingClient({ initialSettings, initialKnowledgeBase, in
       {/* ── Settings Tab ── */}
       {activeTab === 'settings' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+
+          {/* ── Disabled Alert Banner ── */}
+          {settings.ai_calling_disabled && (
+            <div className="lg:col-span-2 flex items-start gap-4 bg-red-50 border border-red-200 rounded-2xl p-5 shadow-sm">
+              <div className="p-2 bg-red-100 rounded-xl shrink-0">
+                <PhoneOff className="w-5 h-5 text-red-600" />
+              </div>
+              <div className="flex-1">
+                <p className="font-bold text-red-800 text-base">⚠️ AI Calling is Disabled</p>
+                <p className="text-sm text-red-600 mt-1">
+                  Both <strong>Sarvam</strong> and <strong>OpenAI/Pipecat</strong> providers failed consecutively.
+                  The calling service has been automatically suspended to prevent further failures.
+                  Current provider: <code className="bg-red-100 px-1 rounded">{settings.ai_provider || 'sarvam'}</code>
+                </p>
+                <p className="text-xs text-red-500 mt-1">
+                  Check your API credits / credentials, then click Re-enable to resume calling.
+                </p>
+              </div>
+              <Button
+                onClick={async () => {
+                  setSaving(true)
+                  try {
+                    const updated = { ...settings, ai_calling_disabled: false }
+                    await updateAISettings(updated)
+                    setSettings(updated)
+                    toast.success('AI Calling re-enabled!')
+                  } catch {
+                    toast.error('Failed to re-enable. Check credentials.')
+                  } finally {
+                    setSaving(false)
+                  }
+                }}
+                disabled={saving}
+                className="shrink-0 bg-orange-500 hover:bg-orange-600 text-white font-semibold px-5 py-2 rounded-xl shadow"
+              >
+                {saving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <PhoneCall className="w-4 h-4 mr-2" />}
+                Re-enable AI Calling
+              </Button>
+            </div>
+          )}
+
           {/* Left Column: Settings & Prompt */}
           <div className="space-y-6">
             <div className="bg-white/80 backdrop-blur-xl p-8 rounded-3xl border border-gray-100 shadow-lg hover:shadow-xl transition-shadow duration-300 space-y-8">

@@ -56,6 +56,8 @@ app.include_router(ai_settings.router, prefix="/api/admin/ai-settings", tags=["a
 app.include_router(blogs.router, prefix="/api/admin/blogs", tags=["admin-blogs"])
 app.include_router(doctors.router, prefix="/api/admin/doctors", tags=["admin-doctors"])
 from api.admin import consultations
+from api.admin import system_logs
+app.include_router(system_logs.router, prefix="/api/admin/system-logs", tags=["admin-system-logs"])
 app.include_router(consultations.router, prefix="/api/admin/consultations", tags=["admin-consultations"])
 from api.webhooks import voice_stream, conference, call_status
 app.include_router(voice_stream.router, prefix="/api/webhooks/exotel", tags=["webhooks-exotel"])

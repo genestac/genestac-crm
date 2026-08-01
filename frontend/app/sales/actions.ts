@@ -170,10 +170,11 @@ export async function triggerAICall(leadId: string) {
 export async function getWhatsappChats(leadId: string) {
   try {
     const res = await fetchAPI(`/api/admin/whatsapp/chat/${leadId}`)
-    return res.data || []
+    // Returns { data: messages[], is_blocked: bool, abuse_strikes: number }
+    return res
   } catch (error) {
     console.error("Failed to get WA chats:", error)
-    return []
+    return { data: [], is_blocked: false, abuse_strikes: 0 }
   }
 }
 
@@ -212,5 +213,55 @@ export async function getWhatsappConversations() {
   } catch (error) {
     console.error("Failed to get WA conversations:", error)
     return []
+  }
+}
+
+export async function deleteWhatsappMessage(leadId: string, messageId: string) {
+  try {
+    const res = await fetchAPI(`/api/admin/whatsapp/chat/${leadId}/message/${messageId}`, {
+      method: 'DELETE'
+    })
+    return res
+  } catch (error: any) {
+    console.error("Failed to delete WA message:", error)
+    throw new Error(error.message || "Failed to delete message")
+  }
+}
+
+export async function renameWhatsappLead(leadId: string, name: string) {
+  try {
+    const res = await fetchAPI(`/api/admin/whatsapp/chat/${leadId}/rename`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name })
+    })
+    return res
+  } catch (error: any) {
+    console.error("Failed to rename lead:", error)
+    throw new Error(error.message || "Failed to rename lead")
+  }
+}
+
+export async function deleteAllWhatsappMessages(leadId: string) {
+  try {
+    const res = await fetchAPI(`/api/admin/whatsapp/chat/${leadId}/all`, {
+      method: 'DELETE'
+    })
+    return res
+  } catch (error: any) {
+    console.error("Failed to delete all WA messages:", error)
+    throw new Error(error.message || "Failed to clear chat")
+  }
+}
+
+export async function unblockWhatsappLead(leadId: string) {
+  try {
+    const res = await fetchAPI(`/api/admin/whatsapp/chat/${leadId}/unblock`, {
+      method: 'POST'
+    })
+    return res
+  } catch (error: any) {
+    console.error("Failed to unblock lead:", error)
+    throw new Error(error.message || "Failed to unblock")
   }
 }

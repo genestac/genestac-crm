@@ -30,19 +30,70 @@ def _get_exotel_creds() -> dict:
     }
 
 
+def _set_ai_provider(supabase, ai_settings: dict, new_provider: str):
+    """Persist a provider switch back to global_settings so all future calls use it."""
+    ai_settings["ai_provider"] = new_provider
+    existing = supabase.table("global_settings").select("id").eq("settings_key", "ai_call_settings").execute()
+    if existing.data:
+        supabase.table("global_settings").update({"settings_value": ai_settings}).eq("settings_key", "ai_call_settings").execute()
+    logger.warning(f"[AI Call] Provider switched → {new_provider} and saved to DB.")
+
+
+def _set_calling_disabled(supabase, ai_settings: dict, disabled: bool):
+    """Set ai_calling_disabled flag in global_settings to stop all auto-calling."""
+    ai_settings["ai_calling_disabled"] = disabled
+    existing = supabase.table("global_settings").select("id").eq("settings_key", "ai_call_settings").execute()
+    if existing.data:
+        supabase.table("global_settings").update({"settings_value": ai_settings}).eq("settings_key", "ai_call_settings").execute()
+    state = "DISABLED" if disabled else "ENABLED"
+    logger.warning(f"[AI Call] Calling service {state} and saved to DB.")
+
+
 def initiate_ai_call(from_number: str, to_number: str, lead_id: str):
     """
-    Routes the outbound call to either Sarvam AI or Pipecat based on the global settings toggle.
+    Routes the outbound call with automatic provider fallback:
+      1. Try the configured provider (sarvam or pipecat/OpenAI).
+      2. On failure → switch to the other provider, save to DB, retry once.
+      3. Both fail → set ai_calling_disabled=True in DB and return None.
+         The scheduler and all callers should check this flag before calling.
     """
     supabase = get_supabase_client()
     settings_res = supabase.table("global_settings").select("settings_value").eq("settings_key", "ai_call_settings").execute()
     ai_settings = settings_res.data[0]["settings_value"] if settings_res.data else {}
-    ai_provider = ai_settings.get("ai_provider", "sarvam")  # Default to sarvam if not set
-    
-    if ai_provider == "pipecat":
-        return _initiate_pipecat_call(from_number, to_number, lead_id)
-    else:
-        return _initiate_sarvam_call(to_number, lead_id, supabase)
+
+    # Hard-stop if service was disabled after both providers failed
+    if ai_settings.get("ai_calling_disabled"):
+        logger.warning("[AI Call] Service is disabled (both providers exhausted). Skipping call.")
+        return None
+
+    primary = ai_settings.get("ai_provider", "sarvam")
+    fallback = "pipecat" if primary == "sarvam" else "sarvam"
+
+    def _call(provider: str):
+        logger.warning(f"[AI Call] Attempting with provider: {provider}")
+        if provider == "pipecat":
+            return _initiate_pipecat_call(from_number, to_number, lead_id)
+        else:
+            return _initiate_sarvam_call(to_number, lead_id, supabase)
+
+    # ── Try primary provider ──────────────────────────────────────────────────
+    result = _call(primary)
+    if result is not None:
+        return result
+
+    # ── Primary failed → switch to fallback ──────────────────────────────────
+    logger.warning(f"[AI Call] {primary} failed. Switching to fallback: {fallback}")
+    _set_ai_provider(supabase, ai_settings, fallback)
+
+    result = _call(fallback)
+    if result is not None:
+        return result
+
+    # ── Both failed → disable the service ────────────────────────────────────
+    logger.error("[AI Call] Both providers failed. Disabling AI calling service.")
+    _set_calling_disabled(supabase, ai_settings, True)
+    return None
+
 
 
 def _initiate_pipecat_call(from_number: str, to_number: str, lead_id: str):
