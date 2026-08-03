@@ -1,9 +1,12 @@
 'use client'
 
+import { useEffect, useState } from 'react'
+
 /**
  * LocalDate — renders a UTC ISO date string in the user's local browser timezone.
- * Use this instead of calling toLocaleString() in server components, which would
- * format the date in the server's timezone (UTC) rather than the user's timezone.
+ * Renders nothing on the server to avoid hydration mismatches where the server
+ * (running UTC) would show the wrong time vs. the user's local timezone (e.g. IST).
+ * After the component mounts in the browser, it formats using the user's local timezone.
  */
 export function LocalDate({
   iso,
@@ -19,9 +22,16 @@ export function LocalDate({
     minute: '2-digit',
   }
 
-  return (
-    <span suppressHydrationWarning>
-      {new Date(iso).toLocaleString([], options ?? defaultOptions)}
-    </span>
-  )
+  const [formatted, setFormatted] = useState<string | null>(null)
+
+  useEffect(() => {
+    setFormatted(new Date(iso).toLocaleString([], options ?? defaultOptions))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [iso])
+
+  // Render nothing until client-side hydration so the UTC server value
+  // never shows to the user.
+  if (formatted === null) return null
+
+  return <span>{formatted}</span>
 }
