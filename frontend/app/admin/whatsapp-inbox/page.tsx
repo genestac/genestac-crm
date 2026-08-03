@@ -96,7 +96,7 @@ export default function WhatsappInboxPage() {
         {activeLeadId ? (
           // Re-use the existing component, but stretch it to full height
           <div className="absolute inset-0 [&>div]:h-full [&>div]:border-0 [&>div]:rounded-none">
-            <WhatsappChat leadId={activeLeadId} leadName={activeLeadName} />
+            <WhatsappChat leadId={activeLeadId} leadName={activeLeadName} showManageButton={true} />
           </div>
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center text-gray-500 bg-[#f0f2f5] border-b-8 border-[#00a884]">

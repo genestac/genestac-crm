@@ -115,9 +115,12 @@ async def get_whatsapp_chat(
             "data": chat_res.data,
             "is_blocked": bool(metadata.get("abuse_blocked")),
             "abuse_strikes": int(metadata.get("abuse_strikes", 0)),
-            "score_label": metadata.get("lead_score_label"),
-            "score": metadata.get("lead_score"),
+            # Return chat-specific score so the WhatsApp window shows what the
+            # chatbot scored, independent of any call score.
+            "score_label": metadata.get("chat_score_label") or metadata.get("lead_score_label"),
+            "score": metadata.get("chat_score") if metadata.get("chat_score") is not None else metadata.get("lead_score"),
         }
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

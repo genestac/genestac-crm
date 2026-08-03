@@ -1128,7 +1128,7 @@ async def voice_stream(websocket: WebSocket):
                 try:
                     import openai as _openai
                     oai_client = _openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-                    summary_prompt = f"""You are a CRM analyst reviewing an AI sales call for a healthcare company (Genestac — weight loss programs).
+                    summary_prompt = f"""You are a strict CRM analyst reviewing an AI sales call for a healthcare company (Genestac — weight loss programs).
 
 Analyze the transcript and return a JSON object with ALL of the following fields.
 
@@ -1142,7 +1142,6 @@ Return ONLY a valid JSON object:
   "callback_requested": true or false,
   "appointment_booked": true or false,
   "lead_score": integer 0-100,
-  "score_label": "Cold" or "Warm" or "Hot",
   "score_reason": "1-2 sentence explanation",
   "wrong_person": true or false,
   "caller_name": "name of whoever actually spoke, if they introduced themselves, else null",
@@ -1159,7 +1158,18 @@ Rules:
 - `appointment_booked`: true if a doctor consultation was explicitly scheduled.
 - `wrong_person`: true if the person who answered was NOT the original lead.
 - `lead_score`: must be an integer 0-100, never null.
-- `score_label`: Cold (0-39), Warm (40-69), Hot (70-100).
+
+STRICT SCORING RULES for `lead_score` — read carefully:
+- Score 0–15: Call picked up but lead only said hello / gave their name / one-word reply. No interest shown.
+- Score 16–39: Minimal engagement. Polite but non-committal, short replies, no questions about the product.
+- Score 40–69: Lead asked questions about the program, price, process, or health. Shows genuine curiosity.
+- Score 70–100: Lead explicitly asked about enrollment, price, appointment with doctor, or said they want to join.
+
+IMPORTANT:
+- A greeting or name introduction ALONE must score 0–15. Never above 20 for only an intro.
+- Do NOT give high scores for polite small talk. Politeness ≠ intent.
+- Score based on EXPLICIT buying signals, not assumptions.
+- If the conversation is one-sided (lead barely replied), score ≤ 20.
 - All other fields: null if not mentioned in the transcript."""
 
                     resp = oai_client.chat.completions.create(
@@ -1177,10 +1187,50 @@ Rules:
                         callback_requested = parsed.get("callback_requested", False)
                         appointment_booked = parsed.get("appointment_booked", False)
                         lead_score = parsed.get("lead_score")
-                        score_label = parsed.get("score_label")
                         score_reason = parsed.get("score_reason")
 
-                        # --- Structured fields extracted from the call ---
+                        # Derive label from score in code — unified thresholds, lowercase for frontend
+                        if lead_score is not None:
+                            lead_score = max(0, min(100, int(lead_score)))
+                            if lead_score >= 70:
+                                score_label = "hot"
+                            elif lead_score >= 40:
+                                score_label = "warm"
+                            else:
+                                score_label = "cold"
+
+                        # --- Write channel-isolated call score to metadata ---
+                        # call_score_* keys are owned by the voicebot.
+                        # chat_score_* keys are owned by the chatbot (lead_scoring_service.py).
+                        # The shared display fields (lead_score / lead_score_label) always reflect
+                        # the most recently scored channel — call wins here since it just happened.
+                        if lead_id and lead_score is not None:
+                            try:
+                                from datetime import datetime as _dt_call, timezone as _tz_call
+                                call_now_iso = _dt_call.now(_tz_call.utc).isoformat()
+
+                                call_meta_res = supabase.table("leads").select("metadata").eq("id", lead_id).execute()
+                                if not call_meta_res.data:
+                                    call_meta_res = supabase.table("users").select("metadata").eq("id", lead_id).execute()
+                                call_meta = (call_meta_res.data[0].get("metadata") or {}) if call_meta_res.data else {}
+
+                                call_meta["call_score"] = lead_score
+                                call_meta["call_score_label"] = score_label
+                                call_meta["call_score_reason"] = score_reason
+                                call_meta["call_scored_at"] = call_now_iso
+                                # Call is always the most recent at this point — update display score
+                                call_meta["lead_score"] = lead_score
+                                call_meta["lead_score_label"] = score_label
+                                call_meta["lead_score_reason"] = score_reason
+
+                                supabase.table("leads").update({"metadata": call_meta}).eq("id", lead_id).execute()
+                                supabase.table("users").update({"metadata": call_meta}).eq("id", lead_id).execute()
+                                logger.warning(
+                                    f"[LeadScore] Call score saved to metadata: {score_label} ({lead_score}) for lead {lead_id}"
+                                )
+                            except Exception as meta_call_err:
+                                logger.error(f"[LeadScore] Failed to write call score to metadata: {meta_call_err}")
+
                         wrong_person = parsed.get("wrong_person", False)
                         caller_name = parsed.get("caller_name")
                         patient_name = parsed.get("patient_name")

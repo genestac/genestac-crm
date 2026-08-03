@@ -258,26 +258,25 @@ async def get_leads(statuses: Optional[str]=Query(None), exclude_statuses: Optio
             
         combined = deduped_combined
 
-        # --- Enrich leads with latest AI call score ---
-        try:
-            all_ids = [item['id'] for item in combined]
-            if all_ids:
-                logs_res = supabase.table('ai_call_logs').select('lead_id, lead_score, score_label').in_('lead_id', all_ids).order('created_at', desc=True).execute()
-                # Keep only the most recent log per lead
-                score_map = {}
-                for log in (logs_res.data or []):
-                    lid = log['lead_id']
-                    if lid not in score_map and log.get('score_label'):
-                        score_map[lid] = {'lead_score': log.get('lead_score'), 'score_label': log.get('score_label')}
-                for item in combined:
-                    if item['id'] in score_map:
-                        item.update(score_map[item['id']])
-        except Exception as score_err:
-            print(f'[get_leads] Score enrichment failed: {score_err}')
+        # --- Enrich leads with score from metadata (most-recent-channel winner) ---
+        # metadata.lead_score / lead_score_label is always set to whichever channel
+        # (chat or call) scored most recently. No need to query ai_call_logs separately.
+        for item in combined:
+            meta = item.get('metadata') or {}
+            if meta.get('lead_score') is not None:
+                item['lead_score'] = meta['lead_score']
+                item['score_label'] = meta.get('lead_score_label')
+            # Also expose per-channel scores for the detail sheet
+            if meta.get('chat_score') is not None:
+                item['chat_score'] = meta['chat_score']
+                item['chat_score_label'] = meta.get('chat_score_label')
+            if meta.get('call_score') is not None:
+                item['call_score'] = meta['call_score']
+                item['call_score_label'] = meta.get('call_score_label')
 
-        # Filter to hot only if requested
+        # Filter to hot only if requested (case-insensitive since labels are lowercase)
         if hot_only:
-            combined = [item for item in combined if item.get('score_label') == 'Hot']
+            combined = [item for item in combined if str(item.get('score_label') or '').lower() == 'hot']
 
         total_count = len(combined)
         start_idx = (page - 1) * limit
@@ -297,6 +296,36 @@ async def get_leads(statuses: Optional[str]=Query(None), exclude_statuses: Optio
         sys.stdout.flush()
         raise HTTPException(status_code=500, detail=f'get_leads error: {str(e)}')
 
+@router.get('/leads/{lead_id}')
+async def get_single_lead(lead_id: str, current_user: dict=Depends(get_current_user), supabase: Client=Depends(get_supabase_client)):
+    """Fetch a single lead by ID from users or leads table. Used by the WhatsApp inbox Manage button."""
+    try:
+        # Try users table first
+        res = supabase.table('users').select('*, user_sources(name), plans(name, price)').eq('id', lead_id).limit(1).execute()
+        if res.data:
+            item = res.data[0]
+            item['record_type'] = 'USER'
+            meta = item.get('metadata') or {}
+            if meta.get('lead_score') is not None:
+                item['lead_score'] = meta['lead_score']
+                item['score_label'] = meta.get('lead_score_label')
+            return {'data': item}
+        # Fallback to leads table
+        res2 = supabase.table('leads').select('*, user_sources(name), plans(name, price)').eq('id', lead_id).limit(1).execute()
+        if res2.data:
+            item = res2.data[0]
+            item['record_type'] = 'LEAD'
+            meta = item.get('metadata') or {}
+            if meta.get('lead_score') is not None:
+                item['lead_score'] = meta['lead_score']
+                item['score_label'] = meta.get('lead_score_label')
+            return {'data': item}
+        raise HTTPException(status_code=404, detail='Lead not found')
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.get('/leads/{lead_id}/ai-calls')
 async def get_lead_ai_calls(lead_id: str, current_user: dict=Depends(get_current_user), supabase: Client=Depends(get_supabase_client)):
     try:
@@ -304,6 +333,7 @@ async def get_lead_ai_calls(lead_id: str, current_user: dict=Depends(get_current
         return {'data': res.data}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.post('/leads/{lead_id}/trigger-ai-call')
 async def trigger_ai_call(lead_id: str, current_user: dict=Depends(get_current_user), supabase: Client=Depends(get_supabase_client)):

@@ -1170,7 +1170,7 @@ export function UserManagementSheet({
                   const latest = pts[pts.length - 1]
                   const prev = pts.length > 1 ? pts[pts.length - 2] : null
                   const trend = prev ? latest.score - prev.score : 0
-                  const labelCls = (lbl: string) => lbl === 'Hot' ? 'text-emerald-600 bg-emerald-50' : lbl === 'Warm' ? 'text-amber-600 bg-amber-50' : 'text-red-600 bg-red-50'
+                  const labelCls = (lbl: string) => { const l = lbl?.toLowerCase(); return l === 'hot' ? 'text-emerald-600 bg-emerald-50' : l === 'warm' ? 'text-amber-600 bg-amber-50' : 'text-red-600 bg-red-50' }
                   return (
                     <div className="bg-white border rounded-xl p-5 shadow-sm space-y-3">
                       <div className="flex items-center justify-between">

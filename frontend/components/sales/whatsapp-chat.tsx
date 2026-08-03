@@ -1,6 +1,6 @@
 'use client'
 import { useState, useEffect, useRef } from 'react'
-import { Loader2, Send, Bot, User, CheckCheck, Trash2, Pencil, Check, X, Phone, ShieldOff, ShieldAlert, Flame, Thermometer, Snowflake, RefreshCw } from 'lucide-react'
+import { Loader2, Send, Bot, User, CheckCheck, Trash2, Pencil, Check, X, Phone, ShieldOff, ShieldAlert, Flame, Thermometer, Snowflake, RefreshCw, ExternalLink } from 'lucide-react'
 import {
   getWhatsappChats,
   sendWhatsappChat,
@@ -11,8 +11,9 @@ import {
   triggerAICall,
   unblockWhatsappLead,
 } from '@/app/sales/actions'
+import { UserManagementSheet } from '@/components/sales/user-management-sheet'
 
-export function WhatsappChat({ leadId, leadName: initialLeadName }: { leadId: string; leadName?: string }) {
+export function WhatsappChat({ leadId, leadName: initialLeadName, showManageButton = false }: { leadId: string; leadName?: string; showManageButton?: boolean }) {
   const [messages, setMessages] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [inputText, setInputText] = useState('')
@@ -22,6 +23,28 @@ export function WhatsappChat({ leadId, leadName: initialLeadName }: { leadId: st
   const [scoreLabel, setScoreLabel] = useState<string | null>(null)
   const [scoreValue, setScoreValue] = useState<number | null>(null)
   const [rescoring, setRescoring] = useState(false)
+
+  // Manage sheet
+  const [manageLead, setManageLead] = useState<any | null>(null)
+  const [manageLoading, setManageLoading] = useState(false)
+  const [manageOpen, setManageOpen] = useState(false)
+
+  const fetchAndOpenManage = async () => {
+    if (manageLead) { setManageOpen(true); return }
+    setManageLoading(true)
+    try {
+      const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
+      // Try users table first, then leads
+      let res = await fetch(`${BACKEND_URL}/api/sales/leads/${leadId}`, { credentials: 'include' })
+      if (!res.ok) res = await fetch(`${BACKEND_URL}/api/admin/leads/${leadId}`, { credentials: 'include' })
+      if (res.ok) {
+        const data = await res.json()
+        setManageLead(data.data || data)
+        setManageOpen(true)
+      }
+    } catch { /* silent */ }
+    finally { setManageLoading(false) }
+  }
 
   // Per-message delete
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
@@ -278,6 +301,35 @@ export function WhatsappChat({ leadId, leadName: initialLeadName }: { leadId: st
             {rescoring ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
             <span>Score</span>
           </button>
+
+          {/* ── Manage Lead ── */}
+          {showManageButton && (
+            manageLead ? (
+              <UserManagementSheet
+                lead={manageLead}
+                defaultTab="overview"
+                onLeadUpdate={(updated) => setManageLead(updated)}
+              >
+                <button
+                  className="flex items-center gap-1.5 text-[10px] bg-indigo-500 hover:bg-indigo-400 px-2 py-1 rounded-lg transition font-semibold"
+                  title="Open lead management panel"
+                >
+                  <ExternalLink className="w-3 h-3" />
+                  <span>Manage</span>
+                </button>
+              </UserManagementSheet>
+            ) : (
+              <button
+                onClick={fetchAndOpenManage}
+                disabled={manageLoading}
+                className="flex items-center gap-1.5 text-[10px] bg-indigo-500 hover:bg-indigo-400 px-2 py-1 rounded-lg transition font-semibold disabled:opacity-60"
+                title="Open lead management panel"
+              >
+                {manageLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <ExternalLink className="w-3 h-3" />}
+                <span>Manage</span>
+              </button>
+            )
+          )}
 
           {/* ── Unblock (only shown when blocked) ── */}
           {isBlocked && (
