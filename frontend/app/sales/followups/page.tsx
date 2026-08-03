@@ -1,6 +1,7 @@
 import { fetchAPI } from '@/utils/api'
 import { UserManagementSheet } from '@/components/sales/user-management-sheet'
 import { MarkFollowupDoneButton } from '@/components/sales/mark-followup-done-button'
+import { LocalDate } from '@/components/sales/local-date'
 import { Button } from '@/components/ui/button'
 import { Calendar, Mail, Phone, Settings2 } from 'lucide-react'
 
@@ -64,9 +65,7 @@ export default async function FollowupsPage() {
                           : 'text-amber-700 bg-amber-50 border-amber-200'
                       }`}>
                         <Calendar className="w-3 h-3 mr-2" />
-                        {new Date(lead.next_followup_date).toLocaleString([], { 
-                          month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' 
-                        })}
+                        <LocalDate iso={lead.next_followup_date} />
                         {isPastDue && <span className="ml-2 text-[10px] uppercase font-bold text-red-600">Past Due</span>}
                       </div>
                     </td>
