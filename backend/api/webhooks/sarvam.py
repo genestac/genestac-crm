@@ -131,13 +131,22 @@ async def tool_fetch_lead(lead_id: str = ""):
     Step 3 response fields to send to agent:
       Lead name: @lead_name | Source: @source | Last call: @last_call_summary
     """
-    if not lead_id:
-        return {
-            "lead_name": "ji",
-            "source": "hamare website pe",
-            "status": "new",
-            "last_call_summary": "",
-        }
+    _DEFAULTS = {
+        "lead_name": "ji",
+        "source": "hamare website se",
+        "status": "new",
+        "last_call_summary": "",
+    }
+
+    # Guard: reject empty values, unresolved Sarvam template literals like {{lead_id}},
+    # or anything that obviously isn't a UUID (prevents Supabase type errors during testing).
+    import re
+    _uuid_re = re.compile(
+        r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE
+    )
+    if not lead_id or not _uuid_re.match(lead_id.strip()):
+        logger.warning(f"[Sarvam/fetch-lead] Skipping DB query — lead_id not a valid UUID: {lead_id!r}")
+        return _DEFAULTS
 
     supabase = get_supabase_client()
 
