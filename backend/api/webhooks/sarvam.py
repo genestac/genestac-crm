@@ -14,19 +14,21 @@ All the heavy CRM logic that previously lived inside the Pipecat pipeline
 here as simple REST endpoints.
 
 Endpoints registered under /api/webhooks/sarvam/:
-  POST /tool/connect-doctor       ← Sarvam calls this when user wants doctor
-  POST /tool/schedule-call        ← Sarvam calls this when user wants appointment
-  POST /tool/schedule-callback    ← Sarvam calls this when user wants callback later
-  POST /tool/search-kb            ← Sarvam calls this when user asks a question
-  POST /post-call                 ← Sarvam calls this when the call ends
-  POST /initiate-call             ← Our CRM calls this to start an outbound AI call
+  GET  /tool/fetch-lead        ← Sarvam calls this ON CALL START to get lead context
+  POST /tool/connect-doctor    ← Sarvam calls this when user wants doctor
+  POST /tool/schedule-call     ← Sarvam calls this when user wants appointment
+  POST /tool/schedule-callback ← Sarvam calls this when user wants callback later
+  POST /tool/search-kb         ← Sarvam calls this when user asks a question
+  POST /post-call              ← Sarvam calls this when the call ends
+  POST /initiate-call          ← Our CRM calls this to start an outbound AI call
 
 Dashboard configuration (Sarvam AI → Your Agent → Tools):
-  Tool "connect_to_doctor"   → URL: https://<your-backend>/api/webhooks/sarvam/tool/connect-doctor
-  Tool "schedule_call"       → URL: https://<your-backend>/api/webhooks/sarvam/tool/schedule-call
-  Tool "schedule_callback"   → URL: https://<your-backend>/api/webhooks/sarvam/tool/schedule-callback
-  Tool "search_knowledge_base" → URL: https://<your-backend>/api/webhooks/sarvam/tool/search-kb
-  Post-call webhook          → URL: https://<your-backend>/api/webhooks/sarvam/post-call
+  Tool "fetch_lead_details"    → GET  https://api.genestac.com/api/webhooks/sarvam/tool/fetch-lead?lead_id={{lead_id}}
+  Tool "connect_to_doctor"     → POST https://api.genestac.com/api/webhooks/sarvam/tool/connect-doctor
+  Tool "schedule_call"         → POST https://api.genestac.com/api/webhooks/sarvam/tool/schedule-call
+  Tool "schedule_callback"     → POST https://api.genestac.com/api/webhooks/sarvam/tool/schedule-callback
+  Tool "search_knowledge_base" → POST https://api.genestac.com/api/webhooks/sarvam/tool/search-kb
+  Post-call webhook            → POST https://api.genestac.com/api/webhooks/sarvam/post-call
 """
 
 import os
@@ -110,6 +112,81 @@ def _get_customer_phone_from_body(body: dict) -> str:
         or body.get("metadata", {}).get("customer_phone")
         or ""
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tool: fetch_lead_details  (on-call-start GET — personalise the greeting)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/tool/fetch-lead")
+async def tool_fetch_lead(lead_id: str = ""):
+    """
+    Sarvam calls this AT CALL START (on-start tool) to fetch lead context.
+
+    Dashboard config:
+      Method : GET
+      URL    : https://api.genestac.com/api/webhooks/sarvam/tool/fetch-lead
+      Param  : lead_id  (query param, value = {{lead_id}} agent variable)
+
+    Step 3 response fields to send to agent:
+      Lead name: @lead_name | Source: @source | Last call: @last_call_summary
+    """
+    if not lead_id:
+        return {
+            "lead_name": "ji",
+            "source": "hamare website pe",
+            "status": "new",
+            "last_call_summary": "",
+        }
+
+    supabase = get_supabase_client()
+
+    # Fetch from users (leads) table
+    lead_name = "ji"
+    source = "hamare website se"
+    lead_status = "new"
+
+    u = supabase.table("users").select("name, source, status").eq("id", lead_id).execute()
+    if u.data:
+        row = u.data[0]
+        lead_name = row.get("name") or "ji"
+        source = row.get("source") or "hamare website se"
+        lead_status = row.get("status") or "new"
+    else:
+        l = supabase.table("leads").select("name, source, status").eq("id", lead_id).execute()
+        if l.data:
+            row = l.data[0]
+            lead_name = row.get("name") or "ji"
+            source = row.get("source") or "hamare website se"
+            lead_status = row.get("status") or "new"
+
+    # Fetch last call memory for context
+    last_call_summary = ""
+    try:
+        mem = (
+            supabase.table("lead_context_memory")
+            .select("memory_text")
+            .eq("lead_id", lead_id)
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        if mem.data:
+            last_call_summary = mem.data[0].get("memory_text", "")[:400]
+    except Exception:
+        pass
+
+    logger.warning(
+        f"[Sarvam/fetch-lead] lead_id={lead_id!r} name={lead_name!r} "
+        f"status={lead_status!r} memory_len={len(last_call_summary)}"
+    )
+
+    return {
+        "lead_name": lead_name,
+        "source": source,
+        "status": lead_status,
+        "last_call_summary": last_call_summary,
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
