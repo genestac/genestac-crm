@@ -80,12 +80,24 @@ def _is_doctor_available(doc: dict, current_time: datetime) -> bool:
     return False
 
 
+import re as _re
+_UUID_RE = _re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    _re.IGNORECASE,
+)
+
+
+def _is_valid_uuid(val: str) -> bool:
+    """Return True only if val looks like a real UUID (not a template literal)."""
+    return bool(val and _UUID_RE.match(val.strip()))
+
+
 def _get_lead_id_from_body(body: dict) -> str:
     """
     Sarvam passes the lead_id through the tool call parameters or the
     call metadata. Try several known keys in order of preference.
+    Returns empty string for unresolved template literals like {{lead_id}}.
     """
-    # Sarvam passes params sent by the agent's tool definition
     params = body.get("parameters", body.get("params", body.get("arguments", {})))
     if isinstance(params, str):
         try:
@@ -100,7 +112,11 @@ def _get_lead_id_from_body(body: dict) -> str:
         or body.get("metadata", {}).get("lead_id")
         or ""
     )
-    return str(lead_id).strip()
+    lead_id = str(lead_id).strip()
+    # Discard unresolved Sarvam template literals (e.g. "{{lead_id}}")
+    if lead_id.startswith("{") or not _is_valid_uuid(lead_id):
+        return ""
+    return lead_id
 
 
 def _get_customer_phone_from_body(body: dict) -> str:
@@ -231,6 +247,9 @@ async def tool_connect_to_doctor(request: Request, background_tasks: BackgroundT
             params = {}
 
     lead_id = _get_lead_id_from_body(body)
+    # Dashboard test guard — {{lead_id}} is not a real UUID
+    if not lead_id:
+        return {"response": "[TEST] connect_to_doctor tool reached successfully. In a real call, this will bridge the user to an available doctor."}
     customer_phone = _get_customer_phone_from_body(body)
     user_confirmed = params.get("user_explicitly_confirmed", False)
     reason = params.get("reason", "doctor connect requested")
@@ -352,6 +371,9 @@ async def tool_schedule_call(request: Request):
             params = {}
 
     lead_id = _get_lead_id_from_body(body)
+    # Dashboard test guard — {{lead_id}} is not a real UUID
+    if not lead_id:
+        return {"response": "[TEST] schedule_call tool reached successfully. In a real call, this will book a doctor consultation appointment."}
     time_preference = params.get("time_preference", "")
     reason = params.get("reason", "Consultation")
 
@@ -514,6 +536,9 @@ async def tool_schedule_callback(request: Request):
             params = {}
 
     lead_id = _get_lead_id_from_body(body)
+    # Dashboard test guard — {{lead_id}} is not a real UUID
+    if not lead_id:
+        return {"response": "[TEST] schedule_callback tool reached successfully. In a real call, this will schedule a callback for the lead."}
     callback_time = params.get("callback_datetime", "")
 
     logger.warning(f"[Sarvam/schedule-callback] lead_id={lead_id!r}, time={callback_time!r}")
@@ -687,6 +712,7 @@ async def _process_post_call(body: dict):
     score_label: Optional[str] = None
     score_reason: Optional[str] = None
     is_not_interested = False
+    is_spam = False
     callback_requested = False
     appointment_booked = False
 
@@ -703,6 +729,7 @@ Return ONLY a valid JSON object:
 {{
   "summary": "3-4 bullet point summary using • character",
   "is_not_interested": true or false,
+  "is_spam": true or false,
   "callback_requested": true or false,
   "appointment_booked": true or false,
   "lead_score": integer 0-100,
@@ -719,10 +746,11 @@ Return ONLY a valid JSON object:
 }}
 Rules:
 - `is_not_interested`: true if lead said 'not interested', 'mujhe interest nahi', 'mat call karo', 'remove my number'.
-- `callback_requested`: true if lead asked to be called back.
+- `is_spam`: true if the caller used abusive language, threats, harassment, or clearly spam behaviour (gaaliyan, abuses, threats, sexual remarks). Set lead_score to 0 if spam.
+- `callback_requested`: true if lead asked to be called back later.
 - `appointment_booked`: true if a doctor consultation was explicitly scheduled.
 - `wrong_person`: true if the person who answered was NOT the original lead.
-- `lead_score`: must be an integer 0-100, never null.
+- `lead_score`: must be an integer 0-100, never null. Set to 0 if is_spam is true.
 - `score_label`: Cold (0-39), Warm (40-69), Hot (70-100).
 - All other fields: null if not mentioned in the transcript."""
 
@@ -738,6 +766,7 @@ Rules:
 
         summary = parsed.get("summary", summary)
         is_not_interested = parsed.get("is_not_interested", False)
+        is_spam = parsed.get("is_spam", False)
         callback_requested = parsed.get("callback_requested", False)
         appointment_booked = parsed.get("appointment_booked", False)
         lead_score = parsed.get("lead_score")
@@ -763,6 +792,7 @@ Rules:
         if wrong_person and caller_name: meta_update["caller_name"] = caller_name
         if wrong_person and relation: meta_update["relation_to_patient"] = relation
         if wrong_person and patient_name: meta_update["actual_patient_name"] = patient_name
+        if is_spam: meta_update["is_spam"] = True
 
         if meta_update:
             try:
@@ -777,12 +807,15 @@ Rules:
 
         # Timeline note
         note_parts = ["🤖 AI Call Summary (Sarvam)"]
+        if is_spam:
+            note_parts.append("🚫 SPAM / ABUSIVE CALLER — Do not call again.")
         if wrong_person:
             note_parts.append(f"⚠️ Wrong person answered. Caller: {caller_name or 'Unknown'} ({relation or 'relative'}). Actual patient: {patient_name or lead_name}.")
         if weight_goal: note_parts.append(f"🎯 Weight Goal: {weight_goal}")
         if current_weight: note_parts.append(f"⚖️ Current Weight: {current_weight}")
         if interested_plan: note_parts.append(f"💳 Interested Plan: {interested_plan}")
         if health_concerns: note_parts.append(f"🏥 Health Concerns: {health_concerns}")
+        if callback_requested: note_parts.append("📞 Callback Requested by lead.")
         note_parts.append(f"\n{summary}")
         if recording_url:
             note_parts.append(f"\n[▶️ Listen to Recording]({recording_url})")
@@ -808,15 +841,21 @@ Rules:
 
         logger.warning(
             f"[Sarvam/post-call] lead={lead_id} score={lead_score} ({score_label}) | "
-            f"not_interested={is_not_interested} callback={callback_requested} appt={appointment_booked}"
+            f"not_interested={is_not_interested} spam={is_spam} callback={callback_requested} appt={appointment_booked}"
         )
 
         # ── CRM status update ──────────────────────────────────────────────
+        # Priority: SPAM > CONSULTATION_SCHEDULED > NOT_INTERESTED >
+        #           CALLBACK_SCHEDULED > QUALIFIED > CONTACTED
         new_status = None
-        if appointment_booked:
+        if is_spam:
+            new_status = "SPAM"
+        elif appointment_booked:
             new_status = "CONSULTATION_SCHEDULED"
         elif is_not_interested:
             new_status = "NOT_INTERESTED"
+        elif callback_requested:
+            new_status = "CALLBACK_SCHEDULED"
         elif interested_plan:
             new_status = "QUALIFIED"
         else:
@@ -923,19 +962,23 @@ class InitiateCallRequest(BaseModel):
     lead_id: str
     to_number: str
     from_number: Optional[str] = None  # Defaults to Exotel virtual number from DB settings
+    initial_state_name: Optional[str] = None  # Override agent entry state if needed
 
 
 @router.post("/initiate-call")
 async def initiate_call(payload: InitiateCallRequest):
     """
-    Triggers an outbound AI call using Sarvam AI's Outbound Call API.
+    Triggers an outbound AI call using Sarvam AI's Outbound Call API (v3).
 
     Sarvam dials the lead via its configured Exotel connection and runs the
-    AI agent conversation entirely on their managed platform. No Exotel
-    connect.json is used here — Sarvam handles telephony routing.
+    AI agent conversation entirely on their managed platform.
 
-    lead_name and lead_source_phrase are fetched from the DB and passed as
-    agent_variables so the agent can personalise the opening greeting.
+    v3 agent_variables:
+      - lead_id, lead_name, lead_source_phrase  (existing)
+      - call_disposition    ← lead's current CRM status
+      - call_summary        ← last call memory / context
+      - company_name        ← "Genestac"
+      - gender              ← from lead profile if available
     """
     supabase = get_supabase_client()
 
@@ -944,7 +987,7 @@ async def initiate_call(payload: InitiateCallRequest):
     org_id        = os.getenv("SARVAM_ORG_ID", "")
     workspace_id  = os.getenv("SARVAM_WORKSPACE_ID", "")
     app_id        = os.getenv("SARVAM_APP_ID", "")
-    app_version   = int(os.getenv("SARVAM_APP_VERSION", "1"))
+    app_version   = int(os.getenv("SARVAM_APP_VERSION", "3"))
     connection_id = os.getenv("SARVAM_CONNECTION_ID", "")
     agent_phone   = os.getenv("SARVAM_AGENT_PHONE_NUMBER", "")
     backend_url   = os.getenv("BACKEND_PUBLIC_URL", "")
@@ -952,37 +995,76 @@ async def initiate_call(payload: InitiateCallRequest):
     if not all([api_key, org_id, workspace_id, app_id, connection_id, agent_phone]):
         return {"success": False, "error": "Sarvam config incomplete. Check .env SARVAM_* variables."}
 
-    # ── Lead details for personalised greeting ───────────────────────────────
-    lead_name = "ji"
+    # ── Lead details ─────────────────────────────────────────────────────────
+    lead_name          = "ji"
     lead_source_phrase = "humari website pe"
-    src = ""
+    call_disposition   = "NEW"
+    gender             = ""
+    src                = ""
 
-    u = supabase.table("users").select("name, source").eq("id", payload.lead_id).execute()
+    u = supabase.table("users").select("name, source, status, gender").eq("id", payload.lead_id).execute()
     if u.data:
-        lead_name = u.data[0].get("name") or "ji"
-        src = (u.data[0].get("source") or "").lower()
+        row = u.data[0]
+        lead_name        = row.get("name") or "ji"
+        src              = (row.get("source") or "").lower()
+        call_disposition = row.get("status") or "NEW"
+        gender           = row.get("gender") or ""
     else:
-        l = supabase.table("leads").select("name, source").eq("id", payload.lead_id).execute()
+        l = supabase.table("leads").select("name, source, status, gender").eq("id", payload.lead_id).execute()
         if l.data:
-            lead_name = l.data[0].get("name") or "ji"
-            src = (l.data[0].get("source") or "").lower()
+            row = l.data[0]
+            lead_name        = row.get("name") or "ji"
+            src              = (row.get("source") or "").lower()
+            call_disposition = row.get("status") or "NEW"
+            gender           = row.get("gender") or ""
 
     source_map = {
-        "facebook": "Facebook pe", "instagram": "Instagram pe",
-        "google": "Google pe", "website": "hamare website pe",
-        "whatsapp": "WhatsApp pe", "referral": "apne ek jaankaar se",
+        "facebook":  "Facebook pe", "instagram": "Instagram pe",
+        "google":    "Google pe",   "website":   "hamare website pe",
+        "whatsapp":  "WhatsApp pe", "referral":  "apne ek jaankaar se",
     }
     for key, phrase in source_map.items():
         if key in src:
             lead_source_phrase = phrase
             break
 
-    # Normalise to E.164
+    # ── Fetch last call summary for context ──────────────────────────────────
+    call_summary = ""
+    try:
+        mem = (
+            supabase.table("lead_context_memory")
+            .select("memory_text")
+            .eq("lead_id", payload.lead_id)
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        if mem.data:
+            call_summary = (mem.data[0].get("memory_text") or "")[:500]
+    except Exception:
+        pass
+
+    # ── Build personalised opening line ──────────────────────────────────────
+    first_name = lead_name.split()[0] if lead_name != "ji" else "ji"
+    if call_summary:
+        initial_bot_message = (
+            f"Namaste {first_name} ji! Main Genestac se bol rahi hu. "
+            f"Aapne pehle humse weight loss ke baare mein baat ki thi — "
+            f"kya aap abhi thoda time de sakte hain?"
+        )
+    else:
+        initial_bot_message = (
+            f"Namaste {first_name} ji! Main Genestac se bol rahi hu. "
+            f"Aapne {lead_source_phrase} hamara weight loss program dekha tha — "
+            f"kya aap abhi thoda time de sakte hain?"
+        )
+
+    # ── Normalise phone to E.164 ─────────────────────────────────────────────
     to_number = payload.to_number.strip()
     if not to_number.startswith("+"):
         to_number = "+91" + to_number.lstrip("0")
 
-    # ── Sarvam Outbound API payload ──────────────────────────────────────────
+    # ── Sarvam v3 Outbound API payload ───────────────────────────────────────
     sarvam_payload = {
         "app_config": {
             "app_id": app_id,
@@ -993,9 +1075,17 @@ async def initiate_call(payload: InitiateCallRequest):
                 "agent_phone_number": agent_phone,
             },
             "agent_variables": {
-                "lead_id": payload.lead_id,
-                "lead_name": lead_name,
-                "lead_source_phrase": lead_source_phrase
+                "lead_id":           payload.lead_id,
+                "lead_name":         lead_name,
+                "lead_source_phrase": lead_source_phrase,
+                "call_disposition":  call_disposition,
+                "call_summary":      call_summary,
+                "company_name":      "Genestac",
+                "gender":            gender,
+            },
+            "app_overrides": {
+                "initial_bot_message": initial_bot_message,
+                **({"initial_state_name": payload.initial_state_name} if payload.initial_state_name else {}),
             },
         },
         "user_config": {"user_phone_number": to_number},
@@ -1005,6 +1095,12 @@ async def initiate_call(payload: InitiateCallRequest):
             "url": f"{backend_url}/api/webhooks/sarvam/post-call",
             "metadata": {"lead_id": payload.lead_id},
         }
+
+    logger.warning(
+        f"[Sarvam/initiate-call] Firing v{app_version} call: "
+        f"lead={payload.lead_id} name={lead_name!r} disposition={call_disposition!r} "
+        f"has_summary={bool(call_summary)} to={to_number}"
+    )
 
     # ── POST to Sarvam ───────────────────────────────────────────────────────
     import urllib.request as _ur
@@ -1022,7 +1118,7 @@ async def initiate_call(payload: InitiateCallRequest):
     try:
         with _ur.urlopen(req, timeout=15) as resp:
             result = json.loads(resp.read().decode())
-            logger.info(f"[Sarvam/initiate-call] ✅ Call queued via Sarvam API: lead={payload.lead_id}, to={to_number}")
+            logger.info(f"[Sarvam/initiate-call] ✅ Call queued: lead={payload.lead_id}, to={to_number}")
             return {"success": True, "data": result}
     except _ue.HTTPError as e:
         err = e.read().decode()
