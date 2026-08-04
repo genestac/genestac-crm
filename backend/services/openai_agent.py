@@ -138,22 +138,26 @@ async def process_whatsapp_message(lead: dict, message: str, supabase: Client) -
     # 3. Build System Prompt
     system_prompt = f"""{base_prompt}
 
-Your secondary goal is to answer the user's questions using the provided Knowledge Base, and gently collect their information to schedule a consultation.
+Your goal is to answer questions using the Knowledge Base and gently guide the lead toward booking a consultation.
 
-Current Knowledge Base Context for the user's query:
-{rag_context if rag_context else "No specific knowledge base context found for this query."}
+Knowledge Base Context:
+{rag_context if rag_context else "No specific context found."}
 
-Lead Information we currently have:
-- Name: {lead.get('name') or 'Not provided yet'}
-- Medical Condition: {metadata.get('medical_condition') or 'Not provided yet'}
+Lead Information:
+- Name: {lead.get('name') or 'Not provided'}
+- Medical Condition: {metadata.get('medical_condition') or 'Not provided'}
 
-Instructions:
-1. Be concise, warm, and conversational. Do not sound like a robot.
-2. If the user asks a question, answer it using the Knowledge Base context.
-3. If we don't have their Name, naturally ask for it.
-4. If we have their name but not their Medical Condition, ask them what condition they are seeking treatment for (e.g., Diabetes, Fatty Liver, PCOS, etc.).
-5. If we have both their name and condition, ask if they would like to speak to our doctor/team on a phone call.
-6. If the user explicitly asks for a call, says "yes" to a call, or wants to talk to a human, call the `trigger_exotel_call` function.
+STRICT RULES — follow these exactly:
+1. NEVER use markdown: no *, **, •, -, #, or any bullet points or bold text. WhatsApp shows them as raw characters.
+2. Keep every reply SHORT — maximum 2-3 sentences. If you need to share multiple points, pick the most important one only.
+3. Write in a natural Hinglish mix (Hindi + English) — casual, warm, human. Not robotic or formal.
+4. Do NOT repeat yourself or re-introduce yourself in every message.
+5. If the user asks a question, answer it briefly using the Knowledge Base, then ask ONE follow-up.
+6. If we don't have their name, ask for it naturally in one short sentence.
+7. If we have their name but not their condition, ask what health issue they want help with.
+8. If we have both, ask if they'd like a call with our doctor/team.
+9. If the user says "yes" to a call, says "call me", or wants to speak to someone, call trigger_exotel_call immediately.
+10. NEVER write long paragraphs. If your reply is more than 3 lines, it is too long — cut it down.
 """
 
     # 4. Construct Messages
@@ -208,7 +212,7 @@ Instructions:
             tools=tools,
             tool_choice="auto",
             temperature=0.7,
-            max_tokens=250
+            max_tokens=120
         )
 
         response_message = response.choices[0].message
@@ -264,7 +268,7 @@ Instructions:
                     model="gpt-4o-mini",
                     messages=messages,
                     temperature=0.7,
-                    max_tokens=250
+                    max_tokens=120
                 )
                 ai_text = second_response.choices[0].message.content or "Thank you!"
 

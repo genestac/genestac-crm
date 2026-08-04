@@ -131,28 +131,50 @@ def _initiate_pipecat_call(from_number: str, to_number: str, lead_id: str):
 
 
 def _initiate_sarvam_call(to_number: str, lead_id: str, supabase):
-    """Initiates an AI outbound call using Sarvam AI's Outbound Call API."""
+    """Initiates an AI outbound call using Sarvam AI's Outbound Call API (v3)."""
     api_key       = os.getenv("SARVAM_API_KEY", "")
     org_id        = os.getenv("SARVAM_ORG_ID", "")
     workspace_id  = os.getenv("SARVAM_WORKSPACE_ID", "")
     app_id        = os.getenv("SARVAM_APP_ID", "")
-    app_version   = int(os.getenv("SARVAM_APP_VERSION", "1"))
+    app_version   = int(os.getenv("SARVAM_APP_VERSION", "2"))
     connection_id = os.getenv("SARVAM_CONNECTION_ID", "")
     agent_phone   = os.getenv("SARVAM_AGENT_PHONE_NUMBER", "")
+    backend_url   = os.getenv("BACKEND_PUBLIC_URL", "")
 
     if not all([api_key, org_id, workspace_id, app_id, connection_id, agent_phone]):
         logger.error("SARVAM credentials not found or incomplete.")
         return None
 
-    # Get lead details for agent variables
-    lead_name, lead_source_phrase, src = "ji", "humari website pe", ""
-    u = supabase.table("users").select("name, source").eq("id", lead_id).execute()
-    if u.data:
-        lead_name, src = u.data[0].get("name") or "ji", (u.data[0].get("source") or "").lower()
-    else:
-        l = supabase.table("leads").select("name, source").eq("id", lead_id).execute()
-        if l.data:
-            lead_name, src = l.data[0].get("name") or "ji", (l.data[0].get("source") or "").lower()
+    # ── Lead details ─────────────────────────────────────────────────────────
+    lead_name = "ji"
+    lead_source_phrase = "humari website pe"
+    call_disposition = "NEW"
+    gender = ""
+    src = ""
+
+    try:
+        u = supabase.table("users").select("name, source, status").eq("id", lead_id).execute()
+        if u.data:
+            row = u.data[0]
+            lead_name        = row.get("name") or "ji"
+            src              = (row.get("source") or "").lower()
+            call_disposition = row.get("status") or "NEW"
+        else:
+            l = supabase.table("leads").select("name, source, status").eq("id", lead_id).execute()
+            if l.data:
+                row = l.data[0]
+                lead_name        = row.get("name") or "ji"
+                src              = (row.get("source") or "").lower()
+                call_disposition = row.get("status") or "NEW"
+    except Exception as e:
+        logger.error(f"[Sarvam] Lead fetch error (non-fatal): {e}")
+
+    try:
+        gu = supabase.table("users").select("gender").eq("id", lead_id).execute()
+        if gu.data:
+            gender = gu.data[0].get("gender") or ""
+    except Exception:
+        gender = ""
 
     source_map = {
         "facebook": "Facebook pe", "instagram": "Instagram pe",
@@ -163,6 +185,22 @@ def _initiate_sarvam_call(to_number: str, lead_id: str, supabase):
         if key in src:
             lead_source_phrase = phrase
             break
+
+    # Last call summary for context
+    call_summary = ""
+    try:
+        mem = (
+            supabase.table("lead_context_memory")
+            .select("memory_text")
+            .eq("lead_id", lead_id)
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        if mem.data:
+            call_summary = (mem.data[0].get("memory_text") or "")[:500]
+    except Exception:
+        pass
 
     to_number = to_number.strip()
     if not to_number.startswith("+"):
@@ -178,30 +216,40 @@ def _initiate_sarvam_call(to_number: str, lead_id: str, supabase):
                 "agent_phone_number": agent_phone,
             },
             "agent_variables": {
-                "lead_id": lead_id,
-                "lead_name": lead_name,
+                "lead_id":            lead_id,
+                "lead_name":          lead_name,
                 "lead_source_phrase": lead_source_phrase,
-                "company_name": "Genestac",
-                "gender": "female",
-                "call_disposition": "",
-                "call_summary": ""
-            }
+                "call_disposition":   call_disposition,
+                "call_summary":       call_summary,
+                "company_name":       "Genestac",
+                "gender":             gender,
+            },
         },
-        "user_config": {"user_phone_number": to_number}
+        "user_config": {"user_phone_number": to_number},
     }
+
+    if backend_url:
+        payload["webhook_config"] = {
+            "url": f"{backend_url}/api/webhooks/sarvam/post-call",
+            "metadata": {"lead_id": lead_id},
+        }
 
     url = f"https://apps.sarvam.ai/api/outbounds/v1/orgs/{org_id}/workspaces/{workspace_id}/outbounds"
     headers = {"Content-Type": "application/json", "X-API-Key": api_key}
 
-    logger.warning(f"Initiating Sarvam Outbound Call: {to_number}")
+    logger.warning(
+        f"[Sarvam] Initiating outbound call v{app_version}: "
+        f"to={to_number} lead={lead_id} name={lead_name!r} disposition={call_disposition!r}"
+    )
     try:
         response = requests.post(url, json=payload, headers=headers)
         response.raise_for_status()
         data = response.json()
         return {"Call": {"Sid": data.get("attempt_id")}}
     except Exception as e:
-        logger.error(f"Sarvam call failed: {e}")
+        logger.error(f"[Sarvam] Call failed: {e}")
         return None
+
 
 
 def bridge_doctor_and_customer(

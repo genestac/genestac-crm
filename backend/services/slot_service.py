@@ -257,37 +257,29 @@ def find_nearest_available_slot(
         if not free_slots:
             continue
 
-        if day_offset == 0:
-            # On the requested day, find the closest free slot to the preferred time
-            # (may be before OR after, whichever is nearer).
-            def _dist(s: dict) -> float:
-                return abs(
-                    (datetime.fromisoformat(s["start"]) - preferred_dt).total_seconds()
-                )
+        target_dt_for_day = datetime(
+            search_date.year, search_date.month, search_date.day,
+            preferred_dt.hour, preferred_dt.minute, preferred_dt.second,
+            tzinfo=IST
+        )
 
-            later = [
-                s for s in free_slots
-                if datetime.fromisoformat(s["start"]) >= preferred_dt
-            ]
-            earlier = [
-                s for s in free_slots
-                if datetime.fromisoformat(s["start"]) < preferred_dt
-            ]
+        def _dist(s: dict) -> float:
+            return abs(
+                (datetime.fromisoformat(s["start"]) - target_dt_for_day).total_seconds()
+            )
 
-            # Pick the closer of the nearest earlier/later slot
-            best = None
-            if later and earlier:
-                best = min([later[0], earlier[-1]], key=_dist)
-            elif later:
-                best = later[0]
-            elif earlier:
-                best = earlier[-1]
+        # On the same day, prioritize slots that haven't already passed if target_date is today
+        now_ist = datetime.now(IST)
+        valid_slots = free_slots
+        if search_date == now_ist.date():
+            # Filter out slots in the past with a 5-min buffer
+            upcoming = [s for s in free_slots if datetime.fromisoformat(s["start"]) >= now_ist - timedelta(minutes=5)]
+            if upcoming:
+                valid_slots = upcoming
 
-            if best:
-                return best
-        else:
-            # On subsequent days, return the first available slot
-            return free_slots[0]
+        best = min(valid_slots, key=_dist)
+        if best:
+            return best
 
     return None  # No free slot found in the search window
 

@@ -6,9 +6,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'rawText is required' }, { status: 400 })
   }
 
-  const NVIDIA_API_KEY = process.env.NVIDIA_API_KEY
-  if (!NVIDIA_API_KEY) {
-    return NextResponse.json({ error: 'NVIDIA_API_KEY not configured' }, { status: 500 })
+  const GEMINI_API_KEY =
+    process.env.GEMINI_API_KEY ||
+    process.env.NEXT_PUBLIC_GEMINI_API_KEY ||
+    'AQ.Ab8RN6Kd7bMJ4ryAbLYSmFKTSV5oEu5VtCjb8H2zlOxdgFa01g'
+
+  if (!GEMINI_API_KEY) {
+    return NextResponse.json({ error: 'GEMINI_API_KEY not configured' }, { status: 500 })
   }
 
   const systemPrompt = `You are a professional blog content formatter. The user will give you raw, unformatted blog text. Your job is to:
@@ -45,8 +49,7 @@ OUTPUT FORMAT:
   },
   "blocks": [
     { "id": "block-1", "type": "heading", "data": { "level": "h2", "text": "...", "id": "...", "align": "left" } },
-    { "id": "block-2", "type": "text", "data": { "html": "<p>...</p>" } },
-    ...
+    { "id": "block-2", "type": "text", "data": { "html": "<p>...</p>" } }
   ],
   "faqs": [
     { "question": "...", "answer": "..." },
@@ -54,49 +57,86 @@ OUTPUT FORMAT:
   ]
 }`
 
-    const payload = {
-      model: 'meta/llama-3.1-8b-instruct',
-    messages: [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: 'Raw blog text to format:\n\n' + rawText }
-    ],
-    temperature: 0.3,
-    max_tokens: 4096,
-  }
+  const candidateModels = [
+    'gemini-flash-latest',
+    'gemini-3.5-flash',
+    'gemini-3.5-flash-lite',
+    'gemini-2.0-flash',
+  ]
 
-  try {
-    const res = await fetch(
-      'https://integrate.api.nvidia.com/v1/chat/completions',
-      {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${NVIDIA_API_KEY}`
-        },
-        body: JSON.stringify(payload),
-      }
-    )
+  let lastError = ''
+  let responseText = ''
 
-    if (!res.ok) {
-      const err = await res.text()
-      return NextResponse.json({ error: `NVIDIA error: ${err}` }, { status: 500 })
-    }
-
-    const nvidiaData = await res.json()
-    const rawJson = nvidiaData?.choices?.[0]?.message?.content ?? ''
-
-    // Strip markdown fences if Gemini wraps the response
-    const cleaned = rawJson.replace(/^```(?:json)?\n?/i, '').replace(/\n?```$/i, '').trim()
-
-    let parsed: { seo: Record<string, string>, blocks: unknown[], faqs: { question: string, answer: string }[] }
+  for (const model of candidateModels) {
     try {
-      parsed = JSON.parse(cleaned)
-    } catch {
-      return NextResponse.json({ error: 'NVIDIA returned invalid JSON', raw: cleaned }, { status: 500 })
-    }
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [
+                {
+                  text: `${systemPrompt}\n\nRaw blog text to format:\n\n${rawText}`,
+                },
+              ],
+            },
+          ],
+          generationConfig: {
+            responseMimeType: 'application/json',
+            temperature: 0.2,
+          },
+        }),
+      })
 
-    return NextResponse.json({ success: true, seo: parsed.seo, blocks: parsed.blocks, faqs: parsed.faqs ?? [] })
-  } catch (e: unknown) {
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+      if (!res.ok) {
+        const errText = await res.text()
+        lastError = `${model} failed (${res.status}): ${errText}`
+        continue
+      }
+
+      const geminiData = await res.json()
+      responseText = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
+      if (responseText) {
+        break
+      }
+    } catch (e) {
+      lastError = String(e)
+    }
   }
+
+  if (!responseText) {
+    return NextResponse.json(
+      { error: `Gemini formatting failed: ${lastError || 'No response generated'}` },
+      { status: 500 }
+    )
+  }
+
+  // Strip potential markdown fences if present
+  const cleaned = responseText
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .trim()
+
+  let parsed: {
+    seo: Record<string, string>
+    blocks: unknown[]
+    faqs: { question: string; answer: string }[]
+  }
+  try {
+    parsed = JSON.parse(cleaned)
+  } catch {
+    return NextResponse.json(
+      { error: 'Gemini returned invalid JSON structure', raw: cleaned },
+      { status: 500 }
+    )
+  }
+
+  return NextResponse.json({
+    success: true,
+    seo: parsed.seo || {},
+    blocks: parsed.blocks || [],
+    faqs: parsed.faqs ?? [],
+  })
 }

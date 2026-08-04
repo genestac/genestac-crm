@@ -168,7 +168,7 @@ export function BlogEditor({ initialBlog }: Props) {
       }
 
       if (!res.ok || data.error) {
-        toast.error(data.error || 'NVIDIA formatting failed')
+        toast.error(data.error || 'Gemini AI formatting failed')
         return
       }
 
@@ -195,7 +195,7 @@ export function BlogEditor({ initialBlog }: Props) {
       const faqCount = Array.isArray(data.faqs) ? data.faqs.length : 0
       toast.success(`✨ Blog formatted! ${data.blocks?.length ?? 0} blocks + ${faqCount} FAQs created.`)
     } catch (e: unknown) {
-      toast.error('Network error calling NVIDIA AI')
+      toast.error('Network error calling Gemini AI')
       console.error(e)
     } finally {
       setIsFormatting(false)
@@ -329,7 +329,7 @@ export function BlogEditor({ initialBlog }: Props) {
                 </div>
                 <div>
                   <h3 className="font-bold text-gray-900 dark:text-white text-lg">AI Blog Formatter</h3>
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Paste raw blog text — NVIDIA AI will format it completely</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Paste raw blog text — Gemini AI will format it completely</p>
                 </div>
               </div>
               <button
@@ -343,7 +343,7 @@ export function BlogEditor({ initialBlog }: Props) {
             {/* Modal Body */}
             <div className="flex-1 overflow-y-auto p-6 space-y-4">
               <div className="bg-blue-50 dark:bg-blue-950/30 rounded-xl p-4 border border-blue-100 dark:border-blue-900 text-sm text-blue-800 dark:text-blue-200">
-                <p className="font-semibold mb-1">✨ What NVIDIA AI will do:</p>
+                <p className="font-semibold mb-1">✨ What Gemini AI will do:</p>
                 <ul className="space-y-1 text-xs list-disc list-inside text-blue-700 dark:text-blue-300">
                   <li>Auto-detect title, slug, meta title &amp; meta description</li>
                   <li>Generate H2, H3, H4 heading structure</li>
@@ -424,7 +424,7 @@ Premium - 29999/month - Full support
                     <Loader2 className="w-4 h-4 text-white animate-spin" />
                   </div>
                   <div>
-                    <p className="text-sm font-semibold text-violet-800 dark:text-violet-200">NVIDIA AI is formatting your blog…</p>
+                    <p className="text-sm font-semibold text-violet-800 dark:text-violet-200">Gemini AI is formatting your blog…</p>
                     <p className="text-xs text-violet-600 dark:text-violet-400 mt-0.5">This takes 5-15 seconds depending on length</p>
                   </div>
                 </div>
@@ -447,7 +447,7 @@ Premium - 29999/month - Full support
               >
                 {isFormatting
                   ? <><Loader2 className="w-4 h-4 animate-spin" /> Formatting…</>
-                  : <><Wand2 className="w-4 h-4" /> Format with NVIDIA AI</>
+                  : <><Wand2 className="w-4 h-4" /> Format with Gemini AI</>
                 }
               </button>
             </div>

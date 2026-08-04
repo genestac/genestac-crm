@@ -32,6 +32,7 @@ Dashboard configuration (Sarvam AI → Your Agent → Tools):
 """
 
 import os
+import re
 import json
 import logging
 import asyncio
@@ -342,14 +343,222 @@ async def tool_connect_to_doctor(request: Request, background_tasks: BackgroundT
     }
 
 
+def _find_lead_active_appointment(supabase, lead_id: str, patient_phone: Optional[str] = None) -> Optional[dict]:
+    """
+    Finds the most recent active/pending/scheduled appointment for a lead/patient.
+    Returns appointment dict with doctor name if found, else None.
+    """
+    if not lead_id and not patient_phone:
+        return None
+    try:
+        if lead_id:
+            res = (
+                supabase.table("appointments")
+                .select("id, scheduled_at, status, doctor_id, duration_minutes, title, notes, staffs!doctor_id(full_name)")
+                .eq("patient_id", lead_id)
+                .in_("status", ["pending", "confirmed", "scheduled", "in_progress"])
+                .order("scheduled_at", desc=True)
+                .limit(1)
+                .execute()
+            )
+            if res.data:
+                appt = res.data[0]
+                doc_info = appt.get("staffs")
+                doc_name = doc_info.get("full_name", "our doctor") if isinstance(doc_info, dict) else "our doctor"
+                appt["doctor_name"] = doc_name
+                return appt
+    except Exception as e:
+        logger.error(f"[Sarvam] Error querying active appointment by lead_id: {e}")
+
+    # Fallback search by patient phone if available
+    if patient_phone:
+        try:
+            res = (
+                supabase.table("appointments")
+                .select("id, scheduled_at, status, doctor_id, duration_minutes, title, notes, staffs!doctor_id(full_name)")
+                .in_("status", ["pending", "confirmed", "scheduled", "in_progress"])
+                .ilike("notes", f"%{patient_phone}%")
+                .order("scheduled_at", desc=True)
+                .limit(1)
+                .execute()
+            )
+            if res.data:
+                appt = res.data[0]
+                doc_info = appt.get("staffs")
+                doc_name = doc_info.get("full_name", "our doctor") if isinstance(doc_info, dict) else "our doctor"
+                appt["doctor_name"] = doc_name
+                return appt
+        except Exception as e:
+            logger.error(f"[Sarvam] Error querying active appointment by phone: {e}")
+
+    return None
+
+
 # ─────────────────────────────────────────────────────────────────────────────
-# Tool: schedule_call  (book a future doctor appointment)
+# Tool: check_consultation  (check if user already has an active appointment)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/tool/check-consultation")
+@router.post("/tool/check-consultation")
+async def tool_check_consultation(request: Request, lead_id: Optional[str] = None):
+    """
+    Sarvam calls this to check if the caller already has a consultation booked.
+    Works for both GET (query param lead_id) and POST (body parameters).
+    """
+    resolved_lead_id = ""
+    phone = ""
+
+    if request.method == "POST":
+        try:
+            body: dict = await request.json()
+            resolved_lead_id = _get_lead_id_from_body(body)
+            phone = _get_customer_phone_from_body(body)
+        except Exception:
+            body = {}
+
+    if not resolved_lead_id and lead_id:
+        if _is_valid_uuid(lead_id.strip()):
+            resolved_lead_id = lead_id.strip()
+
+    if not resolved_lead_id and not phone:
+        return {
+            "has_booked_consultation": False,
+            "response": "[TEST] check_consultation tool reached successfully. In a real call, this checks existing consultations."
+        }
+
+    supabase = get_supabase_client()
+    existing_appt = _find_lead_active_appointment(supabase, resolved_lead_id, phone)
+
+    if existing_appt:
+        scheduled_at = existing_appt.get("scheduled_at", "")
+        doc_name = existing_appt.get("doctor_name", "our doctor")
+        try:
+            friendly_time = datetime.fromisoformat(scheduled_at).astimezone(IST).strftime("%d %B %Y at %I:%M %p IST")
+        except Exception:
+            friendly_time = scheduled_at
+
+        return {
+            "has_booked_consultation": True,
+            "appointment_id": existing_appt.get("id"),
+            "doctor_name": doc_name,
+            "scheduled_at": scheduled_at,
+            "friendly_time": friendly_time,
+            "status": existing_appt.get("status", "pending"),
+            "response": (
+                f"Aapka consultation already booked hai Dr. {doc_name} ke saath {friendly_time} ke liye. "
+                f"Kya aap is appointment ka time change ya reschedule karna chahte hain?"
+            )
+        }
+
+    return {
+        "has_booked_consultation": False,
+        "response": (
+            "Aapka koi active consultation abhi book nahi hai. "
+            "Kya aap hamare expert doctor ke saath consultation book karna chahenge?"
+        )
+    }
+
+
+def _parse_user_time_preference(time_str: str) -> datetime:
+    """
+    Parses ISO strings, natural language ("today 5 pm", "tomorrow 11:30 am"),
+    and Hinglish ("aaj sham 5 baje", "kal subah 10 baje") into a timezone-aware (IST) datetime.
+    """
+    ist = pytz.timezone("Asia/Kolkata")
+    now = datetime.now(ist)
+
+    if not time_str or not isinstance(time_str, str):
+        return now.replace(hour=10, minute=0, second=0, microsecond=0) + timedelta(days=1)
+
+    s = time_str.strip().lower()
+
+    # 1. Direct ISO parsing
+    try:
+        dt = datetime.fromisoformat(time_str.strip())
+        if dt.tzinfo is None:
+            dt = ist.localize(dt)
+        else:
+            dt = dt.astimezone(ist)
+        # If year or date is in past, adjust to today or future
+        if dt.date() < now.date():
+            dt = dt.replace(year=now.year, month=now.month, day=now.day)
+            if dt < now:
+                dt += timedelta(days=1)
+        return dt
+    except Exception:
+        pass
+
+    # 2. Relative day
+    target_date = now.date()
+    if any(k in s for k in ["tomorrow", "kal", "next day"]):
+        target_date = now.date() + timedelta(days=1)
+    elif any(k in s for k in ["day after tomorrow", "parso", "parson"]):
+        target_date = now.date() + timedelta(days=2)
+    elif any(k in s for k in ["today", "aaj", "tonight", "this evening", "this afternoon"]):
+        target_date = now.date()
+    else:
+        weekdays = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+        for idx, day_name in enumerate(weekdays):
+            if day_name in s:
+                days_ahead = (idx - now.weekday() + 7) % 7
+                if days_ahead == 0 and now.hour >= 18:
+                    days_ahead = 7
+                target_date = now.date() + timedelta(days=days_ahead)
+                break
+
+    # 3. Time extraction (12-hr with am/pm)
+    hour = 17  # Default to 5 PM if evening is requested
+    minute = 0
+
+    m_12 = re.search(r"(\b\d{1,2})(?::(\d{2}))?\s*(am|pm)\b", s)
+    if m_12:
+        h = int(m_12.group(1))
+        m = int(m_12.group(2) or 0)
+        ampm = m_12.group(3).lower()
+        if ampm == "pm" and h < 12:
+            h += 12
+        elif ampm == "am" and h == 12:
+            h = 0
+        hour = h
+        minute = m
+    else:
+        # 24-hr format (e.g. "17:00", "17:30")
+        m_24 = re.search(r"\b(\d{1,2}):(\d{2})\b", s)
+        if m_24:
+            hour = int(m_24.group(1))
+            minute = int(m_24.group(2))
+        else:
+            # Match number like "5", "5 baje", "5 o'clock"
+            m_num = re.search(r"\b(\d{1,2})\s*(?:baje|o'clock|clock)?\b", s)
+            if m_num:
+                h = int(m_num.group(1))
+                is_evening_hint = any(k in s for k in ["sham", "shaam", "evening", "dopahar", "afternoon", "night", "raat", "pm"])
+                if (is_evening_hint or (1 <= h <= 7)) and h < 12:
+                    h += 12
+                hour = h
+                minute = 0
+
+    target_dt = ist.localize(datetime(
+        target_date.year, target_date.month, target_date.day,
+        hour, minute, 0
+    ))
+
+    # If requested time today has already passed, advance to tomorrow
+    if target_date == now.date() and target_dt < now:
+        target_dt += timedelta(days=1)
+
+    return target_dt
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tool: schedule_call  (book or reschedule a doctor appointment)
 # ─────────────────────────────────────────────────────────────────────────────
 
 @router.post("/tool/schedule-call")
 async def tool_schedule_call(request: Request):
     """
-    Sarvam calls this when the user asks to book a future doctor consultation.
+    Sarvam calls this when the user asks to book or reschedule a doctor consultation.
+    If an active consultation already exists, it updates/reschedules it to avoid duplicates.
 
     Expected body:
     {
@@ -373,7 +582,7 @@ async def tool_schedule_call(request: Request):
     lead_id = _get_lead_id_from_body(body)
     # Dashboard test guard — {{lead_id}} is not a real UUID
     if not lead_id:
-        return {"response": "[TEST] schedule_call tool reached successfully. In a real call, this will book a doctor consultation appointment."}
+        return {"response": "[TEST] schedule_call tool reached successfully. In a real call, this will book or update a doctor consultation appointment."}
     time_preference = params.get("time_preference", "")
     reason = params.get("reason", "Consultation")
 
@@ -381,13 +590,10 @@ async def tool_schedule_call(request: Request):
 
     supabase = get_supabase_client()
 
-    # ── Parse time ──────────────────────────────────────────────────────────
+    # ── Parse time robustly ──────────────────────────────────────────────────
     ist = pytz.timezone("Asia/Kolkata")
-    try:
-        preferred_dt = datetime.fromisoformat(time_preference)
-    except Exception:
-        preferred_dt = datetime.now(ist).replace(hour=10, minute=0, second=0, microsecond=0) + timedelta(days=1)
-        logger.warning(f"[Sarvam/schedule-call] Could not parse '{time_preference}' — defaulting to tomorrow 10AM IST")
+    preferred_dt = _parse_user_time_preference(time_preference)
+    logger.warning(f"[Sarvam/schedule-call] Parsed '{time_preference}' -> {preferred_dt.isoformat()}")
 
     # ── Find lead details ───────────────────────────────────────────────────
     sales_rep_id = None
@@ -416,11 +622,14 @@ async def tool_schedule_call(request: Request):
         if admin_res.data:
             sales_rep_id = admin_res.data[0]["id"]
 
+    # ── Check for existing active appointment (avoid creating 2 or 3 consultations) ──
+    existing_appt = _find_lead_active_appointment(supabase, lead_id, patient_phone_fallback)
+
     # ── Find a doctor with available slot ───────────────────────────────────
     doc_res = supabase.table("doctor_schedules").select("staff_id, staffs(full_name), allow_scheduling").eq("allow_scheduling", True).execute()
 
     if not doc_res.data:
-        return {"response": "Main appointment book nahi kar saki. Humari team aapse contact karegi jald hi."}
+        return {"response": "Main appointment schedule nahi kar saki. Humari team aapse contact karegi jald hi."}
 
     from services.slot_service import find_nearest_available_slot
     best_slot = None
@@ -452,47 +661,12 @@ async def tool_schedule_call(request: Request):
     if not best_slot:
         return {
             "response": (
-                "Mujhe agले 7 dino mein koi available slot nahi mili. "
+                "Mujhe agle 7 dino mein koi available slot nahi mili. "
                 "Humari team aapse personally contact karegi."
             )
         }
 
     actual_scheduled_at = best_slot["start"]
-
-    # ── Insert appointment ───────────────────────────────────────────────────
-    appt_payload = {
-        "patient_id": patient_id,
-        "doctor_id": best_doctor_id,
-        "sales_rep_id": sales_rep_id,
-        "scheduled_at": actual_scheduled_at,
-        "status": "pending",
-        "notes": (
-            f"Booked via Sarvam AI Voice Agent. Patient requested: {time_preference}. Reason: {reason}"
-            + (f"\n[PHONE: {patient_phone_fallback}]" if patient_phone_fallback else "")
-        ),
-        "title": f"AI-Booked: Consultation with {lead_name}",
-        "type": "consultation",
-        "duration_minutes": 10,
-    }
-    appt_res = supabase.table("appointments").insert(appt_payload).execute()
-    appt_id = appt_res.data[0]["id"] if appt_res.data else None
-    logger.warning(f"[Sarvam/schedule-call] Appointment {appt_id} created for lead {lead_id}")
-
-    # Update lead status
-    supabase.table("leads").update({"status": "CONSULTATION_SCHEDULED"}).eq("id", lead_id).execute()
-    supabase.table("users").update({"status": "CONSULTATION_SCHEDULED"}).eq("id", lead_id).execute()
-
-    # Notify doctor
-    try:
-        supabase.table("system_notifications").insert({
-            "target_role": "doctor",
-            "target_id": best_doctor_id,
-            "notification_type": "in_app",
-            "title": "New Appointment via Sarvam AI Agent",
-            "message": f"{lead_name} requested a consultation: {time_preference}. Reason: {reason}. Appointment ID: {appt_id}"
-        }).execute()
-    except Exception as notif_err:
-        logger.error(f"[Sarvam/schedule-call] Failed to notify doctor: {notif_err}")
 
     # Friendly time string
     try:
@@ -500,12 +674,88 @@ async def tool_schedule_call(request: Request):
     except Exception:
         friendly_time = time_preference
 
-    return {
-        "response": (
-            f"Aapka appointment Dr. {best_doctor_name} ke saath {friendly_time} ke liye book ho gaya hai. "
-            f"Aapko confirmation bheja jayega. Kya main aur kuch help kar sakti hu?"
-        )
-    }
+    # ── Update existing appointment OR Insert new appointment ────────────────
+    if existing_appt:
+        appt_id = existing_appt["id"]
+        appt_update_payload = {
+            "doctor_id": best_doctor_id,
+            "sales_rep_id": sales_rep_id,
+            "scheduled_at": actual_scheduled_at,
+            "status": "pending",
+            "notes": (
+                f"Rescheduled via Sarvam AI Voice Agent. Patient requested: {time_preference}. Reason: {reason}"
+                + (f"\n[PHONE: {patient_phone_fallback}]" if patient_phone_fallback else "")
+            ),
+            "title": f"AI-Booked: Consultation with {lead_name}",
+            "duration_minutes": 10,
+        }
+        supabase.table("appointments").update(appt_update_payload).eq("id", appt_id).execute()
+        logger.warning(f"[Sarvam/schedule-call] Existing appointment {appt_id} rescheduled to {actual_scheduled_at} for lead {lead_id}")
+
+        # Update lead status
+        supabase.table("leads").update({"status": "CONSULTATION_SCHEDULED"}).eq("id", lead_id).execute()
+        supabase.table("users").update({"status": "CONSULTATION_SCHEDULED"}).eq("id", lead_id).execute()
+
+        # Notify doctor
+        try:
+            supabase.table("system_notifications").insert({
+                "target_role": "doctor",
+                "target_id": best_doctor_id,
+                "notification_type": "in_app",
+                "title": "Appointment Rescheduled via Sarvam AI Agent",
+                "message": f"{lead_name} rescheduled consultation to: {friendly_time}. Reason: {reason}. Appointment ID: {appt_id}"
+            }).execute()
+        except Exception as notif_err:
+            logger.error(f"[Sarvam/schedule-call] Failed to notify doctor: {notif_err}")
+
+        return {
+            "response": (
+                f"Aapka pehle se booked appointment Dr. {best_doctor_name} ke saath reschedule ho gaya hai {friendly_time} ke liye. "
+                f"Aapko confirmation bheja jayega. Kya main aur kuch help kar sakti hu?"
+            )
+        }
+    else:
+        appt_payload = {
+            "patient_id": patient_id,
+            "doctor_id": best_doctor_id,
+            "sales_rep_id": sales_rep_id,
+            "scheduled_at": actual_scheduled_at,
+            "status": "pending",
+            "notes": (
+                f"Booked via Sarvam AI Voice Agent. Patient requested: {time_preference}. Reason: {reason}"
+                + (f"\n[PHONE: {patient_phone_fallback}]" if patient_phone_fallback else "")
+            ),
+            "title": f"AI-Booked: Consultation with {lead_name}",
+            "type": "consultation",
+            "duration_minutes": 10,
+        }
+        appt_res = supabase.table("appointments").insert(appt_payload).execute()
+        appt_id = appt_res.data[0]["id"] if appt_res.data else None
+        logger.warning(f"[Sarvam/schedule-call] Appointment {appt_id} created for lead {lead_id}")
+
+        # Update lead status
+        supabase.table("leads").update({"status": "CONSULTATION_SCHEDULED"}).eq("id", lead_id).execute()
+        supabase.table("users").update({"status": "CONSULTATION_SCHEDULED"}).eq("id", lead_id).execute()
+
+        # Notify doctor
+        try:
+            supabase.table("system_notifications").insert({
+                "target_role": "doctor",
+                "target_id": best_doctor_id,
+                "notification_type": "in_app",
+                "title": "New Appointment via Sarvam AI Agent",
+                "message": f"{lead_name} requested a consultation: {time_preference}. Reason: {reason}. Appointment ID: {appt_id}"
+            }).execute()
+        except Exception as notif_err:
+            logger.error(f"[Sarvam/schedule-call] Failed to notify doctor: {notif_err}")
+
+        return {
+            "response": (
+                f"Aapka appointment Dr. {best_doctor_name} ke saath {friendly_time} ke liye book ho gaya hai. "
+                f"Aapko confirmation bheja jayega. Kya main aur kuch help kar sakti hu?"
+            )
+        }
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -922,39 +1172,60 @@ Rules:
         logger.error(f"[Sarvam/post-call] Failed to save call log: {log_err}")
         log_id = None
 
-    # ── Vectorize memory ───────────────────────────────────────────────────
-    memory_text = f"Call summary (Sarvam AI):\n{summary}"
-    if score_label and score_reason:
-        memory_text += f"\nLead warmth: {score_label} ({lead_score}/100). {score_reason}"
+    # ── Vectorize memory ────────────────────────────────────────────#    # ── Lead details ─────────────────────────────────────────────────────────
+    lead_name          = "ji"
+    lead_source_phrase = "humari website pe"
+    call_disposition   = "NEW"
+    gender             = ""
+    src                = ""
 
-    memory_embedding = None
+    logger.warning(f"[Sarvam/initiate-call] Fetching lead details for {payload.lead_id!r}")
+
+    # Fetch core fields (no gender — may not exist on all deployments)
     try:
-        oai_embed = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-        embed_res = oai_embed.embeddings.create(
-            model="text-embedding-3-small",
-            input=memory_text,
-        )
-        memory_embedding = embed_res.data[0].embedding
-        logger.warning(f"[Sarvam/post-call] Embedding generated ({len(memory_embedding)} dims) for lead {lead_id}")
-    except Exception as embed_err:
-        logger.error(f"[Sarvam/post-call] Embedding failed — storing raw text only: {embed_err}")
+        u = supabase.table("users").select("name, source, status").eq("id", payload.lead_id).execute()
+        if u.data:
+            row = u.data[0]
+            lead_name        = row.get("name") or "ji"
+            src              = (row.get("source") or "").lower()
+            call_disposition = row.get("status") or "NEW"
+        else:
+            l = supabase.table("leads").select("name, source, status").eq("id", payload.lead_id).execute()
+            if l.data:
+                row = l.data[0]
+                lead_name        = row.get("name") or "ji"
+                src              = (row.get("source") or "").lower()
+                call_disposition = row.get("status") or "NEW"
+    except Exception as db_err:
+        logger.error(f"[Sarvam/initiate-call] Lead fetch failed (non-fatal): {db_err}")
 
-    memory_payload: dict[str, Any] = {
-        "lead_id": lead_id,
-        "memory_text": memory_text,
-        "source_call_id": log_id,
+    # Gender is optional — column may not exist in all DB schemas
+    try:
+        gu = supabase.table("users").select("gender").eq("id", payload.lead_id).execute()
+        if gu.data:
+            gender = gu.data[0].get("gender") or ""
+        else:
+            gl = supabase.table("leads").select("gender").eq("id", payload.lead_id).execute()
+            if gl.data:
+                gender = gl.data[0].get("gender") or ""
+    except Exception:
+        gender = ""  # Column doesn't exist — safe to ignore
+
+    source_map = {
+        "facebook":  "Facebook pe", "instagram": "Instagram pe",
+        "google":    "Google pe",   "website":   "hamare website pe",
+        "whatsapp":  "WhatsApp pe", "referral":  "apne ek jaankaar se",
     }
-    if memory_embedding is not None:
-        memory_payload["embedding"] = memory_embedding
+    for key, phrase in source_map.items():
+        if key in src:
+            lead_source_phrase = phrase
+            break
 
-    try:
-        supabase.table("lead_context_memory").insert(memory_payload).execute()
-        logger.warning(f"[Sarvam/post-call] ✅ Vectorized memory saved for lead {lead_id}")
-    except Exception as mem_err:
-        logger.error(f"[Sarvam/post-call] Memory save failed: {mem_err}")
-
-
-# ─────────────────────────────────────────────────────────────────────────────
+    logger.warning(
+        f"[Sarvam/initiate-call] Lead resolved: name={lead_name!r} "
+        f"disposition={call_disposition!r} gender={gender!r} source={src!r}"
+    )
+##──────────────────────────────────────────────────
 # Initiate outbound call  (called by our CRM frontend/backend)
 # ─────────────────────────────────────────────────────────────────────────────
 
