@@ -1083,10 +1083,15 @@ async def initiate_call(payload: InitiateCallRequest):
                 "company_name":      "Genestac",
                 "gender":            gender,
             },
-            "app_overrides": {
-                "initial_bot_message": initial_bot_message,
-                **({"initial_state_name": payload.initial_state_name} if payload.initial_state_name else {}),
-            },
+            # NOTE: app_overrides only sent when initial_state_name is explicitly provided.
+            # Sending initial_bot_message without a valid initial_state_name drops the call.
+            # To use: pass initial_state_name matching your Sarvam agent's state name.
+            **({
+                "app_overrides": {
+                    "initial_bot_message": initial_bot_message,
+                    "initial_state_name": payload.initial_state_name,
+                }
+            } if payload.initial_state_name else {}),
         },
         "user_config": {"user_phone_number": to_number},
     }
