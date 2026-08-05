@@ -8,7 +8,7 @@ export default function AdminDashboardClient({ metrics }: { metrics: any }) {
     total_users, total_leads, total_staff, total_revenue, 
     todays_orders_count, todays_orders_revenue, todays_conversions,
     daily_leads_graph, monthly_leads_graph, funnel_graph, contacted_graph,
-    recent_activity 
+    source_graph, recent_activity 
   } = metrics
 
   const COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#8b5cf6', '#ef4444', '#14b8a6', '#f43f5e', '#84cc16'];
@@ -159,6 +159,34 @@ export default function AdminDashboardClient({ metrics }: { metrics: any }) {
                   label={({ name, percent }) => `${name} ${((percent || 0) * 100).toFixed(0)}%`}
                 >
                   {contacted_graph?.map((entry: any, index: number) => (
+                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                  ))}
+                </Pie>
+                <Tooltip />
+                <Legend />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* Source Breakdown Ratio */}
+        <div className="bg-white/80 backdrop-blur-xl border border-gray-100 rounded-3xl p-6 shadow-sm">
+          <h2 className="text-lg font-bold text-gray-900 mb-6">Lead Source Breakdown</h2>
+          <div className="h-72 w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={source_graph}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={60}
+                  outerRadius={100}
+                  fill="#8884d8"
+                  paddingAngle={5}
+                  dataKey="value"
+                  label={({ name, percent }) => `${name} ${((percent || 0) * 100).toFixed(0)}%`}
+                >
+                  {source_graph?.map((entry: any, index: number) => (
                     <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                   ))}
                 </Pie>

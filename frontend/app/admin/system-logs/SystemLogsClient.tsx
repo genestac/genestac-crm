@@ -15,7 +15,7 @@ interface LogEntry {
 }
 
 // ─── Config ──────────────────────────────────────────────────────────────────
-const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
+const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000'
 const MAX_DISPLAY = 2000
 
 const LEVEL_STYLES: Record<LogLevel, { badge: string; text: string; dot: string }> = {

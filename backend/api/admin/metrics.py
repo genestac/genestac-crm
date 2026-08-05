@@ -48,16 +48,22 @@ async def get_admin_metrics(
         # Funnel Data
         status_contacted = 0
         status_counts = {}
+        source_counts = {}
         
         try:
-            # Fetch all leads with created_at and status
-            leads_res = supabase.table("leads").select("id, created_at, status").execute()
+            # Fetch all leads with created_at, status, and source
+            leads_res = supabase.table("leads").select("id, created_at, status, source").execute()
             leads_data = leads_res.data or []
             total_leads = len(leads_data)
             
             for lead in leads_data:
                 created_at_str = lead.get("created_at")
                 status = lead.get("status") or "NEW"
+                
+                raw_source = str(lead.get("source") or "Unknown").strip().title()
+                if not raw_source or raw_source.lower() == "none":
+                    raw_source = "Unknown"
+                source_counts[raw_source] = source_counts.get(raw_source, 0) + 1
                 
                 # Funnel logic
                 status_counts[status] = status_counts.get(status, 0) + 1
@@ -111,6 +117,9 @@ async def get_admin_metrics(
         # Dynamic Status Breakdown Pie
         # Keep variable name contacted_graph for frontend compatibility
         contacted_graph = [{"name": k.replace("_", " ").title(), "value": v} for k, v in status_counts.items() if v > 0]
+        
+        # Source Breakdown Pie
+        source_graph = [{"name": k, "value": v} for k, v in sorted(source_counts.items(), key=lambda x: x[1], reverse=True)]
             
         # 3. Active Staff
         total_staff = 0
@@ -178,6 +187,7 @@ async def get_admin_metrics(
                 "monthly_leads_graph": monthly_leads_graph,
                 "funnel_graph": funnel_graph,
                 "contacted_graph": contacted_graph,
+                "source_graph": source_graph,
                 
                 "recent_activity": activities
             }

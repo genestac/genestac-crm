@@ -40,7 +40,7 @@ export function getAuthToken(cookiesList: { name: string; value: string }[]): st
 
 export function clearAuthCookies(cookieStore: any): void {
   const API_BASE_URL = process.env.API_BASE_URL || 'http://localhost:8000';
-  const isProd = process.env.NODE_ENV === 'production' && !API_BASE_URL.includes('localhost');
+  const isProd = process.env.NODE_ENV === 'production' && !API_BASE_URL.includes('localhost') && !API_BASE_URL.includes('127.0.0.1');
   const domainOpt = isProd ? { domain: '.genestac.com' } : {};
 
   // Function works with both Next.js request.cookies and next/headers cookies()

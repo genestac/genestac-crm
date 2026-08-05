@@ -57,7 +57,7 @@ export async function login(formData: FormData) {
   }
 
   if (token) {
-    const isProd = process.env.NODE_ENV === 'production' && !API_BASE_URL.includes('localhost');
+    const isProd = process.env.NODE_ENV === 'production' && !API_BASE_URL.includes('localhost') && !API_BASE_URL.includes('127.0.0.1');
     const cookieStore = await cookies()
     cookieStore.set('access_token', token, { 
       httpOnly: true, 

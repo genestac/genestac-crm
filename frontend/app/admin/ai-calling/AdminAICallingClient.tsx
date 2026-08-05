@@ -113,7 +113,7 @@ function CallLogRow({ log }: { log: any }) {
           {log.summary && (
             <div>
               <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Summary</h4>
-              <p className="text-sm text-gray-700 whitespace-pre-line">{log.summary}</p>
+              <p className="text-sm text-gray-700 whitespace-pre-line">{log.summary.replace(/(?<!^)(•)/g, '\n$1')}</p>
             </div>
           )}
           {/* Lead Score Section */}
