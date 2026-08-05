@@ -60,6 +60,7 @@ function CrmStatusBadge({ status }: { status: string | undefined | null }) {
 // ─── Single call log row ─────────────────────────────────────────────────────
 function CallLogRow({ log }: { log: any }) {
   const [open, setOpen] = useState(false)
+  const [audioError, setAudioError] = useState(false)
   const date = new Date(log.created_at).toLocaleString('en-IN', {
     dateStyle: 'medium', timeStyle: 'short'
   })
@@ -112,7 +113,7 @@ function CallLogRow({ log }: { log: any }) {
           {log.summary && (
             <div>
               <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Summary</h4>
-              <p className="text-sm text-gray-700">{log.summary}</p>
+              <p className="text-sm text-gray-700 whitespace-pre-line">{log.summary}</p>
             </div>
           )}
           {/* Lead Score Section */}
@@ -127,26 +128,55 @@ function CallLogRow({ log }: { log: any }) {
               </div>
             </div>
           )}
+
+          {/* Recording */}
           {log.recording_url && (
             <div>
               <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Voice Recording</h4>
               <div className="bg-white p-3 rounded-lg border">
-                <audio controls className="w-full h-10" src={log.recording_url}>
-                  Your browser does not support the audio element.
-                </audio>
+                {!audioError ? (
+                  <audio
+                    controls
+                    className="w-full h-10"
+                    src={log.recording_url}
+                    onError={() => setAudioError(true)}
+                  >
+                    Your browser does not support the audio element.
+                  </audio>
+                ) : (
+                  <div className="flex items-center gap-2 text-sm">
+                    <span className="text-gray-500">Audio requires authentication.</span>
+                    <a
+                      href={log.recording_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-xs font-medium transition-colors"
+                    >
+                      <Play className="w-3.5 h-3.5" /> Open Recording
+                    </a>
+                  </div>
+                )}
               </div>
             </div>
           )}
+
+          {/* Transcript */}
           {log.transcript ? (
             <div>
               <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Transcript</h4>
-              <div className="rounded-lg bg-white border p-4 max-h-64 overflow-y-auto space-y-2 font-mono text-xs text-gray-700">
+              <div className="rounded-lg bg-white border p-4 max-h-80 overflow-y-auto space-y-2 font-mono text-xs text-gray-700">
                 {log.transcript.split('\n').filter(Boolean).map((line: string, i: number) => {
-                  const isUser = line.toLowerCase().startsWith('user:')
+                  const lower = line.toLowerCase()
+                  // User/patient side: right-aligned indigo bubbles
+                  const isUser = lower.startsWith('user:') || lower.startsWith('patient:') || lower.startsWith('customer:')
+                  // Bot/doctor side: left-aligned gray bubbles  
+                  const isBot = lower.startsWith('assistant:') || lower.startsWith('bot:') || lower.startsWith('doctor:') || lower.startsWith('agent:')
                   return (
                     <div key={i} className={`flex gap-2 ${isUser ? 'justify-end' : 'justify-start'}`}>
-                      <span className={`px-3 py-1.5 rounded-xl max-w-[80%] break-words ${
-                        isUser ? 'bg-indigo-100 text-indigo-800' : 'bg-gray-100 text-gray-800'
+                      <span className={`px-3 py-1.5 rounded-xl max-w-[85%] break-words leading-relaxed ${
+                        isUser ? 'bg-indigo-100 text-indigo-800' : 
+                        isBot ? 'bg-gray-100 text-gray-800' :
+                        'bg-white border text-gray-600 italic'
                       }`}>
                         {line}
                       </span>
@@ -156,7 +186,9 @@ function CallLogRow({ log }: { log: any }) {
               </div>
             </div>
           ) : (
-            <p className="text-xs text-gray-400 italic">No transcript recorded for this call.</p>
+            <p className="text-xs text-gray-400 italic flex items-center gap-1.5">
+              {log.status === 'completed' ? '⏳ Transcript is being processed...' : 'No transcript recorded for this call.'}
+            </p>
           )}
           {log.call_sid && (
             <p className="text-xs text-gray-400">Call SID: <code className="font-mono">{log.call_sid}</code></p>

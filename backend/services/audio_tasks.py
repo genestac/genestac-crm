@@ -155,6 +155,34 @@ RAW TRANSCRIPT:
                 
             supabase.table('appointments').update({'notes': new_notes}).eq('id', appointment_id).execute()
             logger.warning(f"Saved call summary to appointment notes for {appointment_id}")
+
+        # ── 5. Update ai_call_logs so the admin AI Calling panel shows transcript + recording ──
+        try:
+            log_lead_id = patient_id  # patient_id == lead_id in our schema
+            log_update = {
+                "transcript": formatted_transcript,
+                "summary": summary,
+                "recording_url": recording_url,
+                "status": "completed",
+            }
+            log_res = None
+            if log_lead_id:
+                log_res = supabase.table("ai_call_logs") \
+                    .select("id") \
+                    .eq("lead_id", log_lead_id) \
+                    .order("created_at", desc=True) \
+                    .limit(1) \
+                    .execute()
+
+            if log_res and log_res.data:
+                supabase.table("ai_call_logs").update(log_update).eq("id", log_res.data[0]["id"]).execute()
+                logger.warning(f"[audio_tasks] ✅ Updated ai_call_logs {log_res.data[0]['id']} with transcript+summary+recording")
+            elif log_lead_id:
+                # No row found — create one so the panel can show it
+                supabase.table("ai_call_logs").insert({**log_update, "lead_id": log_lead_id}).execute()
+                logger.warning(f"[audio_tasks] Created new ai_call_logs row for lead {log_lead_id}")
+        except Exception as log_err:
+            logger.error(f"[audio_tasks] Failed to update ai_call_logs: {log_err}")
             
     except Exception as e:
         logger.error(f"Error processing call recording for appointment {appointment_id}: {e}")

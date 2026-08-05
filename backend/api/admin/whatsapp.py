@@ -483,13 +483,27 @@ async def webhook_handler(payload: dict, background_tasks: BackgroundTasks, supa
                                 print(f"[WhatsApp Webhook] Bot paused for {clean_phone}, skipping AI reply.")
                                 continue
                             
+                            # ── First-message detection ─────────────────────
+                            # Check if there were any prior messages for this lead
+                            # (before the current one was inserted)
+                            prior_msg_res = supabase.table("whatsapp_messages") \
+                                .select("id") \
+                                .eq(lead_col, existing["id"]) \
+                                .limit(2) \
+                                .execute()
+                            # We just inserted the current message so count > 1 means prior messages exist
+                            prior_count = len(prior_msg_res.data or [])
+                            is_first_message = (prior_count <= 1)
+                            print(f"[WhatsApp Webhook] is_first_message={is_first_message} (prior_count={prior_count}) for {clean_phone}")
+                            
                             print(f"[WhatsApp Webhook] Processing message with OpenAI Agent for {clean_phone}")
                             
                             # Use OpenAI RAG Agent
                             ai_reply, should_trigger_call = await process_whatsapp_message(
                                 lead=existing, 
                                 message=text_body, 
-                                supabase=supabase
+                                supabase=supabase,
+                                is_first_message=is_first_message
                             )
                             
                             # Send AI Reply

@@ -14,6 +14,15 @@ export async function fetchAdminConsultations(statusFilter: string = 'all') {
   }
 }
 
+export async function fetchPendingDoctorAppointments() {
+  try {
+    const response = await fetchAPI('/api/admin/consultations/pending-doctor', { cache: 'no-store' })
+    return { success: true, data: response }
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Failed to fetch pending appointments' }
+  }
+}
+
 export async function reassignConsultation(appointmentId: string, doctorId: string) {
   try {
     const response = await fetchAPI(`/api/admin/consultations/${appointmentId}/assign`, {
@@ -43,6 +52,32 @@ export async function createConsultation(payload: any) {
     return { success: true, data: response }
   } catch (error: any) {
     return { success: false, error: error.message || 'Failed to create consultation' }
+  }
+}
+
+export async function fetchAvailableSlots(doctorId: string, dateStr: string) {
+  try {
+    const response = await fetchAPI(
+      `/api/admin/consultations/available-slots?doctor_id=${doctorId}&date=${dateStr}`,
+      { cache: 'no-store' }
+    )
+    return { success: true, data: response }
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Failed to fetch slots' }
+  }
+}
+
+export async function bookPendingAppointment(appointmentId: string, doctorId: string, scheduledAt: string) {
+  try {
+    const response = await fetchAPI(`/api/admin/consultations/${appointmentId}/book`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ doctor_id: doctorId, scheduled_at: scheduledAt })
+    })
+    revalidatePath('/admin/consultations')
+    return { success: true, data: response }
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Failed to book appointment' }
   }
 }
 

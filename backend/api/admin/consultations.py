@@ -3,8 +3,11 @@ from supabase import Client
 from db.supabase import get_supabase_client
 from api.deps import get_current_user
 from typing import Dict, Any, Optional
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 router = APIRouter()
+IST = ZoneInfo("Asia/Kolkata")
 
 def _check_admin(current_user: dict):
     role = current_user.get("role", "")
@@ -154,4 +157,82 @@ def create_consultation(
         return res.data[0]
     except Exception as e:
         print(f"DEBUG: Error creating consultation: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/pending-doctor")
+def get_pending_doctor_appointments(
+    current_user: dict = Depends(get_current_user),
+    supabase: Client = Depends(get_supabase_client)
+):
+    """Return all appointments with status='waiting_for_doctor' — created from WhatsApp when no slot was available."""
+    _check_admin(current_user)
+    try:
+        res = supabase.table('appointments').select('*').eq('status', 'waiting_for_doctor').order('created_at', desc=True).execute()
+        data = res.data or []
+
+        # Enrich with patient info from both users and leads tables
+        patient_ids = [d["patient_id"] for d in data if d.get("patient_id")]
+        patients_map = {}
+        if patient_ids:
+            u_res = supabase.table('users').select('id, name, full_name, email, phone').in_('id', patient_ids).execute()
+            for u in (u_res.data or []):
+                patients_map[u["id"]] = {"id": u["id"], "name": u.get("name") or u.get("full_name"), "phone": u.get("phone"), "email": u.get("email")}
+            l_res = supabase.table('leads').select('id, name, email, phone_number, metadata').in_('id', patient_ids).execute()
+            for l in (l_res.data or []):
+                patients_map[l["id"]] = {"id": l["id"], "name": l.get("name"), "phone": l.get("phone_number"), "email": l.get("email"), "metadata": l.get("metadata", {})}
+
+        for d in data:
+            d["users"] = patients_map.get(d.get("patient_id"))
+
+        return data
+    except Exception as e:
+        print(f"DEBUG: Error fetching pending-doctor appointments: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/available-slots")
+def get_available_slots_for_doctor(
+    doctor_id: str = Query(...),
+    date_str: str = Query(..., alias="date"),
+    current_user: dict = Depends(get_current_user),
+    supabase: Client = Depends(get_supabase_client)
+):
+    """Return available slots for a doctor on a given date (YYYY-MM-DD)."""
+    _check_admin(current_user)
+    try:
+        from services.slot_service import get_available_slots
+        target_date = date.fromisoformat(date_str)
+        slots = get_available_slots(doctor_id, target_date, supabase)
+        return slots
+    except Exception as e:
+        print(f"DEBUG: Error fetching available slots: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/{appointment_id}/book")
+def book_pending_appointment(
+    appointment_id: str,
+    payload: Dict[str, Any] = Body(...),
+    current_user: dict = Depends(get_current_user),
+    supabase: Client = Depends(get_supabase_client)
+):
+    """Assign a doctor and scheduled_at to a waiting_for_doctor appointment."""
+    _check_admin(current_user)
+    doctor_id = payload.get("doctor_id")
+    scheduled_at = payload.get("scheduled_at")
+    if not doctor_id or not scheduled_at:
+        raise HTTPException(status_code=400, detail="doctor_id and scheduled_at are required")
+    try:
+        res = supabase.table('appointments').update({
+            'doctor_id': doctor_id,
+            'scheduled_at': scheduled_at,
+            'status': 'pending',
+            'notes': payload.get('notes', 'Manually booked by admin after WhatsApp request')
+        }).eq('id', appointment_id).execute()
+        if not res.data:
+            raise HTTPException(status_code=404, detail="Appointment not found")
+        return res.data[0]
+    except Exception as e:
+        print(f"DEBUG: Error booking pending appointment: {e}")
         raise HTTPException(status_code=500, detail=str(e))
