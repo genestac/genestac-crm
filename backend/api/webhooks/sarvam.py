@@ -1217,60 +1217,9 @@ Rules:
         logger.error(f"[Sarvam/post-call] Failed to save call log: {log_err}")
         log_id = None
 
-    # ── Vectorize memory ────────────────────────────────────────────#    # ── Lead details ─────────────────────────────────────────────────────────
-    lead_name          = "ji"
-    lead_source_phrase = "humari website pe"
-    call_disposition   = "NEW"
-    gender             = ""
-    src                = ""
 
-    logger.warning(f"[Sarvam/initiate-call] Fetching lead details for {payload.lead_id!r}")
 
-    # Fetch core fields (no gender — may not exist on all deployments)
-    try:
-        u = supabase.table("users").select("name, source, status").eq("id", payload.lead_id).execute()
-        if u.data:
-            row = u.data[0]
-            lead_name        = row.get("name") or "ji"
-            src              = (row.get("source") or "").lower()
-            call_disposition = row.get("status") or "NEW"
-        else:
-            l = supabase.table("leads").select("name, source, status").eq("id", payload.lead_id).execute()
-            if l.data:
-                row = l.data[0]
-                lead_name        = row.get("name") or "ji"
-                src              = (row.get("source") or "").lower()
-                call_disposition = row.get("status") or "NEW"
-    except Exception as db_err:
-        logger.error(f"[Sarvam/initiate-call] Lead fetch failed (non-fatal): {db_err}")
 
-    # Gender is optional — column may not exist in all DB schemas
-    try:
-        gu = supabase.table("users").select("gender").eq("id", payload.lead_id).execute()
-        if gu.data:
-            gender = gu.data[0].get("gender") or ""
-        else:
-            gl = supabase.table("leads").select("gender").eq("id", payload.lead_id).execute()
-            if gl.data:
-                gender = gl.data[0].get("gender") or ""
-    except Exception:
-        gender = ""  # Column doesn't exist — safe to ignore
-
-    source_map = {
-        "facebook":  "Facebook pe", "instagram": "Instagram pe",
-        "google":    "Google pe",   "website":   "hamare website pe",
-        "whatsapp":  "WhatsApp pe", "referral":  "apne ek jaankaar se",
-    }
-    for key, phrase in source_map.items():
-        if key in src:
-            lead_source_phrase = phrase
-            break
-
-    logger.warning(
-        f"[Sarvam/initiate-call] Lead resolved: name={lead_name!r} "
-        f"disposition={call_disposition!r} gender={gender!r} source={src!r}"
-    )
-##──────────────────────────────────────────────────
 # Initiate outbound call  (called by our CRM frontend/backend)
 # ─────────────────────────────────────────────────────────────────────────────
 
