@@ -1104,17 +1104,42 @@ Rules:
             except Exception as me:
                 print(f"[Sarvam/post-call] Metadata update failed: {me}")
 
-        # Timeline note — save to user_notes (actual columns: user_id, content)
-        timeline_note = f"🤖 AI Call Summary (Sarvam)\n"
-        if is_spam: timeline_note += "🚫 SPAM / ABUSIVE CALLER — Do not call again.\n"
-        if wrong_person: timeline_note += f"⚠️ Wrong person answered. Caller: {caller_name or 'Unknown'} ({relation or 'relative'}). Actual patient: {patient_name or lead_name}.\n"
-        if weight_goal: timeline_note += f"🎯 Weight Goal: {weight_goal}\n"
-        if current_weight: timeline_note += f"⚖️ Current Weight: {current_weight}\n"
-        if interested_plan: timeline_note += f"💳 Interested Plan: {interested_plan}\n"
-        if health_concerns: timeline_note += f"🏥 Health Concerns: {health_concerns}\n"
-        if callback_requested: timeline_note += "📞 Callback Requested by lead.\n"
-        timeline_note += f"\n{summary}"
-        if recording_url: timeline_note += f"\n[▶️ Listen to Recording]({recording_url})"
+        # Timeline note — save to user_notes with full details + IST timestamp
+        from datetime import datetime, timezone, timedelta
+        IST = timezone(timedelta(hours=5, minutes=30))
+        call_time_ist = datetime.now(IST).strftime("%d %b %Y, %I:%M %p IST")
+        duration_min  = int(duration_seconds // 60)
+        duration_sec  = int(duration_seconds % 60)
+        duration_str  = f"{duration_min}m {duration_sec}s" if duration_min else f"{duration_sec}s"
+
+        score_badge = ""
+        if score_label == "Hot":    score_badge = "🔥"
+        elif score_label == "Warm": score_badge = "🌡️"
+        else:                       score_badge = "❄️"
+
+        note_lines = [
+            f"🤖 AI Voice Call Summary — {call_time_ist}",
+            f"⏱ Duration: {duration_str}  |  {score_badge} Score: {lead_score}/100 ({score_label})",
+            "─" * 40,
+        ]
+        if is_spam:          note_lines.append("🚫 SPAM / ABUSIVE CALLER — Do not call again.")
+        if wrong_person:     note_lines.append(f"⚠️ Wrong person answered. Caller: {caller_name or 'Unknown'} ({relation or 'relative'}). Actual patient: {patient_name or lead_name}.")
+        if callback_requested: note_lines.append("📞 Callback requested by lead.")
+        if appointment_booked: note_lines.append("✅ Appointment booked.")
+        if weight_goal:      note_lines.append(f"🎯 Weight Goal: {weight_goal}")
+        if current_weight:   note_lines.append(f"⚖️ Current Weight: {current_weight}")
+        if interested_plan:  note_lines.append(f"💳 Interested Plan: {interested_plan}")
+        if health_concerns:  note_lines.append(f"🏥 Health Concerns: {health_concerns}")
+        if score_reason:     note_lines.append(f"💬 Reason: {score_reason}")
+        note_lines.append("")
+        # summary can be a list of bullets or a plain string
+        if isinstance(summary, list):
+            note_lines.extend([f"• {s}" for s in summary])
+        else:
+            note_lines.append(str(summary))
+        if recording_url:
+            note_lines.append(f"\n▶️ Recording: {recording_url}")
+        timeline_note = "\n".join(note_lines)
 
         try:
             supabase.table("user_notes").insert({
@@ -1124,6 +1149,7 @@ Rules:
             print(f"[Sarvam/post-call] Timeline note saved to user_notes for lead {lead_id}")
         except Exception as note_err:
             print(f"[Sarvam/post-call] user_notes insert failed: {note_err}")
+
 
         print(
             f"[Sarvam/post-call] GPT done: lead={lead_id} score={lead_score} ({score_label}) | "
