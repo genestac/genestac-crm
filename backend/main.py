@@ -74,6 +74,10 @@ app.include_router(call_status.router, prefix="/api/webhooks/exotel", tags=["web
 from api.webhooks import sarvam as sarvam_webhooks
 app.include_router(sarvam_webhooks.router, prefix="/api/webhooks/sarvam", tags=["webhooks-sarvam"])
 
+# ── Public Lead Ingestion Webhook (Google Sheets, external forms) ─────────────
+from api.webhooks import leads as leads_webhook
+app.include_router(leads_webhook.router, prefix="/api/webhooks", tags=["webhooks-leads"])
+
 from api import templates, custom_fields
 from app.routes import admin_proforma_routes, invoice_settings_routes
 
