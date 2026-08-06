@@ -2,12 +2,12 @@
 Public webhook endpoint for ingesting leads from Google Sheets (or other external sources).
 Route: POST /api/webhooks/leads
 
-Accepts a JSON body with lead details and a source_id (UUID from user_sources table).
-No authentication required — secured by source_id validation.
+All new leads are inserted into the `leads` table.
+If the phone already exists in `leads`, we update it.
+If it exists in `users` (a paid customer), we skip — don't overwrite customer records.
 
-Schema notes:
-  - `users` table : phone, name, city, source_id, metadata (JSONB)
-  - `leads` table : phone_number, name, city, source_id, metadata (JSONB)
+Schema:
+  - `leads` table : phone_number, name, city, source_id, status, metadata (JSONB)
 """
 
 from fastapi import APIRouter, HTTPException, Depends
@@ -37,12 +37,12 @@ async def ingest_sheet_lead(
     supabase: Client = Depends(get_supabase_client)
 ):
     """
-    Receives a lead from Google Sheets Apps Script and upserts it into the
-    users table (new lead) or leads table (if already exists as a lead).
+    Receives a lead from Google Sheets Apps Script and upserts into the leads table.
 
-    - If phone already exists in users → update with new data (city is a real column)
-    - If phone already exists in leads → update metadata only (leads has no city column)
-    - If phone is new → insert into users table with all fields including city
+    Logic:
+    1. Phone exists in leads → UPDATE leads record
+    2. Phone exists in users (paying customer) → skip, return early (don't disturb)
+    3. Phone not found anywhere → INSERT into leads table
     """
 
     if not payload.phone:
@@ -53,7 +53,7 @@ async def ingest_sheet_lead(
     )
 
     # Build metadata from extra sheet fields
-    # NOTE: city is stored in the real `city` column, NOT in metadata
+    # city is stored in the real `city` column, not metadata
     sheet_meta = {}
     if payload.age:
         sheet_meta["age"] = payload.age
@@ -66,32 +66,7 @@ async def ingest_sheet_lead(
     if payload.campaign_name:
         sheet_meta["campaign_name"] = payload.campaign_name
 
-    # ── 1. Check if user already exists ────────────────────────────────────
-    res_users = (
-        supabase.table("users")
-        .select("id, metadata, source_id")
-        .ilike("phone", f"%{clean_phone}%")
-        .execute()
-    )
-
-    if res_users.data:
-        existing = res_users.data[0]
-        existing_meta = existing.get("metadata") or {}
-        existing_meta.update(sheet_meta)
-
-        update_data: dict = {"metadata": existing_meta}
-        if payload.name:
-            update_data["name"] = payload.name
-        if payload.city:
-            update_data["city"] = payload.city
-        # Only set source_id if it wasn't already assigned
-        if payload.source_id and not existing.get("source_id"):
-            update_data["source_id"] = payload.source_id
-
-        supabase.table("users").update(update_data).eq("id", existing["id"]).execute()
-        return {"success": True, "action": "updated", "record_type": "USER", "id": existing["id"]}
-
-    # ── 2. Check the leads table ─────────────────────────────────────────────
+    # ── 1. Check the leads table first ───────────────────────────────────────
     res_leads = (
         supabase.table("leads")
         .select("id, metadata, source_id")
@@ -104,20 +79,39 @@ async def ingest_sheet_lead(
         existing_meta = existing.get("metadata") or {}
         existing_meta.update(sheet_meta)
 
-        update_data = {"metadata": existing_meta}
+        update_data: dict = {"metadata": existing_meta}
         if payload.name:
             update_data["name"] = payload.name
         if payload.city:
             update_data["city"] = payload.city
+        # Only set source_id if it wasn't already assigned
         if payload.source_id and not existing.get("source_id"):
             update_data["source_id"] = payload.source_id
 
         supabase.table("leads").update(update_data).eq("id", existing["id"]).execute()
         return {"success": True, "action": "updated", "record_type": "LEAD", "id": existing["id"]}
 
-    # ── 3. Create new record in users table ─────────────────────────────────
+    # ── 2. Check users table — if they're a paying customer, skip ────────────
+    res_users = (
+        supabase.table("users")
+        .select("id")
+        .ilike("phone", f"%{clean_phone}%")
+        .execute()
+    )
+
+    if res_users.data:
+        # Phone belongs to an existing customer — don't create a duplicate lead
+        return {
+            "success": True,
+            "action": "skipped",
+            "record_type": "USER",
+            "id": res_users.data[0]["id"],
+            "reason": "Phone already exists as a customer in users table"
+        }
+
+    # ── 3. New phone — INSERT into leads table ────────────────────────────────
     insert_data: dict = {
-        "phone": payload.phone,
+        "phone_number": payload.phone,   # leads table uses phone_number, not phone
         "status": "NEW",
         "metadata": sheet_meta,
     }
@@ -128,9 +122,9 @@ async def ingest_sheet_lead(
     if payload.source_id:
         insert_data["source_id"] = payload.source_id
 
-    res = supabase.table("users").insert(insert_data).execute()
+    res = supabase.table("leads").insert(insert_data).execute()
     if not res.data:
         raise HTTPException(status_code=500, detail="Failed to insert lead")
 
     new_id = res.data[0]["id"]
-    return {"success": True, "action": "created", "record_type": "USER", "id": new_id}
+    return {"success": True, "action": "created", "record_type": "LEAD", "id": new_id}
