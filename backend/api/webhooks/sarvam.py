@@ -994,12 +994,16 @@ async def _process_post_call(body: dict):
         lr = supabase.table("leads").select("name").eq("id", lead_id).execute()
         if lr.data:
             lead_name = lr.data[0].get("name") or lead_name
+            print(f"[Sarvam/post-call] Lead found in leads table: {lead_name!r}")
         else:
             ur = supabase.table("users").select("name").eq("id", lead_id).execute()
             if ur.data:
                 lead_name = ur.data[0].get("name") or lead_name
-    except Exception:
-        pass
+                print(f"[Sarvam/post-call] Lead found in users table: {lead_name!r}")
+            else:
+                print(f"[Sarvam/post-call] WARNING: lead_id={lead_id!r} not found in leads or users table!")
+    except Exception as e:
+        print(f"[Sarvam/post-call] Lead name fetch error: {e}")
 
     # ── Lead scoring + structured analysis via GPT-4o-mini ──────────────────
     summary = f"AI Call (Sarvam) with {lead_name}."
@@ -1096,9 +1100,9 @@ Rules:
                 merged = {**existing_meta, **meta_update}
                 supabase.table("leads").update({"metadata": merged}).eq("id", lead_id).execute()
                 supabase.table("users").update({"metadata": merged}).eq("id", lead_id).execute()
-                logger.warning(f"[Sarvam/post-call] Updated lead metadata: {meta_update}")
+                print(f"[Sarvam/post-call] Updated lead metadata: {meta_update}")
             except Exception as me:
-                logger.error(f"[Sarvam/post-call] Metadata update failed: {me}")
+                print(f"[Sarvam/post-call] Metadata update failed: {me}")
 
         # Timeline note
         note_parts = ["🤖 AI Call Summary (Sarvam)"]
@@ -1123,20 +1127,23 @@ Rules:
                 "note": timeline_note,
                 "created_by": "sarvam_ai_agent"
             }).execute()
-            logger.warning(f"[Sarvam/post-call] Timeline note saved for lead {lead_id}")
+            print(f"[Sarvam/post-call] Timeline note saved via interactions table for lead {lead_id}")
         except Exception as note_err:
+            print(f"[Sarvam/post-call] interactions insert failed ({note_err}), trying user_notes...")
             try:
                 supabase.table("user_notes").insert({
                     "user_id": lead_id,
                     "note": timeline_note,
                     "created_by": "sarvam_ai_agent"
                 }).execute()
+                print(f"[Sarvam/post-call] Timeline note saved via user_notes for lead {lead_id}")
             except Exception as note_err2:
-                logger.error(f"[Sarvam/post-call] Failed to save timeline note: {note_err2}")
+                print(f"[Sarvam/post-call] BOTH note saves failed: {note_err2}")
 
-        logger.warning(
-            f"[Sarvam/post-call] lead={lead_id} score={lead_score} ({score_label}) | "
-            f"not_interested={is_not_interested} spam={is_spam} callback={callback_requested} appt={appointment_booked}"
+        print(
+            f"[Sarvam/post-call] GPT done: lead={lead_id} score={lead_score} ({score_label}) | "
+            f"not_interested={is_not_interested} spam={is_spam} callback={callback_requested} appt={appointment_booked} | "
+            f"summary={summary[:80]!r}"
         )
 
         # ── CRM status update ──────────────────────────────────────────────
@@ -1159,7 +1166,7 @@ Rules:
         if new_status:
             supabase.table("leads").update({"status": new_status}).eq("id", lead_id).execute()
             supabase.table("users").update({"status": new_status}).eq("id", lead_id).execute()
-            logger.warning(f"[Sarvam/post-call] ✅ Lead {lead_id} status → {new_status}")
+            print(f"[Sarvam/post-call] Lead {lead_id} status -> {new_status}")
 
         # ── Hot lead alert ─────────────────────────────────────────────────
         if lead_score is not None and lead_score >= 70:
@@ -1189,7 +1196,9 @@ Rules:
                 logger.error(f"[Sarvam/post-call] Hot lead alert failed: {notif_err}")
 
     except Exception as score_err:
-        logger.error(f"[Sarvam/post-call] Lead scoring failed: {score_err}", exc_info=True)
+        import traceback
+        print(f"[Sarvam/post-call] GPT/scoring FAILED: {score_err}")
+        print(traceback.format_exc())
 
     # ── Save call log ──────────────────────────────────────────────────────
     log_payload: dict[str, Any] = {
@@ -1208,13 +1217,13 @@ Rules:
         if log_res.data:
             supabase.table("ai_call_logs").update(log_payload).eq("id", log_res.data[0]["id"]).execute()
             log_id = log_res.data[0]["id"]
-            logger.warning(f"[Sarvam/post-call] Updated call log {log_id}")
+            print(f"[Sarvam/post-call] Updated call log {log_id} with summary+score")
         else:
             new_log = supabase.table("ai_call_logs").insert({"lead_id": lead_id, **log_payload}).execute()
             log_id = new_log.data[0]["id"] if new_log.data else None
-            logger.warning(f"[Sarvam/post-call] Created new call log {log_id}")
+            print(f"[Sarvam/post-call] Created new call log {log_id}")
     except Exception as log_err:
-        logger.error(f"[Sarvam/post-call] Failed to save call log: {log_err}")
+        print(f"[Sarvam/post-call] FAILED to save call log: {log_err}")
         log_id = None
 
 
