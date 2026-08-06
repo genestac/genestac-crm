@@ -928,11 +928,15 @@ async def _process_post_call(body: dict):
     recording_url = body.get("recording_url", "")
     duration_seconds = body.get("duration_seconds", 0)
 
-    # Extract lead_id from various possible locations
+    # ── Extract lead_id — check every location Sarvam could echo it back ─────
+    # We send it in webhook_config.metadata.lead_id AND agent_variables.lead_id
     lead_id = (
-        body.get("custom_data", {}).get("lead_id")
-        or body.get("metadata", {}).get("lead_id")
-        or body.get("lead_id")
+        (body.get("custom_data") or {}).get("lead_id")           # standard custom_data
+        or (body.get("metadata") or {}).get("lead_id")           # key we send in webhook_config
+        or (body.get("agent_variables") or {}).get("lead_id")    # sarvam may reflect agent_variables
+        or ((body.get("app_config") or {}).get("agent_variables") or {}).get("lead_id")  # nested
+        or (body.get("call_metadata") or {}).get("lead_id")      # sarvam v3 variant
+        or body.get("lead_id")                                    # top-level
         or ""
     )
     lead_id = str(lead_id).strip()
@@ -940,7 +944,11 @@ async def _process_post_call(body: dict):
     logger.warning(f"[Sarvam/post-call] Processing: call_id={call_id!r}, lead_id={lead_id!r}, transcript_len={len(transcript)}")
 
     if not transcript or not lead_id:
-        logger.warning("[Sarvam/post-call] Skipping — transcript empty or lead_id missing.")
+        logger.warning(
+            f"[Sarvam/post-call] Skipping — "
+            f"transcript_empty={not transcript}, lead_id_missing={not lead_id}. "
+            f"Body keys: {list(body.keys())}"
+        )
         return
 
     supabase = get_supabase_client()
