@@ -899,26 +899,28 @@ async def tool_search_knowledge_base(request: Request):
 async def sarvam_post_call(request: Request, background_tasks: BackgroundTasks):
     body: dict = await request.json()
 
-    # DIAGNOSTIC: Log the FULL raw payload so we can see exactly what Sarvam sends
+    # DIAGNOSTIC: use print() so it always appears in docker logs stdout
     import json as _json
     try:
         body_preview = _json.dumps(body, ensure_ascii=False, indent=2)
     except Exception:
         body_preview = str(body)
-    logger.warning(
-        "[Sarvam/post-call] ===== RAW PAYLOAD =====\n"
-        f"Keys: {list(body.keys())}\n"
-        f"lead_id (custom_data): {body.get('custom_data', {}).get('lead_id')!r}\n"
-        f"lead_id (metadata):    {body.get('metadata', {}).get('lead_id')!r}\n"
-        f"lead_id (top-level):   {body.get('lead_id')!r}\n"
-        f"transcript present:    {bool(body.get('transcript'))}\n"
-        f"transcript length:     {len(body.get('transcript') or '')}\n"
-        f"Full body:\n{body_preview[:3000]}\n"
-        "[Sarvam/post-call] ===== END PAYLOAD ====="
-    )
+
+    print("=" * 60)
+    print("[Sarvam/post-call] RAW PAYLOAD RECEIVED")
+    print(f"Keys: {list(body.keys())}")
+    print(f"lead_id (custom_data): {(body.get('custom_data') or {}).get('lead_id')!r}")
+    print(f"lead_id (metadata):    {(body.get('metadata') or {}).get('lead_id')!r}")
+    print(f"lead_id (agent_vars):  {(body.get('agent_variables') or {}).get('lead_id')!r}")
+    print(f"lead_id (top-level):   {body.get('lead_id')!r}")
+    print(f"transcript present:    {bool(body.get('transcript'))}")
+    print(f"transcript length:     {len(body.get('transcript') or '')}")
+    print(f"Full body:\n{body_preview[:3000]}")
+    print("=" * 60)
 
     background_tasks.add_task(_process_post_call, body)
     return {"status": "received"}
+
 
 
 async def _process_post_call(body: dict):
