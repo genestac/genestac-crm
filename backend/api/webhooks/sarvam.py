@@ -1104,41 +1104,26 @@ Rules:
             except Exception as me:
                 print(f"[Sarvam/post-call] Metadata update failed: {me}")
 
-        # Timeline note
-        note_parts = ["🤖 AI Call Summary (Sarvam)"]
-        if is_spam:
-            note_parts.append("🚫 SPAM / ABUSIVE CALLER — Do not call again.")
-        if wrong_person:
-            note_parts.append(f"⚠️ Wrong person answered. Caller: {caller_name or 'Unknown'} ({relation or 'relative'}). Actual patient: {patient_name or lead_name}.")
-        if weight_goal: note_parts.append(f"🎯 Weight Goal: {weight_goal}")
-        if current_weight: note_parts.append(f"⚖️ Current Weight: {current_weight}")
-        if interested_plan: note_parts.append(f"💳 Interested Plan: {interested_plan}")
-        if health_concerns: note_parts.append(f"🏥 Health Concerns: {health_concerns}")
-        if callback_requested: note_parts.append("📞 Callback Requested by lead.")
-        note_parts.append(f"\n{summary}")
-        if recording_url:
-            note_parts.append(f"\n[▶️ Listen to Recording]({recording_url})")
-        timeline_note = "\n".join(note_parts)
+        # Timeline note — save to user_notes (actual columns: user_id, content)
+        timeline_note = f"🤖 AI Call Summary (Sarvam)\n"
+        if is_spam: timeline_note += "🚫 SPAM / ABUSIVE CALLER — Do not call again.\n"
+        if wrong_person: timeline_note += f"⚠️ Wrong person answered. Caller: {caller_name or 'Unknown'} ({relation or 'relative'}). Actual patient: {patient_name or lead_name}.\n"
+        if weight_goal: timeline_note += f"🎯 Weight Goal: {weight_goal}\n"
+        if current_weight: timeline_note += f"⚖️ Current Weight: {current_weight}\n"
+        if interested_plan: timeline_note += f"💳 Interested Plan: {interested_plan}\n"
+        if health_concerns: timeline_note += f"🏥 Health Concerns: {health_concerns}\n"
+        if callback_requested: timeline_note += "📞 Callback Requested by lead.\n"
+        timeline_note += f"\n{summary}"
+        if recording_url: timeline_note += f"\n[▶️ Listen to Recording]({recording_url})"
 
         try:
-            supabase.table("interactions").insert({
-                "lead_id": lead_id,
-                "type": "AI_CALL_NOTE",
-                "note": timeline_note,
-                "created_by": "sarvam_ai_agent"
+            supabase.table("user_notes").insert({
+                "user_id": lead_id,
+                "content": timeline_note,
             }).execute()
-            print(f"[Sarvam/post-call] Timeline note saved via interactions table for lead {lead_id}")
+            print(f"[Sarvam/post-call] Timeline note saved to user_notes for lead {lead_id}")
         except Exception as note_err:
-            print(f"[Sarvam/post-call] interactions insert failed ({note_err}), trying user_notes...")
-            try:
-                supabase.table("user_notes").insert({
-                    "user_id": lead_id,
-                    "note": timeline_note,
-                    "created_by": "sarvam_ai_agent"
-                }).execute()
-                print(f"[Sarvam/post-call] Timeline note saved via user_notes for lead {lead_id}")
-            except Exception as note_err2:
-                print(f"[Sarvam/post-call] BOTH note saves failed: {note_err2}")
+            print(f"[Sarvam/post-call] user_notes insert failed: {note_err}")
 
         print(
             f"[Sarvam/post-call] GPT done: lead={lead_id} score={lead_score} ({score_label}) | "
@@ -1203,14 +1188,16 @@ Rules:
     # ── Save call log ──────────────────────────────────────────────────────
     log_payload: dict[str, Any] = {
         "transcript": transcript,
-        "summary": summary,
-        "status": "completed",
-        "provider": "sarvam",
+        "summary":    summary,
+        "status":     "completed",
+        "duration":   duration_seconds,   # actual column name is 'duration'
+        # NOTE: no 'provider' column in ai_call_logs schema
     }
-    if lead_score is not None: log_payload["lead_score"] = lead_score
-    if score_label is not None: log_payload["score_label"] = score_label
-    if score_reason is not None: log_payload["score_reason"] = score_reason
-    if recording_url: log_payload["recording_url"] = recording_url
+    if lead_score    is not None: log_payload["lead_score"]   = lead_score
+    if score_label   is not None: log_payload["score_label"]  = score_label
+    if score_reason  is not None: log_payload["score_reason"] = score_reason
+    if recording_url:             log_payload["recording_url"] = recording_url
+
 
     try:
         log_res = supabase.table("ai_call_logs").select("id").eq("lead_id", lead_id).order("created_at", desc=True).limit(1).execute()
