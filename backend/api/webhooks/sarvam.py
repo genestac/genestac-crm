@@ -897,23 +897,25 @@ async def tool_search_knowledge_base(request: Request):
 
 @router.post("/post-call")
 async def sarvam_post_call(request: Request, background_tasks: BackgroundTasks):
-    """
-    Sarvam sends this when a call ends.
-    
-    Expected body (approximate — confirm exact shape from your Sarvam dashboard):
-    {
-        "call_id": "<sarvam-call-id>",
-        "duration_seconds": 120,
-        "transcript": "assistant: Namaste...\nuser: Haan main baat karna chahta hu...",
-        "summary": "...",
-        "recording_url": "https://...",
-        "custom_data": {
-            "lead_id": "<uuid>"
-        }
-    }
-    """
     body: dict = await request.json()
-    logger.warning(f"[Sarvam/post-call] Received post-call event. Keys: {list(body.keys())}")
+
+    # DIAGNOSTIC: Log the FULL raw payload so we can see exactly what Sarvam sends
+    import json as _json
+    try:
+        body_preview = _json.dumps(body, ensure_ascii=False, indent=2)
+    except Exception:
+        body_preview = str(body)
+    logger.warning(
+        "[Sarvam/post-call] ===== RAW PAYLOAD =====\n"
+        f"Keys: {list(body.keys())}\n"
+        f"lead_id (custom_data): {body.get('custom_data', {}).get('lead_id')!r}\n"
+        f"lead_id (metadata):    {body.get('metadata', {}).get('lead_id')!r}\n"
+        f"lead_id (top-level):   {body.get('lead_id')!r}\n"
+        f"transcript present:    {bool(body.get('transcript'))}\n"
+        f"transcript length:     {len(body.get('transcript') or '')}\n"
+        f"Full body:\n{body_preview[:3000]}\n"
+        "[Sarvam/post-call] ===== END PAYLOAD ====="
+    )
 
     background_tasks.add_task(_process_post_call, body)
     return {"status": "received"}
