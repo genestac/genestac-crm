@@ -924,29 +924,62 @@ async def sarvam_post_call(request: Request, background_tasks: BackgroundTasks):
 
 
 async def _process_post_call(body: dict):
-    """Background task: score lead, save transcript, vectorize memory."""
-    call_id = body.get("call_id", "")
-    transcript = body.get("transcript", "")
-    recording_url = body.get("recording_url", "")
-    duration_seconds = body.get("duration_seconds", 0)
+    """
+    Background task: score lead, save transcript, vectorize memory.
 
-    # ── Extract lead_id — check every location Sarvam could echo it back ─────
-    # We send it in webhook_config.metadata.lead_id AND agent_variables.lead_id
+    Sarvam actual payload shape (confirmed from diagnostics 2026-08-06):
+    {
+      "attempt_id": "...",
+      "status": "connected",
+      "duration": 44.6,
+      "final_agent_variables": {
+          "lead_id": "...",       <- lead_id lives HERE
+          "call_summary": "...",
+          ...
+      },
+      "webhook_config": {
+          "metadata": {"lead_id": "..."}  <- backup
+      },
+      "interaction_transcript": [        <- list of turns, NOT a string
+          {"role": "agent", "en_text": "..."},
+          {"role": "user",  "en_text": "..."},
+      ]
+    }
+    """
+    # ── Extract fields from Sarvam's actual payload ────────────────────────
+    call_id          = body.get("attempt_id") or body.get("call_id", "")
+    duration_seconds = body.get("duration") or body.get("duration_seconds", 0)
+    recording_url    = body.get("recording_url", "")
+
+    # lead_id is in final_agent_variables (Sarvam echoes back all agent_variables)
+    final_vars = body.get("final_agent_variables") or {}
     lead_id = (
-        (body.get("custom_data") or {}).get("lead_id")           # standard custom_data
-        or (body.get("metadata") or {}).get("lead_id")           # key we send in webhook_config
-        or (body.get("agent_variables") or {}).get("lead_id")    # sarvam may reflect agent_variables
-        or ((body.get("app_config") or {}).get("agent_variables") or {}).get("lead_id")  # nested
-        or (body.get("call_metadata") or {}).get("lead_id")      # sarvam v3 variant
-        or body.get("lead_id")                                    # top-level
+        final_vars.get("lead_id")
+        or (body.get("webhook_config") or {}).get("metadata", {}).get("lead_id")
+        or (body.get("custom_data") or {}).get("lead_id")
+        or (body.get("metadata") or {}).get("lead_id")
+        or body.get("lead_id")
         or ""
     )
     lead_id = str(lead_id).strip()
 
-    logger.warning(f"[Sarvam/post-call] Processing: call_id={call_id!r}, lead_id={lead_id!r}, transcript_len={len(transcript)}")
+    # transcript: Sarvam sends interaction_transcript as a list of turn objects
+    raw_transcript = body.get("interaction_transcript") or body.get("transcript") or []
+    if isinstance(raw_transcript, list):
+        lines = []
+        for turn in raw_transcript:
+            role    = (turn.get("role") or "unknown").capitalize()
+            en_text = (turn.get("en_text") or "").strip()
+            if en_text:
+                lines.append(f"{role}: {en_text}")
+        transcript = "\n".join(lines)
+    else:
+        transcript = str(raw_transcript)
+
+    print(f"[Sarvam/post-call] Processing: call_id={call_id!r}, lead_id={lead_id!r}, transcript_lines={len(transcript.splitlines())}")
 
     if not transcript or not lead_id:
-        logger.warning(
+        print(
             f"[Sarvam/post-call] Skipping — "
             f"transcript_empty={not transcript}, lead_id_missing={not lead_id}. "
             f"Body keys: {list(body.keys())}"
