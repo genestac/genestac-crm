@@ -1142,8 +1142,17 @@ Rules:
         timeline_note = "\n".join(note_lines)
 
         try:
+            author_id = "0ecfe3f5-479a-4846-9b7f-4f80482cc791" # fallback
+            try:
+                staff_res = supabase.table("staffs").select("id").limit(1).execute()
+                if staff_res.data:
+                    author_id = staff_res.data[0]["id"]
+            except Exception:
+                pass
+
             supabase.table("user_notes").insert({
                 "user_id": lead_id,
+                "author_id": author_id,
                 "content": timeline_note,
             }).execute()
             print(f"[Sarvam/post-call] Timeline note saved to user_notes for lead {lead_id}")
@@ -1216,7 +1225,7 @@ Rules:
         "transcript": transcript,
         "summary":    summary,
         "status":     "completed",
-        "duration":   duration_seconds,   # actual column name is 'duration'
+        "duration":   int(duration_seconds),   # actual column name is 'duration' and it requires an integer
         # NOTE: no 'provider' column in ai_call_logs schema
     }
     if lead_score    is not None: log_payload["lead_score"]   = lead_score
