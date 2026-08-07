@@ -266,12 +266,15 @@ def _initiate_sarvam_call(to_number: str, lead_id: str, supabase):
         },
     }
 
-    # Always send app_overrides when initial_state_name is configured
+    # Always send initial_bot_message in app_overrides.
+    # New instruction-based Sarvam agents do not use states, so initial_state_name is optional.
+    app_overrides = {
+        "initial_bot_message": initial_bot_message
+    }
     if initial_state_name:
-        app_config["app_overrides"] = {
-            "initial_bot_message": initial_bot_message,
-            "initial_state_name":  initial_state_name,
-        }
+        app_overrides["initial_state_name"] = initial_state_name
+        
+    app_config["app_overrides"] = app_overrides
 
     payload = {
         "app_config": app_config,
