@@ -1132,14 +1132,23 @@ Rules:
         if health_concerns:  note_lines.append(f"🏥 Health Concerns: {health_concerns}")
         if score_reason:     note_lines.append(f"💬 Reason: {score_reason}")
         note_lines.append("")
-        # summary can be a list of bullets or a plain string
+        # AI summary bullets
         if isinstance(summary, list):
             note_lines.extend([f"• {s}" for s in summary])
         else:
             note_lines.append(str(summary))
         if recording_url:
-            note_lines.append(f"\n▶️ Recording: {recording_url}")
+            note_lines.append(f"▶️ Recording: {recording_url}")
+
+        # ── Verbatim transcript (exact, unmodified) ───────────────────────
+        note_lines.append("")
+        note_lines.append("─" * 40)
+        note_lines.append("📋 Full Transcript (verbatim):")
+        note_lines.append("")
+        note_lines.append(transcript)   # raw en_text turns joined as "Agent: ...\nUser: ..."
+
         timeline_note = "\n".join(note_lines)
+
 
         try:
             author_id = "0ecfe3f5-479a-4846-9b7f-4f80482cc791" # fallback
