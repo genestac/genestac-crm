@@ -41,7 +41,7 @@ from typing import Any, Optional
 
 import pytz
 import openai
-from fastapi import APIRouter, BackgroundTasks, Request
+from fastapi import APIRouter, BackgroundTasks, Request, HTTPException
 from pydantic import BaseModel
 
 from db.supabase import get_supabase_client
@@ -946,8 +946,9 @@ Rules:
 - `callback_requested`: true if lead asked to be called back later.
 - `appointment_booked`: true if a doctor consultation was explicitly scheduled.
 - `wrong_person`: true if the person who answered was NOT the original lead.
-- `lead_score`: must be an integer 0-100, never null. Set to 0 if is_spam is true.
-- `score_label`: Cold (0-39), Warm (40-69), Hot (70-100).
+- `unreachable`: Evaluate this internally first. A call is unreachable if it hit voicemail ("please leave a message after the tone"), or the user repeatedly asked to hold ("stay on the line", "hold on") without engaging in the conversation, or if the call disconnected before the user responded to the pitch.
+- `lead_score`: If the call was unreachable/voicemail, set this to exactly 0 (or null). Otherwise, integer 0-100 based on interest level.
+- `score_label`: If unreachable/voicemail, set to "Unreachable". Otherwise: Cold (0-39), Warm (40-69), Hot (70-100).
 - All other fields: null if not mentioned in the transcript."""
 
         resp = oai_client.chat.completions.create(
