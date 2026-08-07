@@ -229,25 +229,52 @@ def _initiate_sarvam_call(to_number: str, lead_id: str, supabase):
     if not to_number.startswith("+"):
         to_number = "+91" + to_number.lstrip("0")
 
-    payload = {
-        "app_config": {
-            "app_id": app_id,
-            "app_version": app_version,
-            "app_type": "agent",
-            "connection_config": {
-                "connection_id": connection_id,
-                "agent_phone_number": agent_phone,
-            },
-            "agent_variables": {
-                "lead_id":            lead_id,
-                "lead_name":          lead_name,
-                "lead_source_phrase": lead_source_phrase,
-                "call_disposition":   call_disposition,
-                "call_summary":       call_summary,
-                "company_name":       "Genestac",
-                "gender":             gender,
-            },
+    # initial_state_name from settings — required for v4+ to know which state to enter
+    initial_state_name = (ai_settings.get("sarvam_initial_state_name") or "").strip()
+
+    # Personalised opening line
+    first_name = lead_name.split()[0] if lead_name and lead_name != "ji" else "ji"
+    if call_summary:
+        initial_bot_message = (
+            f"Namaste {first_name} ji! Main Genestac se bol rahi hu. "
+            f"Aapne pehle humse weight loss ke baare mein baat ki thi — "
+            f"kya aap abhi thoda time de sakte hain?"
+        )
+    else:
+        initial_bot_message = (
+            f"Namaste {first_name} ji! Main Genestac se bol rahi hu. "
+            f"Aapne {lead_source_phrase} hamara weight loss program dekha tha — "
+            f"kya aap abhi thoda time de sakte hain?"
+        )
+
+    app_config: dict = {
+        "app_id": app_id,
+        "app_version": app_version,
+        "app_type": "agent",
+        "connection_config": {
+            "connection_id": connection_id,
+            "agent_phone_number": agent_phone,
         },
+        "agent_variables": {
+            "lead_id":            lead_id,
+            "lead_name":          lead_name,
+            "lead_source_phrase": lead_source_phrase,
+            "call_disposition":   call_disposition,
+            "call_summary":       call_summary,
+            "company_name":       "Genestac",
+            "gender":             gender,
+        },
+    }
+
+    # Always send app_overrides when initial_state_name is configured
+    if initial_state_name:
+        app_config["app_overrides"] = {
+            "initial_bot_message": initial_bot_message,
+            "initial_state_name":  initial_state_name,
+        }
+
+    payload = {
+        "app_config": app_config,
         "user_config": {"user_phone_number": to_number},
     }
 

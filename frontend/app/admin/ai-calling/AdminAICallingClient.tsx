@@ -662,6 +662,11 @@ export function AdminAICallingClient({ initialSettings, initialKnowledgeBase, in
                       <Label className="text-xs">Agent Phone Number</Label>
                       <Input value={settings.sarvam_agent_phone || ''} onChange={e => setSettings({...settings, sarvam_agent_phone: e.target.value})} placeholder="+911141189316" />
                     </div>
+                    <div className="space-y-1.5 col-span-2">
+                      <Label className="text-xs">Initial State Name <span className="text-amber-600 font-semibold">(required for v4+)</span></Label>
+                      <Input value={settings.sarvam_initial_state_name || ''} onChange={e => setSettings({...settings, sarvam_initial_state_name: e.target.value})} placeholder="e.g. start_call" />
+                      <p className="text-xs text-gray-500">The entry state name from your Sarvam agent. Without this, v4+ calls will disconnect immediately.</p>
+                    </div>
                   </div>
                 </div>
               )}
