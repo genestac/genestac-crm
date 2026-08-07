@@ -219,54 +219,38 @@ async def tool_fetch_lead(lead_id: str = ""):
 # Tool: connect_to_doctor
 # ─────────────────────────────────────────────────────────────────────────────
 
-@router.post("/tool/connect-doctor")
+@router.post("/tool/connect-to-doctor")
 async def tool_connect_to_doctor(request: Request, background_tasks: BackgroundTasks):
     """
     Sarvam calls this when the user explicitly asks to speak with a doctor.
     
-    Expected body (Sarvam tool call format):
-    {
-        "parameters": {
-            "lead_id": "<uuid>",
-            "user_explicitly_confirmed": true,
-            "reason": "user said doctor se baat karni hai"
-        },
-        "caller_number": "08312345678",
-        "call_id": "<sarvam-call-id>"
-    }
-    
-    Response tells Sarvam what message to speak to the user.
+    Expected body:
+    { "lead_id": "<uuid>", "lead_name": "<string>" }
+    Response tells Sarvam success/failure.
     """
-    body: dict = await request.json()
-    logger.warning(f"[Sarvam/connect-doctor] Received: {json.dumps(body)[:500]}")
+    try:
+        body: dict = await request.json()
+    except Exception:
+        body = {}
 
-    params = body.get("parameters", body.get("params", body.get("arguments", {})))
-    if isinstance(params, str):
-        try:
-            params = json.loads(params)
-        except Exception:
-            params = {}
+    lead_id = body.get("lead_id", "").strip()
+    if not lead_id or not _is_valid_uuid(lead_id):
+        logger.warning(f"[Sarvam/connect-doctor] Invalid or missing lead_id: {lead_id!r}")
+        return {"success": False}
 
-    lead_id = _get_lead_id_from_body(body)
-    # Dashboard test guard — {{lead_id}} is not a real UUID
-    if not lead_id:
-        return {"response": "[TEST] connect_to_doctor tool reached successfully. In a real call, this will bridge the user to an available doctor."}
-    customer_phone = _get_customer_phone_from_body(body)
-    user_confirmed = params.get("user_explicitly_confirmed", False)
-    reason = params.get("reason", "doctor connect requested")
+    supabase = get_supabase_client()
+    
+    # Fetch customer phone from DB since it's no longer guaranteed in payload
+    customer_phone = None
+    u = supabase.table("users").select("phone").eq("id", lead_id).execute()
+    if u.data and u.data[0].get("phone"):
+        customer_phone = u.data[0]["phone"]
+    else:
+        l = supabase.table("leads").select("phone_number").eq("id", lead_id).execute()
+        if l.data and l.data[0].get("phone_number"):
+            customer_phone = l.data[0]["phone_number"]
 
-    logger.warning(
-        f"[Sarvam/connect-doctor] lead_id={lead_id!r}, confirmed={user_confirmed}, reason={reason!r}"
-    )
-
-    # Guard: LLM must have confirmed the user explicitly asked
-    if not user_confirmed:
-        return {
-            "response": (
-                "Pehle user se confirm karo: 'Kya aap abhi kisi doctor se baat karna chahenge?' "
-                "Wait for a clear yes before connecting."
-            )
-        }
+    logger.warning(f"[Sarvam/connect-doctor] lead_id={lead_id!r}, phone={customer_phone}")
 
     supabase = get_supabase_client()
 
@@ -289,13 +273,7 @@ async def tool_connect_to_doctor(request: Request, background_tasks: BackgroundT
 
     if not available_docs:
         logger.warning("[Sarvam/connect-doctor] No active doctors found.")
-        return {
-            "response": (
-                "Abhi koi doctor available nahi hai. "
-                "Kya main aapke liye ek future appointment book kar sakti hu, "
-                "ya phir aapko callback schedule kar sakti hu?"
-            )
-        }
+        return {"success": False}
 
     doctor = available_docs[0]
     doctor_phone = doctor["exotel_number"]
@@ -334,13 +312,7 @@ async def tool_connect_to_doctor(request: Request, background_tasks: BackgroundT
 
     background_tasks.add_task(_do_bridge)
 
-    return {
-        "response": (
-            f"Bilkul! Main abhi Dr. {doctor_name} ko connect kar rahi hu. "
-            f"Aapko hamare number se ek aur call aayegi. "
-            f"Is call ko aap band kar sakte hain. Thank you!"
-        )
-    }
+    return {"success": True}
 
 
 def _find_lead_active_appointment(supabase, lead_id: str, patient_phone: Optional[str] = None) -> Optional[dict]:
@@ -398,64 +370,31 @@ def _find_lead_active_appointment(supabase, lead_id: str, patient_phone: Optiona
 # Tool: check_consultation  (check if user already has an active appointment)
 # ─────────────────────────────────────────────────────────────────────────────
 
-@router.get("/tool/check-consultation")
 @router.post("/tool/check-consultation")
-async def tool_check_consultation(request: Request, lead_id: Optional[str] = None):
+async def tool_check_consultation(request: Request):
     """
     Sarvam calls this to check if the caller already has a consultation booked.
-    Works for both GET (query param lead_id) and POST (body parameters).
+    Expected body: { "lead_id": "<uuid>" }
+    Response: { "has_active_consultation": true | false }
     """
-    resolved_lead_id = ""
-    phone = ""
+    try:
+        body: dict = await request.json()
+    except Exception:
+        body = {}
 
-    if request.method == "POST":
-        try:
-            body: dict = await request.json()
-            resolved_lead_id = _get_lead_id_from_body(body)
-            phone = _get_customer_phone_from_body(body)
-        except Exception:
-            body = {}
-
-    if not resolved_lead_id and lead_id:
-        if _is_valid_uuid(lead_id.strip()):
-            resolved_lead_id = lead_id.strip()
-
-    if not resolved_lead_id and not phone:
-        return {
-            "has_booked_consultation": False,
-            "response": "[TEST] check_consultation tool reached successfully. In a real call, this checks existing consultations."
-        }
+    lead_id = body.get("lead_id", "").strip()
+    if not lead_id or not _is_valid_uuid(lead_id):
+        logger.warning(f"[Sarvam/check-consultation] Invalid or missing lead_id: {lead_id!r}")
+        return {"has_active_consultation": False}
 
     supabase = get_supabase_client()
-    existing_appt = _find_lead_active_appointment(supabase, resolved_lead_id, phone)
+    existing_appt = _find_lead_active_appointment(supabase, lead_id)
 
-    if existing_appt:
-        scheduled_at = existing_appt.get("scheduled_at", "")
-        doc_name = existing_appt.get("doctor_name", "our doctor")
-        try:
-            friendly_time = datetime.fromisoformat(scheduled_at).astimezone(IST).strftime("%d %B %Y at %I:%M %p IST")
-        except Exception:
-            friendly_time = scheduled_at
-
-        return {
-            "has_booked_consultation": True,
-            "appointment_id": existing_appt.get("id"),
-            "doctor_name": doc_name,
-            "scheduled_at": scheduled_at,
-            "friendly_time": friendly_time,
-            "status": existing_appt.get("status", "pending"),
-            "response": (
-                f"Aapka consultation already booked hai Dr. {doc_name} ke saath {friendly_time} ke liye. "
-                f"Kya aap is appointment ka time change ya reschedule karna chahte hain?"
-            )
-        }
+    has_appt = bool(existing_appt)
+    logger.warning(f"[Sarvam/check-consultation] lead_id={lead_id}, has_active_consultation={has_appt}")
 
     return {
-        "has_booked_consultation": False,
-        "response": (
-            "Aapka koi active consultation abhi book nahi hai. "
-            "Kya aap hamare expert doctor ke saath consultation book karna chahenge?"
-        )
+        "has_active_consultation": has_appt
     }
 
 
@@ -562,31 +501,31 @@ async def tool_schedule_call(request: Request):
 
     Expected body:
     {
-        "parameters": {
-            "lead_id": "<uuid>",
-            "time_preference": "2026-07-31T15:00:00+05:30",
-            "reason": "weight loss consultation"
-        }
+        "lead_id": "<uuid>",
+        "lead_name": "<string>",
+        "appointment_time": "2026-07-31T15:00:00+05:30"
+    }
+    Response:
+    {
+        "success": true | false,
+        "confirmed_time": "<string>"
     }
     """
-    body: dict = await request.json()
-    logger.warning(f"[Sarvam/schedule-call] Received: {json.dumps(body)[:500]}")
+    try:
+        body: dict = await request.json()
+    except Exception:
+        body = {}
 
-    params = body.get("parameters", body.get("params", body.get("arguments", {})))
-    if isinstance(params, str):
-        try:
-            params = json.loads(params)
-        except Exception:
-            params = {}
+    lead_id = body.get("lead_id", "").strip()
+    if not lead_id or not _is_valid_uuid(lead_id):
+        logger.warning(f"[Sarvam/schedule-call] Invalid or missing lead_id: {lead_id!r}")
+        return {"success": False}
+        
+    time_preference = body.get("appointment_time", "")
+    lead_name_from_agent = body.get("lead_name", "the customer")
+    reason = "Consultation booked via Sarvam Voice Agent"
 
-    lead_id = _get_lead_id_from_body(body)
-    # Dashboard test guard — {{lead_id}} is not a real UUID
-    if not lead_id:
-        return {"response": "[TEST] schedule_call tool reached successfully. In a real call, this will book or update a doctor consultation appointment."}
-    time_preference = params.get("time_preference", "")
-    reason = params.get("reason", "Consultation")
-
-    logger.warning(f"[Sarvam/schedule-call] lead_id={lead_id!r}, time={time_preference!r}, reason={reason!r}")
+    logger.warning(f"[Sarvam/schedule-call] lead_id={lead_id!r}, time={time_preference!r}")
 
     supabase = get_supabase_client()
 
@@ -629,7 +568,7 @@ async def tool_schedule_call(request: Request):
     doc_res = supabase.table("doctor_schedules").select("staff_id, staffs(full_name), allow_scheduling").eq("allow_scheduling", True).execute()
 
     if not doc_res.data:
-        return {"response": "Main appointment schedule nahi kar saki. Humari team aapse contact karegi jald hi."}
+        return {"success": False}
 
     from services.slot_service import find_nearest_available_slot
     best_slot = None
@@ -659,12 +598,7 @@ async def tool_schedule_call(request: Request):
                     best_doctor_name = staff_info.get("full_name", "our doctor")
 
     if not best_slot:
-        return {
-            "response": (
-                "Mujhe agle 7 dino mein koi available slot nahi mili. "
-                "Humari team aapse personally contact karegi."
-            )
-        }
+        return {"success": False}
 
     actual_scheduled_at = best_slot["start"]
 
@@ -709,10 +643,8 @@ async def tool_schedule_call(request: Request):
             logger.error(f"[Sarvam/schedule-call] Failed to notify doctor: {notif_err}")
 
         return {
-            "response": (
-                f"Aapka pehle se booked appointment Dr. {best_doctor_name} ke saath reschedule ho gaya hai {friendly_time} ke liye. "
-                f"Aapko confirmation bheja jayega. Kya main aur kuch help kar sakti hu?"
-            )
+            "success": True,
+            "confirmed_time": friendly_time
         }
     else:
         appt_payload = {
@@ -750,10 +682,8 @@ async def tool_schedule_call(request: Request):
             logger.error(f"[Sarvam/schedule-call] Failed to notify doctor: {notif_err}")
 
         return {
-            "response": (
-                f"Aapka appointment Dr. {best_doctor_name} ke saath {friendly_time} ke liye book ho gaya hai. "
-                f"Aapko confirmation bheja jayega. Kya main aur kuch help kar sakti hu?"
-            )
+            "success": True,
+            "confirmed_time": friendly_time
         }
 
 
@@ -766,97 +696,65 @@ async def tool_schedule_call(request: Request):
 async def tool_schedule_callback(request: Request):
     """
     Sarvam calls this when the user says they're busy and want a callback later.
-
     Expected body:
     {
-        "parameters": {
-            "lead_id": "<uuid>",
-            "callback_datetime": "2026-07-31T18:00:00+05:30"
-        }
+        "lead_id": "<uuid>",
+        "lead_name": "<string>",
+        "callback_time": "<string>"
     }
     """
-    body: dict = await request.json()
-    logger.warning(f"[Sarvam/schedule-callback] Received: {json.dumps(body)[:500]}")
+    try:
+        body: dict = await request.json()
+    except Exception:
+        body = {}
 
-    params = body.get("parameters", body.get("params", body.get("arguments", {})))
-    if isinstance(params, str):
-        try:
-            params = json.loads(params)
-        except Exception:
-            params = {}
-
-    lead_id = _get_lead_id_from_body(body)
-    # Dashboard test guard — {{lead_id}} is not a real UUID
-    if not lead_id:
-        return {"response": "[TEST] schedule_callback tool reached successfully. In a real call, this will schedule a callback for the lead."}
-    callback_time = params.get("callback_datetime", "")
-
+    lead_id = body.get("lead_id", "").strip()
+    if not lead_id or not _is_valid_uuid(lead_id):
+        logger.warning(f"[Sarvam/schedule-callback] Invalid or missing lead_id: {lead_id!r}")
+        return {"success": False}
+        
+    callback_time = body.get("callback_time", "")
     logger.warning(f"[Sarvam/schedule-callback] lead_id={lead_id!r}, time={callback_time!r}")
 
-    if lead_id:
-        try:
-            supabase = get_supabase_client()
-            supabase.table("leads").update({
-                "ai_callback_time": callback_time,
-                "status": "CALLBACK_SCHEDULED"
-            }).eq("id", lead_id).execute()
-            supabase.table("users").update({
-                "ai_callback_time": callback_time,
-                "status": "CALLBACK_SCHEDULED"
-            }).eq("id", lead_id).execute()
-            logger.warning(f"[Sarvam/schedule-callback] Lead {lead_id} callback set to {callback_time}")
-        except Exception as e:
-            logger.error(f"[Sarvam/schedule-callback] DB update failed: {e}")
-
-    # Friendly time
-    friendly_time = callback_time
     try:
-        parsed = datetime.fromisoformat(callback_time).astimezone(IST)
-        friendly_time = parsed.strftime("%d %B %Y at %I:%M %p IST")
-    except Exception:
-        pass
+        supabase = get_supabase_client()
+        supabase.table("leads").update({
+            "ai_callback_time": callback_time,
+            "status": "CALLBACK_SCHEDULED"
+        }).eq("id", lead_id).execute()
+        supabase.table("users").update({
+            "ai_callback_time": callback_time,
+            "status": "CALLBACK_SCHEDULED"
+        }).eq("id", lead_id).execute()
+        logger.warning(f"[Sarvam/schedule-callback] Lead {lead_id} callback set to {callback_time}")
+    except Exception as e:
+        logger.error(f"[Sarvam/schedule-callback] DB update failed: {e}")
+        return {"success": False}
 
-    return {
-        "response": (
-            f"Bilkul, main note kar leti hu. "
-            f"Humari team aapko {friendly_time} par call karegi. "
-            f"Thank you aapke samay ke liye!"
-        )
-    }
+    return {"success": True}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Tool: search_knowledge_base  (RAG search)
 # ─────────────────────────────────────────────────────────────────────────────
 
-@router.post("/tool/search-kb")
+@router.post("/tool/search-knowledge-base")
 async def tool_search_knowledge_base(request: Request):
     """
     Sarvam calls this when the user asks about pricing, program details, etc.
-
-    Expected body:
-    {
-        "parameters": {
-            "lead_id": "<uuid>",
-            "query": "What is the price of the medical program?"
-        }
-    }
+    Expected body: { "lead_id": "<uuid>", "question": "<string>" }
+    Response: { "answer": "<string>" }
     """
-    body: dict = await request.json()
-    logger.warning(f"[Sarvam/search-kb] Received: {json.dumps(body)[:500]}")
+    try:
+        body: dict = await request.json()
+    except Exception:
+        body = {}
 
-    params = body.get("parameters", body.get("params", body.get("arguments", {})))
-    if isinstance(params, str):
-        try:
-            params = json.loads(params)
-        except Exception:
-            params = {}
-
-    query = params.get("query", "")
+    query = body.get("question", "")
     logger.warning(f"[Sarvam/search-kb] Searching for: '{query}'")
 
     if not query:
-        return {"response": "Mujhe aapka sawaal clearly samajh nahi aaya. Kya aap dobara pooch sakte hain?"}
+        return {"answer": ""}
 
     try:
         oai_client = openai.AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -873,22 +771,16 @@ async def tool_search_knowledge_base(request: Request):
             "match_count": 3
         }).execute()
 
-        results = search_res.data or []
         if results:
             formatted = "\n\n".join([f"{r['title']}: {r['content']}" for r in results])
             logger.warning(f"[Sarvam/search-kb] Found {len(results)} matches.")
-            return {"response": formatted}
+            return {"answer": formatted}
         else:
             logger.warning("[Sarvam/search-kb] No matches found.")
-            return {
-                "response": (
-                    "Mujhe is sawaal ka exact jawab abhi nahi mila. "
-                    "Kya aap doctor se baat karna chahenge ya callback schedule karein?"
-                )
-            }
+            return {"answer": ""}
     except Exception as e:
         logger.error(f"[Sarvam/search-kb] Error: {e}")
-        return {"response": "Abhi knowledge base search mein dikkat aa rahi hai. Kripya thodi der baad try karein."}
+        return {"answer": ""}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
