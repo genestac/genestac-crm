@@ -1287,21 +1287,33 @@ async def initiate_call(payload: InitiateCallRequest):
     """
     supabase = get_supabase_client()
 
-    # ── Sarvam config: DB (AI Calling tab) first, then .env fallback ────────
+    # ── Sarvam config: ONLY from DB (AI Voice Calling tab) ──────────────────
     try:
         db_settings_res = supabase.table("global_settings").select("settings_value").eq("settings_key", "ai_call_settings").execute()
         db_ai = db_settings_res.data[0]["settings_value"] if db_settings_res.data else {}
-    except Exception:
-        db_ai = {}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to load AI calling settings: {e}")
 
-    api_key       = db_ai.get("sarvam_api_key")       or os.getenv("SARVAM_API_KEY", "")
-    org_id        = db_ai.get("sarvam_org_id")        or os.getenv("SARVAM_ORG_ID", "")
-    workspace_id  = db_ai.get("sarvam_workspace_id")  or os.getenv("SARVAM_WORKSPACE_ID", "")
-    app_id        = db_ai.get("sarvam_app_id")        or os.getenv("SARVAM_APP_ID", "")
-    app_version   = int(db_ai.get("sarvam_app_version") or os.getenv("SARVAM_APP_VERSION") or "3")
-    connection_id = db_ai.get("sarvam_connection_id") or os.getenv("SARVAM_CONNECTION_ID", "")
-    agent_phone   = db_ai.get("sarvam_agent_phone")   or os.getenv("SARVAM_AGENT_PHONE_NUMBER", "")
+    api_key       = (db_ai.get("sarvam_api_key") or "").strip()
+    org_id        = (db_ai.get("sarvam_org_id") or "").strip()
+    workspace_id  = (db_ai.get("sarvam_workspace_id") or "").strip()
+    app_id        = (db_ai.get("sarvam_app_id") or "").strip()
+    app_version   = int(db_ai.get("sarvam_app_version") or 3)
+    connection_id = (db_ai.get("sarvam_connection_id") or "").strip()
+    agent_phone   = (db_ai.get("sarvam_agent_phone") or "").strip()
     backend_url   = os.getenv("BACKEND_PUBLIC_URL", "")
+
+    missing = [k for k, v in {
+        "sarvam_api_key": api_key, "sarvam_org_id": org_id,
+        "sarvam_workspace_id": workspace_id, "sarvam_app_id": app_id,
+        "sarvam_connection_id": connection_id, "sarvam_agent_phone": agent_phone,
+    }.items() if not v]
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Sarvam AI is not fully configured. Missing fields: {', '.join(missing)}. "
+                   "Go to Admin → AI Voice Calling tab → Sarvam AI Configuration and fill in all required fields."
+        )
 
     if not all([api_key, org_id, workspace_id, app_id, connection_id, agent_phone]):
         return {"success": False, "error": "Sarvam config incomplete. Check .env SARVAM_* variables."}

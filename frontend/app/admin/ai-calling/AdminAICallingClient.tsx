@@ -518,6 +518,41 @@ export function AdminAICallingClient({ initialSettings, initialKnowledgeBase, in
             </div>
           )}
 
+          {/* ── Sarvam Config Incomplete Warning ── */}
+          {(!settings.ai_provider || settings.ai_provider === 'sarvam') && (() => {
+            const required: Record<string, string> = {
+              sarvam_api_key:      'API Key',
+              sarvam_org_id:       'Org ID',
+              sarvam_workspace_id: 'Workspace ID',
+              sarvam_app_id:       'App ID',
+              sarvam_connection_id:'Connection ID',
+              sarvam_agent_phone:  'Agent Phone Number',
+            }
+            const missing = Object.entries(required)
+              .filter(([k]) => !(settings as any)[k])
+              .map(([, label]) => label)
+            if (missing.length === 0) return null
+            return (
+              <div className="lg:col-span-2 flex items-start gap-4 bg-amber-50 border border-amber-300 rounded-2xl p-5 shadow-sm">
+                <div className="p-2 bg-amber-100 rounded-xl shrink-0 text-xl">⚠️</div>
+                <div className="flex-1">
+                  <p className="font-bold text-amber-900 text-base">Sarvam AI not fully configured — calls are blocked</p>
+                  <p className="text-sm text-amber-700 mt-1">
+                    The following required fields are missing in the <strong>Sarvam AI Configuration</strong> section below:
+                  </p>
+                  <ul className="mt-2 flex flex-wrap gap-2">
+                    {missing.map(f => (
+                      <li key={f} className="px-2 py-0.5 bg-amber-100 border border-amber-300 rounded-lg text-xs font-semibold text-amber-800">
+                        {f}
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="text-xs text-amber-600 mt-2">Fill in all fields and click Save Settings. No calls will be made until all fields are provided.</p>
+                </div>
+              </div>
+            )
+          })()}
+
           {/* Left Column: Settings & Prompt */}
           <div className="space-y-6">
             <div className="bg-white/80 backdrop-blur-xl p-8 rounded-3xl border border-gray-100 shadow-lg hover:shadow-xl transition-shadow duration-300 space-y-8">
