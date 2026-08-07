@@ -163,7 +163,7 @@ async def tool_fetch_lead(lead_id: str = ""):
     )
     if not lead_id or not _uuid_re.match(lead_id.strip()):
         logger.warning(f"[Sarvam/fetch-lead] Skipping DB query — lead_id not a valid UUID: {lead_id!r}")
-        return _DEFAULTS
+        raise HTTPException(status_code=400, detail="Missing or invalid lead_id")
 
     supabase = get_supabase_client()
 
@@ -236,7 +236,7 @@ async def tool_connect_to_doctor(request: Request, background_tasks: BackgroundT
     lead_id = body.get("lead_id", "").strip()
     if not lead_id or not _is_valid_uuid(lead_id):
         logger.warning(f"[Sarvam/connect-doctor] Invalid or missing lead_id: {lead_id!r}")
-        return {"success": False}
+        raise HTTPException(status_code=400, detail="Missing or invalid lead_id")
 
     supabase = get_supabase_client()
     
@@ -385,7 +385,7 @@ async def tool_check_consultation(request: Request):
     lead_id = body.get("lead_id", "").strip()
     if not lead_id or not _is_valid_uuid(lead_id):
         logger.warning(f"[Sarvam/check-consultation] Invalid or missing lead_id: {lead_id!r}")
-        return {"has_active_consultation": False}
+        raise HTTPException(status_code=400, detail="Missing or invalid lead_id")
 
     supabase = get_supabase_client()
     existing_appt = _find_lead_active_appointment(supabase, lead_id)
@@ -519,7 +519,7 @@ async def tool_schedule_call(request: Request):
     lead_id = body.get("lead_id", "").strip()
     if not lead_id or not _is_valid_uuid(lead_id):
         logger.warning(f"[Sarvam/schedule-call] Invalid or missing lead_id: {lead_id!r}")
-        return {"success": False}
+        raise HTTPException(status_code=400, detail="Missing or invalid lead_id")
         
     time_preference = body.get("appointment_time", "")
     lead_name_from_agent = body.get("lead_name", "the customer")
@@ -711,7 +711,7 @@ async def tool_schedule_callback(request: Request):
     lead_id = body.get("lead_id", "").strip()
     if not lead_id or not _is_valid_uuid(lead_id):
         logger.warning(f"[Sarvam/schedule-callback] Invalid or missing lead_id: {lead_id!r}")
-        return {"success": False}
+        raise HTTPException(status_code=400, detail="Missing or invalid lead_id")
         
     callback_time = body.get("callback_time", "")
     logger.warning(f"[Sarvam/schedule-callback] lead_id={lead_id!r}, time={callback_time!r}")
@@ -749,6 +749,11 @@ async def tool_search_knowledge_base(request: Request):
         body: dict = await request.json()
     except Exception:
         body = {}
+
+    lead_id = body.get("lead_id", "").strip()
+    if not lead_id or not _is_valid_uuid(lead_id):
+        logger.warning(f"[Sarvam/search-kb] Invalid or missing lead_id: {lead_id!r}")
+        raise HTTPException(status_code=400, detail="Missing or invalid lead_id")
 
     query = body.get("question", "")
     logger.warning(f"[Sarvam/search-kb] Searching for: '{query}'")
