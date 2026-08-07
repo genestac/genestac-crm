@@ -1292,7 +1292,7 @@ async def initiate_call(payload: InitiateCallRequest):
     org_id        = os.getenv("SARVAM_ORG_ID", "")
     workspace_id  = os.getenv("SARVAM_WORKSPACE_ID", "")
     app_id        = os.getenv("SARVAM_APP_ID", "")
-    app_version   = int(os.getenv("SARVAM_APP_VERSION", "3"))
+    app_version   = int(os.getenv("SARVAM_APP_VERSION") or "3")  # must be set in .env
     connection_id = os.getenv("SARVAM_CONNECTION_ID", "")
     agent_phone   = os.getenv("SARVAM_AGENT_PHONE_NUMBER", "")
     backend_url   = os.getenv("BACKEND_PUBLIC_URL", "")
