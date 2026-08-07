@@ -199,3 +199,67 @@ async def get_admin_metrics(
         traceback.print_exc()
         from fastapi.responses import JSONResponse
         return JSONResponse(status_code=500, content={"detail": "Failed to fetch admin metrics", "error": str(e)})
+
+from pydantic import BaseModel
+from typing import List
+
+class WhatsappConfig(BaseModel):
+    numbers: List[str]
+    time: str
+
+@router.get("/whatsapp-config")
+async def get_whatsapp_config(
+    current_user: dict = Depends(get_current_user),
+    supabase: Client = Depends(get_supabase_client)
+):
+    if not is_admin(current_user, supabase):
+        raise HTTPException(status_code=403, detail="Not authorized.")
+    
+    num_res = supabase.table("global_settings").select("settings_value").eq("settings_key", "whatsapp_report_numbers").execute()
+    time_res = supabase.table("global_settings").select("settings_value").eq("settings_key", "whatsapp_report_time").execute()
+    
+    numbers = []
+    time_val = "21:00"
+    
+    if num_res.data and "numbers" in num_res.data[0].get("settings_value", {}):
+        numbers = num_res.data[0]["settings_value"]["numbers"]
+        
+    if time_res.data and "time" in time_res.data[0].get("settings_value", {}):
+        time_val = time_res.data[0]["settings_value"]["time"]
+        
+    return {"numbers": numbers, "time": time_val}
+
+@router.post("/whatsapp-config")
+async def save_whatsapp_config(
+    config: WhatsappConfig,
+    current_user: dict = Depends(get_current_user),
+    supabase: Client = Depends(get_supabase_client)
+):
+    if not is_admin(current_user, supabase):
+        raise HTTPException(status_code=403, detail="Not authorized.")
+        
+    supabase.table("global_settings").upsert({
+        "settings_key": "whatsapp_report_numbers",
+        "settings_value": {"numbers": config.numbers}
+    }).execute()
+    
+    supabase.table("global_settings").upsert({
+        "settings_key": "whatsapp_report_time",
+        "settings_value": {"time": config.time}
+    }).execute()
+    
+    return {"success": True}
+
+@router.post("/send-whatsapp-report")
+async def trigger_whatsapp_report(
+    current_user: dict = Depends(get_current_user),
+    supabase: Client = Depends(get_supabase_client)
+):
+    if not is_admin(current_user, supabase):
+        raise HTTPException(status_code=403, detail="Not authorized.")
+        
+    from core.scheduler import _send_daily_whatsapp_report_logic
+    import asyncio
+    asyncio.create_task(_send_daily_whatsapp_report_logic())
+    
+    return {"success": True, "message": "Report generation triggered in background."}

@@ -498,6 +498,99 @@ def sweep_whatsapp_campaigns():
 
 
 
+async def _send_daily_whatsapp_report_logic():
+    print("[WhatsApp Report] Generating daily report...")
+    supabase = get_supabase_client()
+    
+    # 1. Fetch Config
+    num_res = supabase.table("global_settings").select("settings_value").eq("settings_key", "whatsapp_report_numbers").execute()
+    numbers = num_res.data[0].get("settings_value", {}).get("numbers", []) if num_res.data else []
+    
+    if not numbers:
+        print("[WhatsApp Report] No phone numbers configured. Skipping.")
+        return
+        
+    # 2. Gather Stats
+    today_date = datetime.datetime.now()
+    start_of_today_str = today_date.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+    
+    # New Leads
+    leads_res = supabase.table("leads").select("id", count="exact").gte("created_at", start_of_today_str).execute()
+    new_leads = leads_res.count or 0
+    
+    # AI Calls
+    logs_res = supabase.table("ai_call_logs").select("id, status", count="exact").gte("created_at", start_of_today_str).execute()
+    total_calls = logs_res.count or 0
+    answered = len([log for log in (logs_res.data or []) if log.get("status") == "completed"])
+    
+    # Consultations
+    consult_res = supabase.table("leads").select("id", count="exact").eq("status", "CONSULTATION_SCHEDULED").gte("created_at", start_of_today_str).execute()
+    # Note: Using created_at might only catch leads created today that became scheduled today. Let's assume this is a simplified proxy. 
+    # For better accuracy, we just show current leads with this status created today, or we can look at all leads updated today.
+    # We will use updated_at for status changes if possible. But for now, we just query based on created_at or generic.
+    
+    # Let's do a broader fetch for today's conversions/consultations
+    # All leads updated today to CONSULTATION_SCHEDULED or CONVERTED
+    updated_res = supabase.table("leads").select("status").gte("updated_at", start_of_today_str).execute()
+    consults_today = 0
+    conversions_today = 0
+    for lead in (updated_res.data or []):
+        if lead.get("status") == "CONSULTATION_SCHEDULED":
+            consults_today += 1
+        elif lead.get("status") == "CONVERTED":
+            conversions_today += 1
+            
+    # Orders (Revenue)
+    orders_res = supabase.table("proforma_invoices").select("total_amount").gte("created_at", start_of_today_str).execute()
+    revenue = sum(o.get("total_amount", 0) for o in (orders_res.data or []))
+    orders_count = len(orders_res.data or [])
+            
+    report_text = f"""📊 *Genestac Daily Report* 📊
+Date: {today_date.strftime('%Y-%m-%d')}
+
+📈 *Leads & Sales*
+- New Leads: {new_leads}
+- Consultations Booked: {consults_today}
+- New Conversions: {conversions_today}
+- Orders Generated: {orders_count}
+- Total Revenue: ₹{revenue:,.2f}
+
+🤖 *AI Calling*
+- Total Calls Triggered: {total_calls}
+- Calls Answered: {answered}
+
+_This is an automated daily report from Genestac CRM._"""
+
+    from services.whatsapp_service import send_whatsapp_text
+    import asyncio
+    
+    tasks = []
+    for num in numbers:
+        tasks.append(send_whatsapp_text(num, report_text))
+        
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    print(f"[WhatsApp Report] Sent to {len(numbers)} numbers. Results: {results}")
+
+
+def check_and_send_whatsapp_report():
+    try:
+        supabase = get_supabase_client()
+        time_res = supabase.table("global_settings").select("settings_value").eq("settings_key", "whatsapp_report_time").execute()
+        target_time = time_res.data[0].get("settings_value", {}).get("time", "21:00") if time_res.data else "21:00"
+        
+        now = datetime.datetime.now()
+        current_time_str = now.strftime("%H:%M")
+        
+        if current_time_str == target_time:
+            # Prevent multiple sends within the same minute by checking a basic log/cache if needed,
+            # but apscheduler runs this exactly once per minute if we use interval=1m at 0 seconds.
+            import asyncio
+            asyncio.run(_send_daily_whatsapp_report_logic())
+            
+    except Exception as e:
+        print(f"[WhatsApp Report Trigger Error] {e}")
+
+
 def start_scheduler():
     if not scheduler.running:
         # Sweep for auto-calls and pending callbacks every 5 minutes
@@ -506,6 +599,8 @@ def start_scheduler():
         scheduler.add_job(sweep_scheduled_appointments, 'interval', minutes=1, id="appointment_call_sweep", replace_existing=True)
         # Sweep for WhatsApp Campaigns every 1 minute
         scheduler.add_job(sweep_whatsapp_campaigns, 'interval', minutes=1, id="whatsapp_campaign_sweep", replace_existing=True)
+        # Check WhatsApp Daily Report trigger every 1 minute
+        scheduler.add_job(check_and_send_whatsapp_report, 'interval', minutes=1, id="whatsapp_daily_report", replace_existing=True)
         scheduler.start()
         print("Started Background Scheduler for AI Voice Calling and WhatsApp.")
 
