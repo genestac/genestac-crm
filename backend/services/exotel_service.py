@@ -131,14 +131,24 @@ def _initiate_pipecat_call(from_number: str, to_number: str, lead_id: str):
 
 
 def _initiate_sarvam_call(to_number: str, lead_id: str, supabase):
-    """Initiates an AI outbound call using Sarvam AI's Outbound Call API (v3)."""
-    api_key       = os.getenv("SARVAM_API_KEY", "")
-    org_id        = os.getenv("SARVAM_ORG_ID", "")
-    workspace_id  = os.getenv("SARVAM_WORKSPACE_ID", "")
-    app_id        = os.getenv("SARVAM_APP_ID", "")
-    app_version   = int(os.getenv("SARVAM_APP_VERSION") or "3")  # must be set in .env
-    connection_id = os.getenv("SARVAM_CONNECTION_ID", "")
-    agent_phone   = os.getenv("SARVAM_AGENT_PHONE_NUMBER", "")
+    """Initiates an AI outbound call using Sarvam AI's Outbound Call API (v3).
+    Reads credentials from global_settings (AI Voice Calling tab) first,
+    then falls back to .env variables.
+    """
+    # ── Load from global_settings first (AI Voice Calling tab in admin) ─────
+    try:
+        settings_res = supabase.table("global_settings").select("settings_value").eq("settings_key", "ai_call_settings").execute()
+        ai_settings = settings_res.data[0]["settings_value"] if settings_res.data else {}
+    except Exception:
+        ai_settings = {}
+
+    api_key       = ai_settings.get("sarvam_api_key")       or os.getenv("SARVAM_API_KEY", "")
+    org_id        = ai_settings.get("sarvam_org_id")        or os.getenv("SARVAM_ORG_ID", "")
+    workspace_id  = ai_settings.get("sarvam_workspace_id")  or os.getenv("SARVAM_WORKSPACE_ID", "")
+    app_id        = ai_settings.get("sarvam_app_id")        or os.getenv("SARVAM_APP_ID", "")
+    app_version   = int(ai_settings.get("sarvam_app_version") or os.getenv("SARVAM_APP_VERSION") or "3")
+    connection_id = ai_settings.get("sarvam_connection_id") or os.getenv("SARVAM_CONNECTION_ID", "")
+    agent_phone   = ai_settings.get("sarvam_agent_phone")   or os.getenv("SARVAM_AGENT_PHONE_NUMBER", "")
     backend_url   = os.getenv("BACKEND_PUBLIC_URL", "")
 
     if not all([api_key, org_id, workspace_id, app_id, connection_id, agent_phone]):

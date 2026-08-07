@@ -1287,14 +1287,20 @@ async def initiate_call(payload: InitiateCallRequest):
     """
     supabase = get_supabase_client()
 
-    # ── Sarvam config from env ───────────────────────────────────────────────
-    api_key       = os.getenv("SARVAM_API_KEY", "")
-    org_id        = os.getenv("SARVAM_ORG_ID", "")
-    workspace_id  = os.getenv("SARVAM_WORKSPACE_ID", "")
-    app_id        = os.getenv("SARVAM_APP_ID", "")
-    app_version   = int(os.getenv("SARVAM_APP_VERSION") or "3")  # must be set in .env
-    connection_id = os.getenv("SARVAM_CONNECTION_ID", "")
-    agent_phone   = os.getenv("SARVAM_AGENT_PHONE_NUMBER", "")
+    # ── Sarvam config: DB (AI Calling tab) first, then .env fallback ────────
+    try:
+        db_settings_res = supabase.table("global_settings").select("settings_value").eq("settings_key", "ai_call_settings").execute()
+        db_ai = db_settings_res.data[0]["settings_value"] if db_settings_res.data else {}
+    except Exception:
+        db_ai = {}
+
+    api_key       = db_ai.get("sarvam_api_key")       or os.getenv("SARVAM_API_KEY", "")
+    org_id        = db_ai.get("sarvam_org_id")        or os.getenv("SARVAM_ORG_ID", "")
+    workspace_id  = db_ai.get("sarvam_workspace_id")  or os.getenv("SARVAM_WORKSPACE_ID", "")
+    app_id        = db_ai.get("sarvam_app_id")        or os.getenv("SARVAM_APP_ID", "")
+    app_version   = int(db_ai.get("sarvam_app_version") or os.getenv("SARVAM_APP_VERSION") or "3")
+    connection_id = db_ai.get("sarvam_connection_id") or os.getenv("SARVAM_CONNECTION_ID", "")
+    agent_phone   = db_ai.get("sarvam_agent_phone")   or os.getenv("SARVAM_AGENT_PHONE_NUMBER", "")
     backend_url   = os.getenv("BACKEND_PUBLIC_URL", "")
 
     if not all([api_key, org_id, workspace_id, app_id, connection_id, agent_phone]):

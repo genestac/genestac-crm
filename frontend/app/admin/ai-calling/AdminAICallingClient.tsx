@@ -591,6 +591,46 @@ export function AdminAICallingClient({ initialSettings, initialKnowledgeBase, in
                 </div>
               </div>
 
+              {/* Sarvam AI Config — shown only when Sarvam is selected */}
+              {(!settings.ai_provider || settings.ai_provider === 'sarvam') && (
+                <div className="space-y-4 bg-indigo-50/50 p-5 rounded-2xl border border-indigo-100">
+                  <div>
+                    <Label className="font-semibold text-indigo-800">Sarvam AI Configuration</Label>
+                    <p className="text-xs text-gray-500 mt-0.5">These replace the SARVAM_* env variables — changes take effect immediately on next call.</p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">API Key</Label>
+                      <Input type="password" value={settings.sarvam_api_key || ''} onChange={e => setSettings({...settings, sarvam_api_key: e.target.value})} placeholder="sk-..." />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Org ID</Label>
+                      <Input value={settings.sarvam_org_id || ''} onChange={e => setSettings({...settings, sarvam_org_id: e.target.value})} placeholder="your-org-id" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Workspace ID</Label>
+                      <Input value={settings.sarvam_workspace_id || ''} onChange={e => setSettings({...settings, sarvam_workspace_id: e.target.value})} placeholder="your-workspace-id" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">App ID</Label>
+                      <Input value={settings.sarvam_app_id || ''} onChange={e => setSettings({...settings, sarvam_app_id: e.target.value})} placeholder="your-app-id" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">App Version</Label>
+                      <Input type="number" value={settings.sarvam_app_version ?? 3} onChange={e => setSettings({...settings, sarvam_app_version: parseInt(e.target.value)})} placeholder="3" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Connection ID</Label>
+                      <Input value={settings.sarvam_connection_id || ''} onChange={e => setSettings({...settings, sarvam_connection_id: e.target.value})} placeholder="your-connection-id" />
+                    </div>
+                    <div className="space-y-1.5 col-span-2">
+                      <Label className="text-xs">Agent Phone Number</Label>
+                      <Input value={settings.sarvam_agent_phone || ''} onChange={e => setSettings({...settings, sarvam_agent_phone: e.target.value})} placeholder="+911141189316" />
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div className="space-y-3">
                 <Label>System Prompt (Instructions)</Label>
                 <Textarea
