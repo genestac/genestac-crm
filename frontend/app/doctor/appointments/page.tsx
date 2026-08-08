@@ -34,15 +34,19 @@ export default function DoctorAppointmentsPage() {
     }
   }
 
-  const pendingAppointments = appointments.filter(a => a.status === 'pending')
+  const pendingAppointments = appointments.filter(a => ['pending', 'waiting_for_doctor'].includes(a.status))
   
   const today = new Date()
   today.setHours(0, 0, 0, 0)
   
-  const confirmedOrCompleted = appointments.filter(a => ['confirmed', 'completed'].includes(a.status))
+  const handledAppointments = appointments.filter(a => !['pending', 'waiting_for_doctor'].includes(a.status))
   
-  const upcomingAppointments = confirmedOrCompleted.filter(a => new Date(a.scheduled_at) >= today)
-  const pastAppointments = confirmedOrCompleted.filter(a => new Date(a.scheduled_at) < today)
+  const upcomingAppointments = handledAppointments.filter(a => 
+    a.status === 'confirmed' && new Date(a.scheduled_at) >= today
+  )
+  const pastAppointments = handledAppointments.filter(a => 
+    new Date(a.scheduled_at) < today || ['completed', 'rejected', 'cancelled'].includes(a.status)
+  )
 
   return (
     <div className="space-y-8">
@@ -78,7 +82,7 @@ export default function DoctorAppointmentsPage() {
                   <div className="absolute top-0 left-0 w-1 h-full bg-amber-400"></div>
                   <div className="flex justify-between items-start mb-3">
                     <h3 className="font-bold text-gray-900">{appt.patients?.name || appt.patients?.full_name || 'Unknown Patient'}</h3>
-                    <span className="bg-amber-100 text-amber-800 text-[10px] uppercase font-bold px-2 py-0.5 rounded">Pending</span>
+                    <span className="bg-amber-100 text-amber-800 text-[10px] uppercase font-bold px-2 py-0.5 rounded">{appt.status.replace(/_/g, ' ')}</span>
                   </div>
                   
                   <div className="space-y-2 text-sm text-gray-600 mb-4">
