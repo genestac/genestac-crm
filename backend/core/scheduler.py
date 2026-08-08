@@ -249,6 +249,14 @@ def sweep_leads_for_auto_call():
                 user_res = supabase.table("users").select("phone").eq("id", lead_id).execute()
                 phone = user_res.data[0].get("phone") if user_res.data else None
 
+            # Sanitize phone — strip any prefix like 'p:', 'tel:', spaces etc.
+            if phone:
+                import re
+                phone = re.sub(r'^[^0-9+]+', '', str(phone).strip())  # strip leading non-digit/non-+ chars
+                phone = re.sub(r'\s+', '', phone)  # remove internal spaces
+                if not phone:
+                    phone = None
+
             if phone:
                 print(f"[AI Voice Scheduler] Triggering call for lead {lead_id} ({phone})")
                 log_res = supabase.table("ai_call_logs").insert({

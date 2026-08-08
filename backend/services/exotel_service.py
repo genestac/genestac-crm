@@ -231,7 +231,11 @@ def _initiate_sarvam_call(to_number: str, lead_id: str, supabase):
     except Exception:
         pass
 
-    to_number = to_number.strip()
+    import re
+    to_number = str(to_number).strip()
+    # Strip any non-digit, non-+ prefix (e.g. 'p:', 'tel:', whitespace)
+    to_number = re.sub(r'^[^0-9+]+', '', to_number)
+    to_number = re.sub(r'\s+', '', to_number)
     if not to_number.startswith("+"):
         to_number = "+91" + to_number.lstrip("0")
 

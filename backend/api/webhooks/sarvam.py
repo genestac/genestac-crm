@@ -789,91 +789,24 @@ async def tool_search_knowledge_base(request: Request):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Post-call webhook  (Sarvam sends transcript + metadata when call ends)
-# ─────────────────────────────────────────────────────────────────────────────
-
-@router.post("/post-call")
-async def sarvam_post_call(request: Request, background_tasks: BackgroundTasks):
-    body: dict = await request.json()
-
-    # DIAGNOSTIC: use print() so it always appears in docker logs stdout
-    import json as _json
-    try:
-        body_preview = _json.dumps(body, ensure_ascii=False, indent=2)
-    except Exception:
-        body_preview = str(body)
-
-    print("=" * 60)
-    print("[Sarvam/post-call] RAW PAYLOAD RECEIVED")
-    print(f"Keys: {list(body.keys())}")
-    print(f"lead_id (custom_data): {(body.get('custom_data') or {}).get('lead_id')!r}")
-    print(f"lead_id (metadata):    {(body.get('metadata') or {}).get('lead_id')!r}")
-    print(f"lead_id (agent_vars):  {(body.get('agent_variables') or {}).get('lead_id')!r}")
-    print(f"lead_id (top-level):   {body.get('lead_id')!r}")
-    print(f"transcript present:    {bool(body.get('transcript'))}")
-    print(f"transcript length:     {len(body.get('transcript') or '')}")
-    print(f"Full body:\n{body_preview[:3000]}")
-    print("=" * 60)
-
-    background_tasks.add_task(_process_post_call, body)
-    return {"status": "received"}
-
-
-
-async def _process_post_call(body: dict):
-    """
-    Background task: score lead, save transcript, vectorize memory.
-
-    Sarvam actual payload shape (confirmed from diagnostics 2026-08-06):
-    {
-      "attempt_id": "...",
-      "status": "connected",
-      "duration": 44.6,
-      "final_agent_variables": {
-          "lead_id": "...",       <- lead_id lives HERE
-          "call_summary": "...",
-          ...
-      },
-      "webhook_config": {
-          "metadata": {"lead_id": "..."}  <- backup
-      },
-      "interaction_transcript": [        <- list of turns, NOT a string
-          {"role": "agent", "en_text": "..."},
-          {"role": "user",  "en_text": "..."},
-      ]
-    }
-    """
-    # ── Extract fields from Sarvam's actual payload ────────────────────────
-    call_id          = body.get("attempt_id") or body.get("call_id", "")
-    duration_seconds = body.get("duration") or body.get("duration_seconds", 0)
-    recording_url    = body.get("recording_url", "")
-
-    # lead_id is in final_agent_variables (Sarvam echoes back all agent_variables)
-    final_vars = body.get("final_agent_variables") or {}
-    lead_id = (
-        final_vars.get("lead_id")
-        or (body.get("webhook_config") or {}).get("metadata", {}).get("lead_id")
-        or (body.get("custom_data") or {}).get("lead_id")
-        or (body.get("metadata") or {}).get("lead_id")
-        or body.get("lead_id")
-        or ""
-    )
-    lead_id = str(lead_id).strip()
-
-    # transcript: Sarvam sends interaction_transcript as a list of turn objects
+# Post-call webhook  (Sarvam sends transcript +      # transcript: Sarvam sends interaction_transcript as a list of turn objects
     raw_transcript = body.get("interaction_transcript") or body.get("transcript") or []
     if isinstance(raw_transcript, list):
         lines = []
+        has_user_turn = False
         for turn in raw_transcript:
             role    = (turn.get("role") or "unknown").capitalize()
             en_text = (turn.get("en_text") or "").strip()
             if en_text:
                 lines.append(f"{role}: {en_text}")
+            if (turn.get("role") or "").lower() == "user" and en_text:
+                has_user_turn = True
         transcript = "\n".join(lines)
     else:
         transcript = str(raw_transcript)
+        has_user_turn = bool(transcript.strip())
 
-    print(f"[Sarvam/post-call] Processing: call_id={call_id!r}, lead_id={lead_id!r}, transcript_lines={len(transcript.splitlines())}")
+    print(f"[Sarvam/post-call] Processing: call_id={call_id!r}, lead_id={lead_id!r}, transcript_lines={len(transcript.splitlines())}, has_user_turn={has_user_turn}")
 
     if not transcript or not lead_id:
         print(
@@ -912,9 +845,97 @@ async def _process_post_call(body: dict):
     callback_requested = False
     appointment_booked = False
 
+    # ── EARLY EXIT: agent-only transcript = unreachable, no scoring needed ──
+    if not has_user_turn:
+        print(f"[Sarvam/post-call] No user turn detected — marking as Unreachable (0/100), skipping GPT.")
+        lead_score = 0
+        score_label = "Unreachable"
+        score_reason = "Call connected but the lead did not respond. Voicemail or no answer."
+        summary = f"Call reached {lead_name} but no response was received (voicemail or unanswered)."
+    # ---
+    call_id          = body.get("attempt_id") or body.get("call_id", "")
+    duration_seconds = body.get("duration") or body.get("duration_seconds", 0)
+    recording_url    = body.get("recording_url", "")
+
+    # lead_id is in final_agent_variables (Sarvam echoes back all agent_variables)
+    final_vars = body.get("final_agent_variables") or {}
+    lead_id = (
+        final_vars.get("lead_id")
+        or (body.get("webhook_config") or {}).get("metadata", {}).get("lead_id")
+        or (body.get("custom_data") or {}).get("lead_id")
+        or (body.get("metadata") or {}).get("lead_id")
+        or body.get("lead_id")
+        or ""
+    )
+    lead_id = str(lead_id).strip()
+
+    # transcript: Sarvam sends interaction_transcript as a list of turn objects
+    raw_transcript = body.get("interaction_transcript") or body.get("transcript") or []
+    has_user_turn = False
+    if isinstance(raw_transcript, list):
+        lines = []
+        for turn in raw_transcript:
+            role    = (turn.get("role") or "unknown").capitalize()
+            en_text = (turn.get("en_text") or "").strip()
+            if en_text:
+                lines.append(f"{role}: {en_text}")
+            if (turn.get("role") or "").lower() == "user" and en_text:
+                has_user_turn = True
+        transcript = "\n".join(lines)
+    else:
+        transcript = str(raw_transcript)
+        has_user_turn = bool(transcript.strip())
+
+    print(f"[Sarvam/post-call] Processing: call_id={call_id!r}, lead_id={lead_id!r}, transcript_lines={len(transcript.splitlines())}, has_user_turn={has_user_turn}")
+
+    if not transcript or not lead_id:
+        print(
+            f"[Sarvam/post-call] Skipping — "
+            f"transcript_empty={not transcript}, lead_id_missing={not lead_id}. "
+            f"Body keys: {list(body.keys())}"
+        )
+        return
+
+    supabase = get_supabase_client()
+
+    # Get lead name for context
+    lead_name = "the customer"
     try:
-        oai_client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-        summary_prompt = f"""You are a CRM analyst reviewing an AI sales call for a healthcare company (Genestac — weight loss programs).
+        lr = supabase.table("leads").select("name").eq("id", lead_id).execute()
+        if lr.data:
+            lead_name = lr.data[0].get("name") or lead_name
+            print(f"[Sarvam/post-call] Lead found in leads table: {lead_name!r}")
+        else:
+            ur = supabase.table("users").select("name").eq("id", lead_id).execute()
+            if ur.data:
+                lead_name = ur.data[0].get("name") or lead_name
+                print(f"[Sarvam/post-call] Lead found in users table: {lead_name!r}")
+            else:
+                print(f"[Sarvam/post-call] WARNING: lead_id={lead_id!r} not found in leads or users table!")
+    except Exception as e:
+        print(f"[Sarvam/post-call] Lead name fetch error: {e}")
+
+    # ── Lead scoring + structured analysis via GPT-4o-mini ──────────────────
+    summary = f"AI Call (Sarvam) with {lead_name}."
+    lead_score: Optional[int] = None
+    score_label: Optional[str] = None
+    score_reason: Optional[str] = None
+    is_not_interested = False
+    is_spam = False
+    callback_requested = False
+    appointment_booked = False
+
+    # Agent-only transcript = voicemail/no answer — skip GPT entirely
+    if not has_user_turn:
+        print(f"[Sarvam/post-call] No user turn detected — Unreachable (0/100), skipping GPT.")
+        lead_score = 0
+        score_label = "Unreachable"
+        score_reason = "Call connected but lead did not respond (voicemail or no answer)."
+        summary = f"Call reached {lead_name} but no response was received."
+    else:
+        try:
+            oai_client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+            summary_prompt = f"""You are a CRM analyst reviewing an AI sales call for a healthcare company (Genestac — weight loss programs).
 
 Analyze the transcript and return a JSON object with ALL of the following fields.
 
@@ -951,181 +972,181 @@ Rules:
 - `score_label`: If unreachable/voicemail, set to "Unreachable". Otherwise: Cold (0-39), Warm (40-69), Hot (70-100).
 - All other fields: null if not mentioned in the transcript."""
 
-        resp = oai_client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": summary_prompt}],
-            max_tokens=400,
-            response_format={"type": "json_object"}
-        )
+            resp = oai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": summary_prompt}],
+                max_tokens=400,
+                response_format={"type": "json_object"}
+            )
 
-        response_text = resp.choices[0].message.content.strip()
-        parsed = json.loads(response_text)
+            response_text = resp.choices[0].message.content.strip()
+            parsed = json.loads(response_text)
 
-        summary = parsed.get("summary", summary)
-        is_not_interested = parsed.get("is_not_interested", False)
-        is_spam = parsed.get("is_spam", False)
-        callback_requested = parsed.get("callback_requested", False)
-        appointment_booked = parsed.get("appointment_booked", False)
-        lead_score = parsed.get("lead_score")
-        score_label = parsed.get("score_label")
-        score_reason = parsed.get("score_reason")
+            summary = parsed.get("summary", summary)
+            is_not_interested = parsed.get("is_not_interested", False)
+            is_spam = parsed.get("is_spam", False)
+            callback_requested = parsed.get("callback_requested", False)
+            appointment_booked = parsed.get("appointment_booked", False)
+            lead_score = parsed.get("lead_score")
+            score_label = parsed.get("score_label")
+            score_reason = parsed.get("score_reason")
 
-        # Structured data extracted from the call
-        wrong_person = parsed.get("wrong_person", False)
-        caller_name = parsed.get("caller_name")
-        patient_name = parsed.get("patient_name")
-        relation = parsed.get("relation_to_patient")
-        weight_goal = parsed.get("weight_goal")
-        current_weight = parsed.get("current_weight")
-        interested_plan = parsed.get("interested_plan")
-        health_concerns = parsed.get("health_concerns")
+            # Structured data extracted from the call
+            wrong_person = parsed.get("wrong_person", False)
+            caller_name = parsed.get("caller_name")
+            patient_name = parsed.get("patient_name")
+            relation = parsed.get("relation_to_patient")
+            weight_goal = parsed.get("weight_goal")
+            current_weight = parsed.get("current_weight")
+            interested_plan = parsed.get("interested_plan")
+            health_concerns = parsed.get("health_concerns")
 
-        # Merge structured data into lead metadata
-        meta_update = {}
-        if weight_goal: meta_update["weight_goal"] = weight_goal
-        if current_weight: meta_update["current_weight"] = current_weight
-        if interested_plan: meta_update["interested_plan_interest"] = interested_plan
-        if health_concerns: meta_update["health_concerns"] = health_concerns
-        if wrong_person and caller_name: meta_update["caller_name"] = caller_name
-        if wrong_person and relation: meta_update["relation_to_patient"] = relation
-        if wrong_person and patient_name: meta_update["actual_patient_name"] = patient_name
-        if is_spam: meta_update["is_spam"] = True
+            # Merge structured data into lead metadata
+            meta_update = {}
+            if weight_goal: meta_update["weight_goal"] = weight_goal
+            if current_weight: meta_update["current_weight"] = current_weight
+            if interested_plan: meta_update["interested_plan_interest"] = interested_plan
+            if health_concerns: meta_update["health_concerns"] = health_concerns
+            if wrong_person and caller_name: meta_update["caller_name"] = caller_name
+            if wrong_person and relation: meta_update["relation_to_patient"] = relation
+            if wrong_person and patient_name: meta_update["actual_patient_name"] = patient_name
+            if is_spam: meta_update["is_spam"] = True
 
-        if meta_update:
+            if meta_update:
+                try:
+                    existing_meta_res = supabase.table("leads").select("metadata").eq("id", lead_id).execute()
+                    existing_meta = (existing_meta_res.data[0].get("metadata") or {}) if existing_meta_res.data else {}
+                    merged = {**existing_meta, **meta_update}
+                    supabase.table("leads").update({"metadata": merged}).eq("id", lead_id).execute()
+                    supabase.table("users").update({"metadata": merged}).eq("id", lead_id).execute()
+                    print(f"[Sarvam/post-call] Updated lead metadata: {meta_update}")
+                except Exception as me:
+                    print(f"[Sarvam/post-call] Metadata update failed: {me}")
+
+            # Timeline note — save to user_notes with full details + IST timestamp
+            from datetime import datetime, timezone, timedelta
+            IST = timezone(timedelta(hours=5, minutes=30))
+            call_time_ist = datetime.now(IST).strftime("%d %b %Y, %I:%M %p IST")
+            duration_min  = int(duration_seconds // 60)
+            duration_sec  = int(duration_seconds % 60)
+            duration_str  = f"{duration_min}m {duration_sec}s" if duration_min else f"{duration_sec}s"
+
+            score_badge = ""
+            if score_label == "Hot":    score_badge = "🔥"
+            elif score_label == "Warm": score_badge = "🌡️"
+            else:                       score_badge = "❄️"
+
+            note_lines = [
+                f"🤖 AI Voice Call Summary — {call_time_ist}",
+                f"⏱ Duration: {duration_str}  |  {score_badge} Score: {lead_score}/100 ({score_label})",
+                "─" * 40,
+            ]
+            if is_spam:          note_lines.append("🚫 SPAM / ABUSIVE CALLER — Do not call again.")
+            if wrong_person:     note_lines.append(f"⚠️ Wrong person answered. Caller: {caller_name or 'Unknown'} ({relation or 'relative'}). Actual patient: {patient_name or lead_name}.")
+            if callback_requested: note_lines.append("📞 Callback requested by lead.")
+            if appointment_booked: note_lines.append("✅ Appointment booked.")
+            if weight_goal:      note_lines.append(f"🎯 Weight Goal: {weight_goal}")
+            if current_weight:   note_lines.append(f"⚖️ Current Weight: {current_weight}")
+            if interested_plan:  note_lines.append(f"💳 Interested Plan: {interested_plan}")
+            if health_concerns:  note_lines.append(f"🏥 Health Concerns: {health_concerns}")
+            if score_reason:     note_lines.append(f"💬 Reason: {score_reason}")
+            note_lines.append("")
+            # AI summary bullets
+            if isinstance(summary, list):
+                note_lines.extend([f"• {s}" for s in summary])
+            else:
+                note_lines.append(str(summary))
+            if recording_url:
+                note_lines.append(f"▶️ Recording: {recording_url}")
+
+            # ── Verbatim transcript (exact, unmodified) ───────────────────────
+            note_lines.append("")
+            note_lines.append("─" * 40)
+            note_lines.append("📋 Full Transcript (verbatim):")
+            note_lines.append("")
+            note_lines.append(transcript)   # raw en_text turns joined as "Agent: ...\nUser: ..."
+
+            timeline_note = "\n".join(note_lines)
+
+
             try:
-                existing_meta_res = supabase.table("leads").select("metadata").eq("id", lead_id).execute()
-                existing_meta = (existing_meta_res.data[0].get("metadata") or {}) if existing_meta_res.data else {}
-                merged = {**existing_meta, **meta_update}
-                supabase.table("leads").update({"metadata": merged}).eq("id", lead_id).execute()
-                supabase.table("users").update({"metadata": merged}).eq("id", lead_id).execute()
-                print(f"[Sarvam/post-call] Updated lead metadata: {meta_update}")
-            except Exception as me:
-                print(f"[Sarvam/post-call] Metadata update failed: {me}")
+                author_id = "0ecfe3f5-479a-4846-9b7f-4f80482cc791" # fallback
+                try:
+                    staff_res = supabase.table("staffs").select("id").limit(1).execute()
+                    if staff_res.data:
+                        author_id = staff_res.data[0]["id"]
+                except Exception:
+                    pass
 
-        # Timeline note — save to user_notes with full details + IST timestamp
-        from datetime import datetime, timezone, timedelta
-        IST = timezone(timedelta(hours=5, minutes=30))
-        call_time_ist = datetime.now(IST).strftime("%d %b %Y, %I:%M %p IST")
-        duration_min  = int(duration_seconds // 60)
-        duration_sec  = int(duration_seconds % 60)
-        duration_str  = f"{duration_min}m {duration_sec}s" if duration_min else f"{duration_sec}s"
-
-        score_badge = ""
-        if score_label == "Hot":    score_badge = "🔥"
-        elif score_label == "Warm": score_badge = "🌡️"
-        else:                       score_badge = "❄️"
-
-        note_lines = [
-            f"🤖 AI Voice Call Summary — {call_time_ist}",
-            f"⏱ Duration: {duration_str}  |  {score_badge} Score: {lead_score}/100 ({score_label})",
-            "─" * 40,
-        ]
-        if is_spam:          note_lines.append("🚫 SPAM / ABUSIVE CALLER — Do not call again.")
-        if wrong_person:     note_lines.append(f"⚠️ Wrong person answered. Caller: {caller_name or 'Unknown'} ({relation or 'relative'}). Actual patient: {patient_name or lead_name}.")
-        if callback_requested: note_lines.append("📞 Callback requested by lead.")
-        if appointment_booked: note_lines.append("✅ Appointment booked.")
-        if weight_goal:      note_lines.append(f"🎯 Weight Goal: {weight_goal}")
-        if current_weight:   note_lines.append(f"⚖️ Current Weight: {current_weight}")
-        if interested_plan:  note_lines.append(f"💳 Interested Plan: {interested_plan}")
-        if health_concerns:  note_lines.append(f"🏥 Health Concerns: {health_concerns}")
-        if score_reason:     note_lines.append(f"💬 Reason: {score_reason}")
-        note_lines.append("")
-        # AI summary bullets
-        if isinstance(summary, list):
-            note_lines.extend([f"• {s}" for s in summary])
-        else:
-            note_lines.append(str(summary))
-        if recording_url:
-            note_lines.append(f"▶️ Recording: {recording_url}")
-
-        # ── Verbatim transcript (exact, unmodified) ───────────────────────
-        note_lines.append("")
-        note_lines.append("─" * 40)
-        note_lines.append("📋 Full Transcript (verbatim):")
-        note_lines.append("")
-        note_lines.append(transcript)   # raw en_text turns joined as "Agent: ...\nUser: ..."
-
-        timeline_note = "\n".join(note_lines)
+                supabase.table("user_notes").insert({
+                    "user_id": lead_id,
+                    "author_id": author_id,
+                    "content": timeline_note,
+                }).execute()
+                print(f"[Sarvam/post-call] Timeline note saved to user_notes for lead {lead_id}")
+            except Exception as note_err:
+                print(f"[Sarvam/post-call] user_notes insert failed: {note_err}")
 
 
-        try:
-            author_id = "0ecfe3f5-479a-4846-9b7f-4f80482cc791" # fallback
-            try:
-                staff_res = supabase.table("staffs").select("id").limit(1).execute()
-                if staff_res.data:
-                    author_id = staff_res.data[0]["id"]
-            except Exception:
-                pass
+            print(
+                f"[Sarvam/post-call] GPT done: lead={lead_id} score={lead_score} ({score_label}) | "
+                f"not_interested={is_not_interested} spam={is_spam} callback={callback_requested} appt={appointment_booked} | "
+                f"summary={summary[:80]!r}"
+            )
 
-            supabase.table("user_notes").insert({
-                "user_id": lead_id,
-                "author_id": author_id,
-                "content": timeline_note,
-            }).execute()
-            print(f"[Sarvam/post-call] Timeline note saved to user_notes for lead {lead_id}")
-        except Exception as note_err:
-            print(f"[Sarvam/post-call] user_notes insert failed: {note_err}")
+            # ── CRM status update ──────────────────────────────────────────────
+            # Priority: SPAM > CONSULTATION_SCHEDULED > NOT_INTERESTED >
+            #           CALLBACK_SCHEDULED > QUALIFIED > CONTACTED
+            new_status = None
+            if is_spam:
+                new_status = "SPAM"
+            elif appointment_booked:
+                new_status = "CONSULTATION_SCHEDULED"
+            elif is_not_interested:
+                new_status = "NOT_INTERESTED"
+            elif callback_requested:
+                new_status = "CALLBACK_SCHEDULED"
+            elif interested_plan:
+                new_status = "QUALIFIED"
+            else:
+                new_status = "CONTACTED"
 
+            if new_status:
+                supabase.table("leads").update({"status": new_status}).eq("id", lead_id).execute()
+                supabase.table("users").update({"status": new_status}).eq("id", lead_id).execute()
+                print(f"[Sarvam/post-call] Lead {lead_id} status -> {new_status}")
 
-        print(
-            f"[Sarvam/post-call] GPT done: lead={lead_id} score={lead_score} ({score_label}) | "
-            f"not_interested={is_not_interested} spam={is_spam} callback={callback_requested} appt={appointment_booked} | "
-            f"summary={summary[:80]!r}"
-        )
+            # ── Hot lead alert ─────────────────────────────────────────────────
+            if lead_score is not None and lead_score >= 70:
+                try:
+                    rep_id = None
+                    rep_res = supabase.table("users").select("assigned_sales_rep_id").eq("id", lead_id).execute()
+                    if rep_res.data and rep_res.data[0].get("assigned_sales_rep_id"):
+                        rep_id = rep_res.data[0]["assigned_sales_rep_id"]
+                    else:
+                        rep_res2 = supabase.table("leads").select("assigned_sales_rep_id").eq("id", lead_id).execute()
+                        if rep_res2.data and rep_res2.data[0].get("assigned_sales_rep_id"):
+                            rep_id = rep_res2.data[0]["assigned_sales_rep_id"]
 
-        # ── CRM status update ──────────────────────────────────────────────
-        # Priority: SPAM > CONSULTATION_SCHEDULED > NOT_INTERESTED >
-        #           CALLBACK_SCHEDULED > QUALIFIED > CONTACTED
-        new_status = None
-        if is_spam:
-            new_status = "SPAM"
-        elif appointment_booked:
-            new_status = "CONSULTATION_SCHEDULED"
-        elif is_not_interested:
-            new_status = "NOT_INTERESTED"
-        elif callback_requested:
-            new_status = "CALLBACK_SCHEDULED"
-        elif interested_plan:
-            new_status = "QUALIFIED"
-        else:
-            new_status = "CONTACTED"
+                    if rep_id:
+                        supabase.table("system_notifications").insert({
+                            "target_role": "sales",
+                            "target_id": rep_id,
+                            "notification_type": "in_app",
+                            "title": f"🔥 Hot Lead: {lead_name} ({lead_score}/100)",
+                            "message": (
+                                f"{lead_name} scored {lead_score}/100 ({score_label}). "
+                                f"{score_reason or ''} Call them now before they go cold!"
+                            ),
+                        }).execute()
+                        logger.warning(f"[Sarvam/post-call] 🔥 Hot lead alert sent to sales rep {rep_id}")
+                except Exception as notif_err:
+                    logger.error(f"[Sarvam/post-call] Hot lead alert failed: {notif_err}")
 
-        if new_status:
-            supabase.table("leads").update({"status": new_status}).eq("id", lead_id).execute()
-            supabase.table("users").update({"status": new_status}).eq("id", lead_id).execute()
-            print(f"[Sarvam/post-call] Lead {lead_id} status -> {new_status}")
-
-        # ── Hot lead alert ─────────────────────────────────────────────────
-        if lead_score is not None and lead_score >= 70:
-            try:
-                rep_id = None
-                rep_res = supabase.table("users").select("assigned_sales_rep_id").eq("id", lead_id).execute()
-                if rep_res.data and rep_res.data[0].get("assigned_sales_rep_id"):
-                    rep_id = rep_res.data[0]["assigned_sales_rep_id"]
-                else:
-                    rep_res2 = supabase.table("leads").select("assigned_sales_rep_id").eq("id", lead_id).execute()
-                    if rep_res2.data and rep_res2.data[0].get("assigned_sales_rep_id"):
-                        rep_id = rep_res2.data[0]["assigned_sales_rep_id"]
-
-                if rep_id:
-                    supabase.table("system_notifications").insert({
-                        "target_role": "sales",
-                        "target_id": rep_id,
-                        "notification_type": "in_app",
-                        "title": f"🔥 Hot Lead: {lead_name} ({lead_score}/100)",
-                        "message": (
-                            f"{lead_name} scored {lead_score}/100 ({score_label}). "
-                            f"{score_reason or ''} Call them now before they go cold!"
-                        ),
-                    }).execute()
-                    logger.warning(f"[Sarvam/post-call] 🔥 Hot lead alert sent to sales rep {rep_id}")
-            except Exception as notif_err:
-                logger.error(f"[Sarvam/post-call] Hot lead alert failed: {notif_err}")
-
-    except Exception as score_err:
-        import traceback
-        print(f"[Sarvam/post-call] GPT/scoring FAILED: {score_err}")
-        print(traceback.format_exc())
+        except Exception as score_err:
+            import traceback
+            print(f"[Sarvam/post-call] GPT/scoring FAILED: {score_err}")
+            print(traceback.format_exc())
 
     # ── Save call log ──────────────────────────────────────────────────────
     log_payload: dict[str, Any] = {
