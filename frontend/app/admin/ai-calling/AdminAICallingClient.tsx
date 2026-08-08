@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { updateAISettings, addKnowledgeBaseItem, deleteKnowledgeBaseItem, getCallLogs, getCallQueue, updateCallQueue, processNextCall, getCallStats, getEligibleLeadsPreview, clearCallQueue } from '../actions'
+import { updateAISettings, addKnowledgeBaseItem, deleteKnowledgeBaseItem, getCallLogs, getCallQueue, updateCallQueue, processNextCall, getCallStats, getEligibleLeadsPreview, clearCallQueue, buildQueueFromFilters } from '../actions'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -234,6 +234,7 @@ export function AdminAICallingClient({ initialSettings, initialKnowledgeBase, in
   const [savingConfig, setSavingConfig] = useState(false)
   const [savingTrigger, setSavingTrigger] = useState(false)
   const [clearingQueue, setClearingQueue] = useState(false)
+  const [buildingQueue, setBuildingQueue] = useState(false)
 
   const fetchPreview = async () => {
     setPreviewLoading(true)
@@ -432,6 +433,24 @@ export function AdminAICallingClient({ initialSettings, initialKnowledgeBase, in
       toast.error('Failed to clear queue')
     } finally {
       setClearingQueue(false)
+    }
+  }
+
+  const handleBuildQueue = async () => {
+    if (!confirm('This will REPLACE the current queue with leads matching your saved filter settings. Continue?')) return
+    setBuildingQueue(true)
+    try {
+      const res = await buildQueueFromFilters()
+      if (res?.success) {
+        toast.success(res.message || 'Queue built successfully!')
+        fetchCallQueue()
+      } else {
+        toast.error(res?.message || 'Failed to build queue')
+      }
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to build queue')
+    } finally {
+      setBuildingQueue(false)
     }
   }
 
@@ -755,11 +774,32 @@ export function AdminAICallingClient({ initialSettings, initialKnowledgeBase, in
               </div>
 
               {/* Trigger Save Button */}
-              <div className="pt-4">
+              <div className="pt-4 space-y-3">
                 <Button onClick={handleSaveTrigger} disabled={savingTrigger} className="w-full bg-amber-500 hover:bg-amber-600">
                   {savingTrigger && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
                   Save Trigger & Scheduling
                 </Button>
+
+                {/* Build Queue Button */}
+                <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 space-y-3">
+                  <div>
+                    <p className="text-sm font-bold text-emerald-800">🚀 Build Call Queue</p>
+                    <p className="text-xs text-emerald-600 mt-0.5">
+                      After saving your filters above, click this to populate the queue with all matching leads. 
+                      This will <strong>replace</strong> the current queue.
+                    </p>
+                  </div>
+                  <Button
+                    onClick={handleBuildQueue}
+                    disabled={buildingQueue}
+                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white"
+                  >
+                    {buildingQueue 
+                      ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Building Queue...</>
+                      : <>🚀 Build Queue from Filters</>
+                    }
+                  </Button>
+                </div>
               </div>
               </div>}
             </div>

@@ -426,6 +426,97 @@ async def clear_ai_call_queue(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.post("/queue/build-from-filters")
+async def build_queue_from_filters(
+    current_user: dict = Depends(get_current_user),
+    supabase: Client = Depends(get_supabase_client)
+):
+    """Build a new call queue from the current trigger/filter settings."""
+    try:
+        import uuid
+        import datetime as dt
+        from collections import Counter
+
+        # Load settings
+        res = supabase.table("global_settings").select("settings_value").eq("settings_key", "ai_call_settings").execute()
+        settings = res.data[0]["settings_value"] if res.data else {}
+
+        enabled_statuses    = settings.get("enabled_statuses", [])
+        filter_created_from = settings.get("filter_created_from")
+        filter_created_to   = settings.get("filter_created_to")
+        filter_sources_raw  = settings.get("filter_sources", "")
+        filter_sources      = [s.strip().lower() for s in filter_sources_raw.split(",") if s.strip()] if filter_sources_raw else []
+        max_calls_per_lead  = int(settings.get("max_calls_per_lead") or 3)
+        skip_not_interested = settings.get("skip_not_interested", True)
+        skip_consultation   = settings.get("skip_consultation_scheduled", True)
+
+        if not enabled_statuses:
+            return {"success": False, "message": "No lead statuses selected in Trigger & Scheduling settings. Please configure and save settings first."}
+
+        def build_query(table: str, phone_col: str):
+            q = supabase.table(table).select(f"id, {phone_col}, status, source, created_at").in_("status", enabled_statuses)
+            if filter_created_from:
+                q = q.gte("created_at", filter_created_from)
+            if filter_created_to:
+                q = q.lte("created_at", filter_created_to + "T23:59:59")
+            if skip_not_interested:
+                q = q.neq("status", "NOT_INTERESTED")
+            if skip_consultation:
+                q = q.neq("status", "CONSULTATION_SCHEDULED")
+            return q.execute().data or []
+
+        leads_raw = build_query("leads", "phone_number")
+        users_raw = build_query("users", "phone")
+
+        leads_ids = {l["id"] for l in leads_raw}
+        all_records = [
+            {"id": l["id"], "phone": l.get("phone_number"), "status": l.get("status"), "source": l.get("source", "")}
+            for l in leads_raw if l.get("phone_number")
+        ] + [
+            {"id": u["id"], "phone": u.get("phone"), "status": u.get("status"), "source": u.get("source", "")}
+            for u in users_raw if u.get("phone") and u["id"] not in leads_ids
+        ]
+
+        if filter_sources:
+            all_records = [r for r in all_records if any(fs in (r.get("source") or "").lower() for fs in filter_sources)]
+
+        # Exclude leads that already hit max call limit
+        all_ids = [r["id"] for r in all_records]
+        max_reached_ids = set()
+        if all_ids:
+            logs_res = supabase.table("ai_call_logs").select("lead_id").in_("lead_id", all_ids).execute()
+            call_counts = Counter(row["lead_id"] for row in (logs_res.data or []))
+            max_reached_ids = {lid for lid, cnt in call_counts.items() if cnt >= max_calls_per_lead}
+
+        eligible = [r for r in all_records if r["id"] not in max_reached_ids]
+
+        if not eligible:
+            return {"success": False, "message": "No eligible leads found matching your current filters."}
+
+        now_iso = dt.datetime.now().isoformat()
+        new_queue = [
+            {
+                "id": str(uuid.uuid4()),
+                "lead_id": r["id"],
+                "status": "pending",
+                "created_at": now_iso
+            }
+            for r in eligible
+        ]
+
+        supabase.table("global_settings").upsert({
+            "settings_key": "ai_call_queue",
+            "settings_value": new_queue
+        }, on_conflict="settings_key").execute()
+
+        return {
+            "success": True,
+            "message": f"Queue built with {len(new_queue)} leads matching your filters.",
+            "count": len(new_queue)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.post("/queue/enqueue")
 async def enqueue_ai_call(
     payload: Dict[str, Any] = Body(...),

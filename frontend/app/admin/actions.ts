@@ -192,3 +192,16 @@ export async function clearCallQueue() {
   }
 }
 
+export async function buildQueueFromFilters() {
+  try {
+    const response = await fetchAPI('/api/admin/ai-settings/queue/build-from-filters', {
+      method: 'POST',
+      headers: { 'Cookie': (await cookies()).toString() }
+    })
+    return response
+  } catch (error) {
+    console.error('Failed to build queue from filters:', error)
+    throw error
+  }
+}
+
