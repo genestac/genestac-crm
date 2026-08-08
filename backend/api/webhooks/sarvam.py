@@ -901,9 +901,9 @@ async def _process_post_call(body: dict, lead_id: str):
 
     # ── EARLY EXIT: agent-only transcript = unreachable, no scoring needed ──
     if not has_user_turn:
-        print(f"[Sarvam/post-call] No user turn detected — marking as Unreachable (0/100), skipping GPT.")
+        print(f"[Sarvam/post-call] No user turn detected — marking as No Answer (0/100), skipping GPT.")
         lead_score = 0
-        score_label = "Unreachable"
+        score_label = "No Answer"
         score_reason = "Call connected but the lead did not respond. Voicemail or no answer."
         summary = f"Call reached {lead_name} but no response was received (voicemail or unanswered)."
     # ---
@@ -981,9 +981,9 @@ async def _process_post_call(body: dict, lead_id: str):
 
     # Agent-only transcript = voicemail/no answer — skip GPT entirely
     if not has_user_turn:
-        print(f"[Sarvam/post-call] No user turn detected — Unreachable (0/100), skipping GPT.")
+        print(f"[Sarvam/post-call] No user turn detected — No Answer (0/100), skipping GPT.")
         lead_score = 0
-        score_label = "Unreachable"
+        score_label = "No Answer"
         score_reason = "Call connected but lead did not respond (voicemail or no answer)."
         summary = f"Call reached {lead_name} but no response was received."
     else:
@@ -1023,7 +1023,7 @@ Rules:
 - `wrong_person`: true if the person who answered was NOT the original lead.
 - `unreachable`: Evaluate this internally first. A call is unreachable if it hit voicemail ("please leave a message after the tone"), or the user repeatedly asked to hold ("stay on the line", "hold on") without engaging in the conversation, or if the call disconnected before the user responded to the pitch.
 - `lead_score`: If the call was unreachable/voicemail, set this to exactly 0 (or null). Otherwise, integer 0-100 based on interest level.
-- `score_label`: If unreachable/voicemail, set to "Unreachable". Otherwise: Cold (0-39), Warm (40-69), Hot (70-100).
+- `score_label`: If unreachable/voicemail, set to "No Answer". Otherwise: Cold (0-39), Warm (40-69), Hot (70-100).
 - All other fields: null if not mentioned in the transcript."""
 
             resp = oai_client.chat.completions.create(
@@ -1263,13 +1263,13 @@ Rules:
                         item["status"] = "completed"
                         item["crm_status"] = "CONTACT_ATTEMPTED"
                         item["score"] = 0
-                        item["score_label"] = "Unreachable"
+                        item["score_label"] = "No Answer"
                         item["completed_at"] = __import__("datetime").datetime.utcnow().isoformat()
                         updated = True
                         break
                 if updated:
                     supabase.table("global_settings").upsert({"settings_key": "ai_call_queue", "settings_value": queue}, on_conflict="settings_key").execute()
-                    print(f"[Sarvam/post-call] Queue item for lead {lead_id} -> completed (Unreachable)")
+                    print(f"[Sarvam/post-call] Queue item for lead {lead_id} -> completed (No Answer)")
         except Exception as qe:
             print(f"[Sarvam/post-call] Queue sync (unreachable) failed (non-fatal): {qe}")
 
