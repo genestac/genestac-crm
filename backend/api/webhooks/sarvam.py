@@ -862,10 +862,10 @@ async def _process_post_call(body: dict, lead_id: str):
 
     print(f"[Sarvam/post-call] Processing: call_id={call_id!r}, lead_id={lead_id!r}, transcript_lines={len(transcript.splitlines())}, has_user_turn={has_user_turn}")
 
-    if not transcript or not lead_id:
+    if not lead_id:
         print(
             f"[Sarvam/post-call] Skipping — "
-            f"transcript_empty={not transcript}, lead_id_missing={not lead_id}. "
+            f"lead_id_missing={not lead_id}. "
             f"Body keys: {list(body.keys())}"
         )
         return
