@@ -178,3 +178,17 @@ export async function getEligibleLeadsPreview() {
     return null
   }
 }
+
+export async function clearCallQueue() {
+  try {
+    const response = await fetchAPI('/api/admin/ai-settings/queue', {
+      method: 'DELETE',
+      headers: { 'Cookie': (await cookies()).toString() }
+    })
+    return response
+  } catch (error) {
+    console.error('Failed to clear call queue:', error)
+    throw error
+  }
+}
+

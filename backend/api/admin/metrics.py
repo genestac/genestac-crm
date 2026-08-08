@@ -241,12 +241,12 @@ async def save_whatsapp_config(
     supabase.table("global_settings").upsert({
         "settings_key": "whatsapp_report_numbers",
         "settings_value": {"numbers": config.numbers}
-    }).execute()
+    }, on_conflict="settings_key").execute()
     
     supabase.table("global_settings").upsert({
         "settings_key": "whatsapp_report_time",
         "settings_value": {"time": config.time}
-    }).execute()
+    }, on_conflict="settings_key").execute()
     
     return {"success": True}
 

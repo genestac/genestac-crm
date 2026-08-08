@@ -359,34 +359,39 @@ async def get_ai_call_queue(
     current_user: dict = Depends(get_current_user),
     supabase: Client = Depends(get_supabase_client)
 ):
-    """Get the AI call queue from global settings."""
+    """Get the AI call queue from global settings (limited to recent items)."""
     try:
-        res = supabase.table("global_settings").select("*").eq("settings_key", "ai_call_queue").execute()
+        res = supabase.table("global_settings").select("settings_value").eq("settings_key", "ai_call_queue").execute()
         queue = []
         if res.data:
-            queue = res.data[0]["settings_value"]
-            
-        # Enrich queue with lead data
-        if queue:
-            lead_ids = [item["lead_id"] for item in queue if "lead_id" in item]
+            queue = res.data[0]["settings_value"] or []
+
+        # Show pending first (up to 50), then recent history (up to 50)
+        pending_items = [q for q in queue if q.get("status") == "pending"][-50:]
+        history_items = [q for q in queue if q.get("status") != "pending"][-50:]
+        display_queue = pending_items + history_items
+
+        # Enrich with lead data
+        if display_queue:
+            lead_ids = list({item["lead_id"] for item in display_queue if "lead_id" in item})
             if lead_ids:
                 leads_res = supabase.table("leads").select("id, name, phone_number, status").in_("id", lead_ids).execute()
                 users_res = supabase.table("users").select("id, name, phone, status").in_("id", lead_ids).execute()
-                
+
                 lead_map = {l["id"]: l for l in (leads_res.data or [])}
                 for u in (users_res.data or []):
                     if u["id"] not in lead_map:
                         lead_map[u["id"]] = {"id": u["id"], "name": u.get("name") or "Unknown", "phone_number": u.get("phone"), "status": u.get("status")}
-                        
-                for item in queue:
+
+                for item in display_queue:
                     lead = lead_map.get(item.get("lead_id"), {})
                     item["leads"] = {
-                        "name": lead.get("name"), 
+                        "name": lead.get("name"),
                         "phone": lead.get("phone_number"),
                         "crm_status": lead.get("status")
                     }
-                    
-        return {"data": queue}
+
+        return {"data": display_queue, "total": len(queue), "pending_count": len([q for q in queue if q.get("status") == "pending"])}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -403,6 +408,21 @@ async def update_ai_call_queue(
             "settings_value": data
         }, on_conflict="settings_key").execute()
         return {"success": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/queue")
+async def clear_ai_call_queue(
+    current_user: dict = Depends(get_current_user),
+    supabase: Client = Depends(get_supabase_client)
+):
+    """Clear the entire AI call queue."""
+    try:
+        supabase.table("global_settings").upsert({
+            "settings_key": "ai_call_queue",
+            "settings_value": []
+        }, on_conflict="settings_key").execute()
+        return {"success": True, "message": "Call queue cleared successfully."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

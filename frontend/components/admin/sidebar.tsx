@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname } from 'next/navigation'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { 
   LayoutDashboard, 
   Users, 
@@ -20,11 +20,23 @@ import {
   FileText,
   Pin,
   MessageCircle,
-  Terminal
+  Terminal,
+  Bot,
+  PhoneCall,
+  ListOrdered,
+  ChevronDown,
+  ChevronRight
 } from 'lucide-react'
 import { logout } from '@/app/auth/actions'
 
-const modules = [
+type RouteItem = {
+  name: string
+  path: string
+  icon: React.ElementType
+  subItems?: { name: string; path: string; hash?: string; icon: React.ElementType }[]
+}
+
+const modules: { title: string; routes: RouteItem[] }[] = [
   {
     title: 'Overview',
     routes: [
@@ -73,7 +85,16 @@ const modules = [
       { name: 'Coupons', path: '/admin/coupons', icon: Settings },
       { name: 'Invoice Settings', path: '/admin/invoice-settings', icon: Settings },
       { name: 'Custom Fields', path: '/admin/custom-fields', icon: Settings },
-      { name: 'AI Voice Calling', path: '/admin/ai-calling', icon: Activity },
+      {
+        name: 'AI Voice Calling',
+        path: '/admin/ai-calling',
+        icon: Bot,
+        subItems: [
+          { name: 'Settings', path: '/admin/ai-calling', icon: Settings },
+          { name: 'Call Logs', path: '/admin/ai-calling?tab=logs', icon: PhoneCall },
+          { name: 'Call Queue', path: '/admin/ai-calling?tab=queue', icon: ListOrdered },
+        ]
+      },
     ]
   }
 ]
@@ -83,6 +104,9 @@ export function AdminSidebar() {
   const [isPinned, setIsPinned] = useState(true)
   const [isHovered, setIsHovered] = useState(false)
   const [isMounted, setIsMounted] = useState(false)
+  const [expandedItems, setExpandedItems] = useState<string[]>(['/admin/ai-calling'])
+  const [flyout, setFlyout] = useState<{ route: RouteItem; top: number } | null>(null)
+  const flyoutTimeout = useRef<NodeJS.Timeout | null>(null)
 
   useEffect(() => {
     setIsMounted(true)
@@ -99,11 +123,32 @@ export function AdminSidebar() {
 
   const isCollapsed = isMounted ? (!isPinned && !isHovered) : false
 
+  const toggleExpand = (path: string) => {
+    setExpandedItems(prev => 
+      prev.includes(path) ? prev.filter(p => p !== path) : [...prev, path]
+    )
+  }
+
+  const showFlyout = (route: RouteItem, e: React.MouseEvent) => {
+    if (!isCollapsed || !route.subItems) return
+    if (flyoutTimeout.current) clearTimeout(flyoutTimeout.current)
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+    setFlyout({ route, top: rect.top })
+  }
+
+  const hideFlyout = () => {
+    flyoutTimeout.current = setTimeout(() => setFlyout(null), 150)
+  }
+
+  const keepFlyout = () => {
+    if (flyoutTimeout.current) clearTimeout(flyoutTimeout.current)
+  }
+
   return (
     <div 
       className={`flex flex-col bg-card text-foreground border-r border-border min-h-screen shrink-0 relative transition-[width] duration-300 z-20 ${isCollapsed ? 'w-20' : 'w-64'}`}
       onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
+      onMouseLeave={() => { setIsHovered(false); hideFlyout() }}
     >
       {/* Brand Gradient Top Border */}
       <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-br from-[var(--color-brand-green)] to-[var(--color-brand-teal)]"></div>
@@ -137,22 +182,66 @@ export function AdminSidebar() {
             </h4>
             <div className="space-y-1">
               {module.routes.map((route) => {
-                const isActive = pathname === route.path
+                const isActive = pathname === route.path || pathname.startsWith(route.path + '/')
+                const hasSubItems = !!route.subItems
+                const isExpanded = expandedItems.includes(route.path)
+
                 return (
-                  <Link
-                    key={route.path}
-                    href={route.path}
-                    className={`flex items-center px-4 py-2.5 rounded-lg transition-all duration-200 ${
-                      isActive 
-                        ? 'bg-primary text-primary-foreground font-semibold shadow-sm' 
-                        : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-                    }`}
-                  >
-                    <route.icon className="w-5 h-5 mr-3 shrink-0" />
-                    <span className={`text-sm whitespace-nowrap transition-opacity duration-300 ${isCollapsed ? 'opacity-0 w-0 hidden' : 'opacity-100'}`}>
-                      {route.name}
-                    </span>
-                  </Link>
+                  <div key={route.path}>
+                    {/* Main route item */}
+                    {hasSubItems ? (
+                      <button
+                        onClick={() => isCollapsed ? undefined : toggleExpand(route.path)}
+                        onMouseEnter={(e) => showFlyout(route, e)}
+                        onMouseLeave={hideFlyout}
+                        className={`w-full flex items-center px-4 py-2.5 rounded-lg transition-all duration-200 ${
+                          isActive 
+                            ? 'bg-primary text-primary-foreground font-semibold shadow-sm' 
+                            : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                        }`}
+                      >
+                        <route.icon className="w-5 h-5 mr-3 shrink-0" />
+                        <span className={`text-sm whitespace-nowrap flex-1 text-left transition-opacity duration-300 ${isCollapsed ? 'opacity-0 w-0 hidden' : 'opacity-100'}`}>
+                          {route.name}
+                        </span>
+                        {!isCollapsed && (
+                          isExpanded 
+                            ? <ChevronDown className="w-4 h-4 shrink-0 opacity-60" /> 
+                            : <ChevronRight className="w-4 h-4 shrink-0 opacity-60" />
+                        )}
+                      </button>
+                    ) : (
+                      <Link
+                        href={route.path}
+                        className={`flex items-center px-4 py-2.5 rounded-lg transition-all duration-200 ${
+                          isActive 
+                            ? 'bg-primary text-primary-foreground font-semibold shadow-sm' 
+                            : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                        }`}
+                      >
+                        <route.icon className="w-5 h-5 mr-3 shrink-0" />
+                        <span className={`text-sm whitespace-nowrap transition-opacity duration-300 ${isCollapsed ? 'opacity-0 w-0 hidden' : 'opacity-100'}`}>
+                          {route.name}
+                        </span>
+                      </Link>
+                    )}
+
+                    {/* Inline sub-items (expanded sidebar only) */}
+                    {hasSubItems && !isCollapsed && isExpanded && (
+                      <div className="ml-4 mt-1 space-y-1 border-l-2 border-border pl-3">
+                        {route.subItems!.map((sub) => (
+                          <Link
+                            key={sub.path}
+                            href={sub.path}
+                            className="flex items-center px-3 py-2 rounded-lg text-sm text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                          >
+                            <sub.icon className="w-4 h-4 mr-2 shrink-0" />
+                            {sub.name}
+                          </Link>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 )
               })}
             </div>
@@ -173,6 +262,29 @@ export function AdminSidebar() {
           </button>
         </form>
       </div>
+
+      {/* Flyout popup for collapsed sidebar */}
+      {flyout && isCollapsed && (
+        <div
+          className="fixed z-50 bg-white border border-gray-200 rounded-xl shadow-xl py-2 min-w-[180px]"
+          style={{ left: '76px', top: flyout.top }}
+          onMouseEnter={keepFlyout}
+          onMouseLeave={hideFlyout}
+        >
+          <p className="px-3 pb-1 text-xs font-bold uppercase tracking-wider text-gray-400">{flyout.route.name}</p>
+          {flyout.route.subItems!.map((sub) => (
+            <Link
+              key={sub.path}
+              href={sub.path}
+              className="flex items-center px-3 py-2 text-sm text-gray-700 hover:bg-indigo-50 hover:text-indigo-700 transition-colors"
+              onClick={() => setFlyout(null)}
+            >
+              <sub.icon className="w-4 h-4 mr-2 shrink-0" />
+              {sub.name}
+            </Link>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

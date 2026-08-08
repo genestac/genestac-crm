@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { updateAISettings, addKnowledgeBaseItem, deleteKnowledgeBaseItem, getCallLogs, getCallQueue, updateCallQueue, processNextCall, getCallStats, getEligibleLeadsPreview } from '../actions'
+import { updateAISettings, addKnowledgeBaseItem, deleteKnowledgeBaseItem, getCallLogs, getCallQueue, updateCallQueue, processNextCall, getCallStats, getEligibleLeadsPreview, clearCallQueue } from '../actions'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -226,6 +226,15 @@ export function AdminAICallingClient({ initialSettings, initialKnowledgeBase, in
   const [preview, setPreview] = useState<any>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
 
+  // Collapsible section state
+  const [configOpen, setConfigOpen] = useState(false)
+  const [triggerOpen, setTriggerOpen] = useState(true)
+
+  // Separate saving states
+  const [savingConfig, setSavingConfig] = useState(false)
+  const [savingTrigger, setSavingTrigger] = useState(false)
+  const [clearingQueue, setClearingQueue] = useState(false)
+
   const fetchPreview = async () => {
     setPreviewLoading(true)
     try {
@@ -376,15 +385,53 @@ export function AdminAICallingClient({ initialSettings, initialKnowledgeBase, in
     }
   }
 
+  const handleSaveConfig = async () => {
+    setSavingConfig(true)
+    try {
+      await updateAISettings(settings)
+      toast.success('AI Agent configuration saved!')
+    } catch {
+      toast.error('Failed to save configuration')
+    } finally {
+      setSavingConfig(false)
+    }
+  }
+
+  const handleSaveTrigger = async () => {
+    setSavingTrigger(true)
+    try {
+      await updateAISettings(settings)
+      toast.success('Trigger & Scheduling settings saved!')
+    } catch {
+      toast.error('Failed to save trigger settings')
+    } finally {
+      setSavingTrigger(false)
+    }
+  }
+
   const handleSaveSettings = async () => {
     setSaving(true)
     try {
       await updateAISettings(settings)
-      toast.success('AI Call settings updated successfully')
+      toast.success('All settings saved!')
     } catch {
-      toast.error('Failed to update settings')
+      toast.error('Failed to save settings')
     } finally {
       setSaving(false)
+    }
+  }
+
+  const handleClearQueue = async () => {
+    if (!confirm('Are you sure you want to clear the entire call queue? This cannot be undone.')) return
+    setClearingQueue(true)
+    try {
+      await clearCallQueue()
+      setCallQueue([])
+      toast.success('Call queue cleared!')
+    } catch {
+      toast.error('Failed to clear queue')
+    } finally {
+      setClearingQueue(false)
     }
   }
 
@@ -429,12 +476,6 @@ export function AdminAICallingClient({ initialSettings, initialKnowledgeBase, in
     })
   }
 
-  // Stats from logs
-  const completedCount = callLogs.filter(l => l.status === 'completed').length
-  const failedCount = callLogs.filter(l => l.status === 'failed_to_initiate').length
-  const hotCount = callLogs.filter(l => l.score_label === 'Hot').length
-  const totalCount = callLogs.length
-
   return (
     <div className="space-y-6 pb-12">
       {/* Header */}
@@ -477,95 +518,23 @@ export function AdminAICallingClient({ initialSettings, initialKnowledgeBase, in
       {/* ── Settings Tab ── */}
       {activeTab === 'settings' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-
-          {/* ── Disabled Alert Banner ── */}
-          {settings.ai_calling_disabled && (
-            <div className="lg:col-span-2 flex items-start gap-4 bg-red-50 border border-red-200 rounded-2xl p-5 shadow-sm">
-              <div className="p-2 bg-red-100 rounded-xl shrink-0">
-                <PhoneOff className="w-5 h-5 text-red-600" />
-              </div>
-              <div className="flex-1">
-                <p className="font-bold text-red-800 text-base">⚠️ AI Calling is Disabled</p>
-                <p className="text-sm text-red-600 mt-1">
-                  Both <strong>Sarvam</strong> and <strong>OpenAI/Pipecat</strong> providers failed consecutively.
-                  The calling service has been automatically suspended to prevent further failures.
-                  Current provider: <code className="bg-red-100 px-1 rounded">{settings.ai_provider || 'sarvam'}</code>
-                </p>
-                <p className="text-xs text-red-500 mt-1">
-                  Check your API credits / credentials, then click Re-enable to resume calling.
-                </p>
-              </div>
-              <Button
-                onClick={async () => {
-                  setSaving(true)
-                  try {
-                    const updated = { ...settings, ai_calling_disabled: false }
-                    await updateAISettings(updated)
-                    setSettings(updated)
-                    toast.success('AI Calling re-enabled!')
-                  } catch {
-                    toast.error('Failed to re-enable. Check credentials.')
-                  } finally {
-                    setSaving(false)
-                  }
-                }}
-                disabled={saving}
-                className="shrink-0 bg-orange-500 hover:bg-orange-600 text-white font-semibold px-5 py-2 rounded-xl shadow"
-              >
-                {saving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <PhoneCall className="w-4 h-4 mr-2" />}
-                Re-enable AI Calling
-              </Button>
-            </div>
-          )}
-
-          {/* ── Sarvam Config Incomplete Warning ── */}
-          {(!settings.ai_provider || settings.ai_provider === 'sarvam') && (() => {
-            const required: Record<string, string> = {
-              sarvam_api_key:      'API Key',
-              sarvam_org_id:       'Org ID',
-              sarvam_workspace_id: 'Workspace ID',
-              sarvam_app_id:       'App ID',
-              sarvam_connection_id:'Connection ID',
-              sarvam_agent_phone:  'Agent Phone Number',
-            }
-            const missing = Object.entries(required)
-              .filter(([k]) => !(settings as any)[k])
-              .map(([, label]) => label)
-            if (missing.length === 0) return null
-            return (
-              <div className="lg:col-span-2 flex items-start gap-4 bg-amber-50 border border-amber-300 rounded-2xl p-5 shadow-sm">
-                <div className="p-2 bg-amber-100 rounded-xl shrink-0 text-xl">⚠️</div>
-                <div className="flex-1">
-                  <p className="font-bold text-amber-900 text-base">Sarvam AI not fully configured — calls are blocked</p>
-                  <p className="text-sm text-amber-700 mt-1">
-                    The following required fields are missing in the <strong>Sarvam AI Configuration</strong> section below:
-                  </p>
-                  <ul className="mt-2 flex flex-wrap gap-2">
-                    {missing.map(f => (
-                      <li key={f} className="px-2 py-0.5 bg-amber-100 border border-amber-300 rounded-lg text-xs font-semibold text-amber-800">
-                        {f}
-                      </li>
-                    ))}
-                  </ul>
-                  <p className="text-xs text-amber-600 mt-2">Fill in all fields and click Save Settings. No calls will be made until all fields are provided.</p>
-                </div>
-              </div>
-            )
-          })()}
-
-          {/* Left Column: Settings & Prompt */}
           <div className="space-y-6">
-            <div className="bg-white/80 backdrop-blur-xl p-8 rounded-3xl border border-gray-100 shadow-lg hover:shadow-xl transition-shadow duration-300 space-y-8">
-              <div className="flex items-center gap-4 border-b border-gray-100 pb-5">
+            <div className="bg-white/80 backdrop-blur-xl rounded-3xl border border-gray-100 shadow-lg hover:shadow-xl transition-shadow duration-300">
+              <button
+                onClick={() => setConfigOpen(o => !o)}
+                className="w-full flex items-center gap-4 p-6 text-left"
+              >
                 <div className="p-3 bg-gradient-to-br from-blue-100 to-indigo-50 text-blue-600 rounded-2xl shadow-inner">
                   <Bot className="w-6 h-6" />
                 </div>
-                <div>
+                <div className="flex-1">
                   <h2 className="text-xl font-bold text-gray-900">AI Agent Configuration</h2>
                   <p className="text-sm text-gray-500">Core connectivity and persona settings.</p>
                 </div>
-              </div>
+                {configOpen ? <ChevronUp className="w-5 h-5 text-gray-400" /> : <ChevronDown className="w-5 h-5 text-gray-400" />}
+              </button>
 
+              {configOpen && <div className="px-8 pb-8 space-y-8 border-t border-gray-100 pt-6">
               <div className="space-y-4">
                 <Label>AI Provider Engine</Label>
                 <div className="flex bg-gray-100 p-1 rounded-xl w-fit">
@@ -590,39 +559,29 @@ export function AdminAICallingClient({ initialSettings, initialKnowledgeBase, in
                     OpenAI (Pipecat)
                   </button>
                 </div>
-                <p className="text-xs text-gray-500">
-                  {(!settings.ai_provider || settings.ai_provider === 'sarvam') 
-                    ? "Uses Sarvam's outbound API for regional language models." 
-                    : "Uses Genestac's internal Pipecat service and Exotel WebSockets."}
-                </p>
               </div>
 
               <div className="space-y-3">
-                <Label>Exotel Source Number (ExoPhone)</Label>
-                <Input
-                  value={settings.exotel_number || ''}
-                  onChange={e => setSettings({...settings, exotel_number: e.target.value})}
-                  placeholder="e.g. +91XXXXXXXXXX"
-                />
-                <p className="text-xs text-gray-500">The verified Exotel number the AI will use to call customers.</p>
+                <Label>Exotel Source Number</Label>
+                <Input value={settings.exotel_number || ''} onChange={e => setSettings({...settings, exotel_number: e.target.value})} />
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-3">
                   <Label>Exotel Account SID</Label>
-                  <Input value={settings.exotel_sid || ''} onChange={e => setSettings({...settings, exotel_sid: e.target.value})} placeholder="e.g. genestac1" />
+                  <Input value={settings.exotel_sid || ''} onChange={e => setSettings({...settings, exotel_sid: e.target.value})} />
                 </div>
                 <div className="space-y-3">
                   <Label>Exotel Subdomain</Label>
-                  <Input value={settings.exotel_subdomain || ''} onChange={e => setSettings({...settings, exotel_subdomain: e.target.value})} placeholder="e.g. api.exotel.com" />
+                  <Input value={settings.exotel_subdomain || ''} onChange={e => setSettings({...settings, exotel_subdomain: e.target.value})} />
                 </div>
                 <div className="space-y-3">
                   <Label>Exotel API Key</Label>
-                  <Input value={settings.exotel_api_key || ''} onChange={e => setSettings({...settings, exotel_api_key: e.target.value})} placeholder="Your API Key" />
+                  <Input value={settings.exotel_api_key || ''} onChange={e => setSettings({...settings, exotel_api_key: e.target.value})} />
                 </div>
                 <div className="space-y-3">
                   <Label>Exotel API Token</Label>
-                  <Input type="password" value={settings.exotel_api_token || ''} onChange={e => setSettings({...settings, exotel_api_token: e.target.value})} placeholder="Your API Token" />
+                  <Input type="password" value={settings.exotel_api_token || ''} onChange={e => setSettings({...settings, exotel_api_token: e.target.value})} />
                 </div>
               </div>
 
@@ -676,25 +635,35 @@ export function AdminAICallingClient({ initialSettings, initialKnowledgeBase, in
                 <Textarea
                   value={settings.base_prompt}
                   onChange={e => setSettings({...settings, base_prompt: e.target.value})}
-                  className="h-48 max-h-96 overflow-y-auto resize-y"
-                  style={{ fieldSizing: 'fixed' } as any}
-                  placeholder="You are an AI sales agent for..."
+                  className="h-48 resize-none"
                 />
-                <p className="text-xs text-gray-500">Provide the personality, goal, and rules for the AI here. Dynamic RAG context (lead name, past summary) is automatically injected.</p>
               </div>
+
+              <div className="pt-4">
+                <Button onClick={handleSaveConfig} disabled={savingConfig} className="w-full bg-blue-600 hover:bg-blue-700">
+                  {savingConfig && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                  Save AI Configuration
+                </Button>
+              </div>
+              </div>}
             </div>
 
-            <div className="bg-white/80 backdrop-blur-xl p-8 rounded-3xl border border-gray-100 shadow-lg hover:shadow-xl transition-shadow duration-300 space-y-6">
-              <div className="flex items-center gap-4 border-b border-gray-100 pb-5">
+            <div className="bg-white/80 backdrop-blur-xl rounded-3xl border border-gray-100 shadow-lg hover:shadow-xl transition-shadow duration-300">
+              <button
+                onClick={() => setTriggerOpen(o => !o)}
+                className="w-full flex items-center gap-4 p-6 text-left"
+              >
                 <div className="p-3 bg-gradient-to-br from-amber-100 to-orange-50 text-amber-600 rounded-2xl shadow-inner">
                   <Clock className="w-6 h-6" />
                 </div>
-                <div>
+                <div className="flex-1">
                   <h2 className="text-xl font-bold text-gray-900">Trigger & Scheduling</h2>
                   <p className="text-sm text-gray-500">When should the AI auto-dial leads?</p>
                 </div>
-              </div>
-              
+                {triggerOpen ? <ChevronUp className="w-5 h-5 text-gray-400" /> : <ChevronDown className="w-5 h-5 text-gray-400" />}
+              </button>
+
+              {triggerOpen && <div className="px-8 pb-8 space-y-6 border-t border-gray-100 pt-6">
               <div className="space-y-5 bg-amber-50/50 p-5 rounded-2xl border border-amber-100/50">
                 <Label>Enable Auto-Calling for these Lead Statuses</Label>
                 <div className="grid grid-cols-2 gap-3">
@@ -784,11 +753,20 @@ export function AdminAICallingClient({ initialSettings, initialKnowledgeBase, in
                   <Label htmlFor="skip-consultation-scheduled" className="cursor-pointer text-sm">Skip leads who already have a Consultation Scheduled</Label>
                 </div>
               </div>
+
+              {/* Trigger Save Button */}
+              <div className="pt-4">
+                <Button onClick={handleSaveTrigger} disabled={savingTrigger} className="w-full bg-amber-500 hover:bg-amber-600">
+                  {savingTrigger && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                  Save Trigger & Scheduling
+                </Button>
+              </div>
+              </div>}
             </div>
 
-            <Button onClick={handleSaveSettings} disabled={saving} className="w-full">
+            <Button onClick={handleSaveSettings} disabled={saving} className="w-full bg-gray-700 hover:bg-gray-800">
               {saving && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-              Save Settings
+              Save All Settings
             </Button>
 
             {/* ── Eligible Leads Live Overview ── */}
@@ -1081,6 +1059,16 @@ export function AdminAICallingClient({ initialSettings, initialKnowledgeBase, in
               <Button size="sm" onClick={handleProcessNext} disabled={processingQueue || queueLoading || callQueue.filter((q: any) => q.status === 'pending').length === 0}>
                 {processingQueue ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Play className="w-4 h-4 mr-2" />}
                 Process Next
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleClearQueue}
+                disabled={clearingQueue || queueLoading || callQueue.length === 0}
+                className="text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700"
+              >
+                {clearingQueue ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Trash2 className="w-4 h-4 mr-2" />}
+                Clear Queue
               </Button>
             </div>
           </div>

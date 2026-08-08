@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { Save, Send, Clock, Phone } from "lucide-react"
+import { getWhatsappConfig, saveWhatsappConfig, triggerWhatsappReport } from "./whatsapp-report-actions"
 
 export default function WhatsappReportConfig() {
   const [numbers, setNumbers] = useState<string>("")
@@ -16,12 +17,8 @@ export default function WhatsappReportConfig() {
 
   const fetchConfig = async () => {
     try {
-      const token = localStorage.getItem("token")
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/admin/metrics/whatsapp-config`, {
-        headers: { Authorization: `Bearer ${token}` }
-      })
-      if (res.ok) {
-        const data = await res.json()
+      const data = await getWhatsappConfig()
+      if (data) {
         setNumbers(data.numbers ? data.numbers.join(", ") : "")
         setTime(data.time || "21:00")
       }
@@ -34,25 +31,17 @@ export default function WhatsappReportConfig() {
     setIsLoading(true)
     setMessage(null)
     try {
-      const token = localStorage.getItem("token")
       const numList = numbers.split(",").map(n => n.trim()).filter(n => n.length > 0)
       
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/admin/metrics/whatsapp-config`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`
-        },
-        body: JSON.stringify({ numbers: numList, time })
-      })
+      const res = await saveWhatsappConfig(numList, time)
 
-      if (res.ok) {
+      if (res && res.success) {
         setMessage({ text: "Configuration saved successfully!", type: "success" })
       } else {
         setMessage({ text: "Failed to save configuration.", type: "error" })
       }
-    } catch (err) {
-      setMessage({ text: "Network error occurred.", type: "error" })
+    } catch (err: any) {
+      setMessage({ text: err.message || "Network error occurred.", type: "error" })
     } finally {
       setIsLoading(false)
     }
@@ -64,19 +53,15 @@ export default function WhatsappReportConfig() {
     setIsSending(true)
     setMessage(null)
     try {
-      const token = localStorage.getItem("token")
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/admin/metrics/send-whatsapp-report`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` }
-      })
+      const res = await triggerWhatsappReport()
 
-      if (res.ok) {
+      if (res && res.success) {
         setMessage({ text: "Report triggered successfully! Check WhatsApp shortly.", type: "success" })
       } else {
         setMessage({ text: "Failed to trigger report.", type: "error" })
       }
-    } catch (err) {
-      setMessage({ text: "Network error occurred.", type: "error" })
+    } catch (err: any) {
+      setMessage({ text: err.message || "Network error occurred.", type: "error" })
     } finally {
       setIsSending(false)
     }
