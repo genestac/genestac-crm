@@ -79,6 +79,10 @@ def initiate_ai_call(from_number: str, to_number: str, lead_id: str):
     # ── Try primary provider ──────────────────────────────────────────────────
     result = _call(primary)
     if result is not None:
+        # If it's a lead-level skip (bad phone/invalid), don't try fallback
+        if isinstance(result, dict) and result.get("_lead_skip"):
+            logger.warning(f"[AI Call] Lead {lead_id} skipped (bad/invalid phone). Not a provider failure.")
+            return result
         return result
 
     # ── Primary failed → switch to fallback ──────────────────────────────────
@@ -87,6 +91,8 @@ def initiate_ai_call(from_number: str, to_number: str, lead_id: str):
 
     result = _call(fallback)
     if result is not None:
+        if isinstance(result, dict) and result.get("_lead_skip"):
+            return result
         return result
 
     # ── Both failed → disable the service ────────────────────────────────────
@@ -296,9 +302,20 @@ def _initiate_sarvam_call(to_number: str, lead_id: str, supabase):
     )
     try:
         response = requests.post(url, json=payload, headers=headers)
+        if response.status_code in (400, 422):
+            # Bad phone number or invalid request — lead-level failure, not a provider failure
+            logger.warning(f"[Sarvam] Lead-level failure (HTTP {response.status_code}) for lead {lead_id}: {response.text[:200]}")
+            return {"Call": {"Sid": None}, "_lead_skip": True}
+        if response.status_code in (401, 403):
+            # Credential failure — real provider failure
+            logger.error(f"[Sarvam] Credential failure (HTTP {response.status_code}): {response.text[:200]}")
+            return None
         response.raise_for_status()
         data = response.json()
         return {"Call": {"Sid": data.get("attempt_id")}}
+    except requests.exceptions.HTTPError as e:
+        logger.error(f"[Sarvam] HTTP error for lead {lead_id}: {e}")
+        return None
     except Exception as e:
         logger.error(f"[Sarvam] Call failed: {e}")
         return None

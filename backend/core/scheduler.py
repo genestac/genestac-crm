@@ -260,15 +260,22 @@ def sweep_leads_for_auto_call():
                 exotel_res = initiate_ai_call(from_number=exotel_number, to_number=phone, lead_id=lead_id)
 
                 if exotel_res and "Call" in exotel_res:
-                    call_sid = exotel_res["Call"].get("Sid")
-                    if call_log_id:
-                        supabase.table("ai_call_logs").update({"call_sid": call_sid, "status": "ringing"}).eq("id", call_log_id).execute()
-                    # Mark as bot_called — keep in queue for status tracking
-                    queue[pending_idx]["status"] = "bot_called"
-                    queue[pending_idx]["call_log_id"] = call_log_id
-                    queue[pending_idx]["call_sid"] = call_sid
-                    queue[pending_idx]["called_at"] = datetime.datetime.utcnow().isoformat()
-                    print(f"[AI Voice Scheduler] ✅ Call initiated for lead {lead_id}, marked as bot_called")
+                    # Check for lead-level skip (bad/invalid phone number)
+                    if exotel_res.get("_lead_skip"):
+                        if call_log_id:
+                            supabase.table("ai_call_logs").update({"status": "failed_to_initiate"}).eq("id", call_log_id).execute()
+                        queue[pending_idx]["status"] = "skipped"
+                        print(f"[AI Voice Scheduler] ⏭️  Skipped lead {lead_id} (invalid/unroutable phone)")
+                    else:
+                        call_sid = exotel_res["Call"].get("Sid")
+                        if call_log_id:
+                            supabase.table("ai_call_logs").update({"call_sid": call_sid, "status": "ringing"}).eq("id", call_log_id).execute()
+                        # Mark as bot_called — keep in queue for status tracking
+                        queue[pending_idx]["status"] = "bot_called"
+                        queue[pending_idx]["call_log_id"] = call_log_id
+                        queue[pending_idx]["call_sid"] = call_sid
+                        queue[pending_idx]["called_at"] = datetime.datetime.utcnow().isoformat()
+                        print(f"[AI Voice Scheduler] ✅ Call initiated for lead {lead_id}, marked as bot_called")
                 else:
                     if call_log_id:
                         supabase.table("ai_call_logs").update({"status": "failed_to_initiate"}).eq("id", call_log_id).execute()
