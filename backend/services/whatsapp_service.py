@@ -45,7 +45,10 @@ async def send_whatsapp_template(phone_number: str, template_name: str, language
             response.raise_for_status()
             return response.json()
         except Exception as e:
-            print(f"WhatsApp API Error: {e}")
+            if hasattr(e, 'response') and e.response is not None:
+                print(f"WhatsApp API Error: {e} - Body: {e.response.text}")
+            else:
+                print(f"WhatsApp API Error: {e}")
             return {"error": str(e)}
 
 async def sync_templates_from_meta():
