@@ -205,3 +205,26 @@ export async function buildQueueFromFilters() {
   }
 }
 
+export async function getContainerLogs(lines = 200) {
+  try {
+    const response = await fetchAPI(`/api/admin/ai-settings/logs?lines=${lines}`, {
+      headers: { 'Cookie': (await cookies()).toString() }
+    })
+    return response
+  } catch (error) {
+    console.error('Failed to fetch container logs:', error)
+    return { logs: [], total: 0 }
+  }
+}
+
+export async function getQueueStatusCounts() {
+  try {
+    const response = await fetchAPI('/api/admin/ai-settings/queue/status-counts', {
+      headers: { 'Cookie': (await cookies()).toString() }
+    })
+    return response
+  } catch (error) {
+    console.error('Failed to fetch queue status counts:', error)
+    return { counts: {}, total: 0 }
+  }
+}

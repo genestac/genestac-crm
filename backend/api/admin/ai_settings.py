@@ -631,3 +631,65 @@ async def process_next_in_queue(
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/logs")
+async def get_ai_call_logs_stream(
+    lines: int = 200,
+    current_user: dict = Depends(get_current_user),
+):
+    """Return recent container/process logs filtered to AI calling activity."""
+    import subprocess, os
+
+    log_lines = []
+
+    # Try docker logs first (works when running inside docker-compose)
+    container_name = os.environ.get("HOSTNAME", "backend-api-1")
+    try:
+        result = subprocess.run(
+            ["docker", "logs", container_name, "--tail", str(lines), "--timestamps"],
+            capture_output=True, text=True, timeout=10
+        )
+        raw = (result.stdout + result.stderr).strip()
+        if raw:
+            log_lines = raw.splitlines()
+    except Exception:
+        pass
+
+    # Fallback: read uvicorn logs from stderr via /proc if docker unavailable
+    if not log_lines:
+        try:
+            result = subprocess.run(
+                ["docker", "logs", "backend-api-1", "--tail", str(lines), "--timestamps"],
+                capture_output=True, text=True, timeout=10
+            )
+            raw = (result.stdout + result.stderr).strip()
+            log_lines = raw.splitlines() if raw else []
+        except Exception:
+            log_lines = ["[Logs unavailable — container name may differ]"]
+
+    # Filter to AI-calling relevant lines (keep all scheduler/webhook lines)
+    keywords = ["AI Voice", "Sarvam", "post-call", "Scheduler", "WhatsApp", "ERROR", "Error", "DISABLED", "sweep"]
+    filtered = [l for l in log_lines if any(k in l for k in keywords)]
+
+    # If nothing matches, return last N raw lines
+    if not filtered:
+        filtered = log_lines[-lines:]
+
+    return {"logs": filtered, "total": len(filtered)}
+
+
+@router.get("/queue/status-counts")
+async def get_queue_status_counts(
+    current_user: dict = Depends(get_current_user),
+    supabase: Client = Depends(get_supabase_client),
+):
+    """Return a quick count of queue items grouped by status."""
+    try:
+        from collections import Counter
+        res = supabase.table("global_settings").select("settings_value").eq("settings_key", "ai_call_queue").execute()
+        queue = res.data[0]["settings_value"] if res.data else []
+        counts = Counter(item.get("status", "unknown") for item in queue)
+        return {"counts": dict(counts), "total": len(queue)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

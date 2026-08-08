@@ -1116,6 +1116,27 @@ Rules:
                 supabase.table("users").update({"status": new_status}).eq("id", lead_id).execute()
                 print(f"[Sarvam/post-call] Lead {lead_id} status -> {new_status}")
 
+            # ── Sync queue item status after call completes ────────────────────
+            try:
+                q_res = supabase.table("global_settings").select("settings_value").eq("settings_key", "ai_call_queue").execute()
+                if q_res.data:
+                    queue = q_res.data[0]["settings_value"] or []
+                    updated = False
+                    for item in queue:
+                        if item.get("lead_id") == lead_id and item.get("status") == "bot_called":
+                            item["status"] = "completed"
+                            item["crm_status"] = new_status
+                            item["score"] = lead_score
+                            item["score_label"] = score_label
+                            item["completed_at"] = __import__("datetime").datetime.utcnow().isoformat()
+                            updated = True
+                            break
+                    if updated:
+                        supabase.table("global_settings").upsert({"settings_key": "ai_call_queue", "settings_value": queue}, on_conflict="settings_key").execute()
+                        print(f"[Sarvam/post-call] Queue item for lead {lead_id} -> completed")
+            except Exception as qe:
+                print(f"[Sarvam/post-call] Queue sync failed (non-fatal): {qe}")
+
             # ── Hot lead alert ─────────────────────────────────────────────────
             if lead_score is not None and lead_score >= 70:
                 try:
@@ -1175,6 +1196,30 @@ Rules:
     except Exception as log_err:
         print(f"[Sarvam/post-call] FAILED to save call log: {log_err}")
         log_id = None
+
+    # ── Sync queue for Unreachable (no-user-turn) calls ───────────────────
+    if not has_user_turn:
+        try:
+            q_res = supabase.table("global_settings").select("settings_value").eq("settings_key", "ai_call_queue").execute()
+            if q_res.data:
+                queue = q_res.data[0]["settings_value"] or []
+                updated = False
+                for item in queue:
+                    if item.get("lead_id") == lead_id and item.get("status") == "bot_called":
+                        item["status"] = "completed"
+                        item["crm_status"] = "CONTACT_ATTEMPTED"
+                        item["score"] = 0
+                        item["score_label"] = "Unreachable"
+                        item["completed_at"] = __import__("datetime").datetime.utcnow().isoformat()
+                        updated = True
+                        break
+                if updated:
+                    supabase.table("global_settings").upsert({"settings_key": "ai_call_queue", "settings_value": queue}, on_conflict="settings_key").execute()
+                    print(f"[Sarvam/post-call] Queue item for lead {lead_id} -> completed (Unreachable)")
+        except Exception as qe:
+            print(f"[Sarvam/post-call] Queue sync (unreachable) failed (non-fatal): {qe}")
+
+
 
 
 

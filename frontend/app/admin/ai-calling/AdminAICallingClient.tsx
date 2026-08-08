@@ -38,6 +38,7 @@ function CallStatusBadge({ status }: { status: string }) {
     not_picked:         { label: 'Not Picked',  className: 'bg-red-50 text-red-600 border-red-200',         icon: <PhoneMissed className="w-3 h-3" /> },
     processing:         { label: 'Processing',  className: 'bg-purple-50 text-purple-700 border-purple-200', icon: <Loader2 className="w-3 h-3 animate-spin" /> },
     failed:             { label: 'Failed',      className: 'bg-red-50 text-red-700 border-red-200',         icon: <XCircle className="w-3 h-3" /> },
+    skipped:            { label: 'Skipped',     className: 'bg-orange-50 text-orange-600 border-orange-200', icon: <PhoneOff className="w-3 h-3" /> },
   }
   const s = map[status] ?? { label: status, className: 'bg-gray-50 text-gray-600 border-gray-200', icon: null }
   return (
@@ -1076,8 +1077,8 @@ export function AdminAICallingClient({ initialSettings, initialKnowledgeBase, in
             {[
               { label: 'In Queue (Pending)',  value: callQueue.filter((q: any) => q.status === 'pending').length,     color: 'text-gray-900',   bg: 'bg-white' },
               { label: 'Bot Called',          value: callQueue.filter((q: any) => q.status === 'bot_called').length,  color: 'text-indigo-700', bg: 'bg-indigo-50' },
-              { label: 'Picked Up (In Call)', value: callQueue.filter((q: any) => q.status === 'in_call').length,     color: 'text-green-700',  bg: 'bg-green-50' },
-              { label: 'Not Picked',          value: callQueue.filter((q: any) => q.status === 'not_picked').length,  color: 'text-red-700',    bg: 'bg-red-50' },
+              { label: 'Completed',           value: callQueue.filter((q: any) => q.status === 'completed').length,   color: 'text-green-700',  bg: 'bg-green-50' },
+              { label: 'Skipped',             value: callQueue.filter((q: any) => q.status === 'skipped').length,    color: 'text-orange-700', bg: 'bg-orange-50' },
             ].map(s => (
               <div key={s.label} className={`${s.bg} rounded-xl border p-5 shadow-sm`}>
                 <p className="text-xs text-gray-500 font-medium">{s.label}</p>
@@ -1160,36 +1161,54 @@ export function AdminAICallingClient({ initialSettings, initialKnowledgeBase, in
                 </div>
               )}
 
-              {/* Bot Called / In Call / Not Picked History */}
-              {callQueue.filter((q: any) => ['bot_called', 'in_call', 'not_picked', 'processing', 'failed'].includes(q.status)).length > 0 && (
+              {/* Bot Called / Completed / Skipped History */}
+              {callQueue.filter((q: any) => ['bot_called', 'in_call', 'not_picked', 'processing', 'failed', 'completed', 'skipped'].includes(q.status)).length > 0 && (
                 <div className="space-y-2">
                   <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 flex items-center gap-2">
                     <PhoneCall className="w-3.5 h-3.5" /> Call History
                   </h3>
-                  {callQueue.filter((q: any) => ['bot_called', 'in_call', 'not_picked', 'processing', 'failed'].includes(q.status)).map((item: any) => (
+                  {callQueue.filter((q: any) => ['bot_called', 'in_call', 'not_picked', 'processing', 'failed', 'completed', 'skipped'].includes(q.status)).map((item: any) => (
                     <div
                       key={item.id}
-                      className="flex items-center gap-4 p-4 border rounded-xl bg-white shadow-sm"
+                      className={`flex items-center gap-4 p-4 border rounded-xl shadow-sm ${
+                        item.status === 'completed' ? 'bg-green-50 border-green-100' :
+                        item.status === 'skipped' ? 'bg-orange-50 border-orange-100' :
+                        'bg-white'
+                      }`}
                     >
                       <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${
+                        item.status === 'completed' ? 'bg-green-100' :
+                        item.status === 'skipped' ? 'bg-orange-100' :
                         item.status === 'in_call' ? 'bg-green-50' :
                         item.status === 'not_picked' ? 'bg-red-50' :
                         item.status === 'bot_called' ? 'bg-indigo-50' : 'bg-gray-50'
                       }`}>
                         <PhoneCall className={`w-4 h-4 ${
+                          item.status === 'completed' ? 'text-green-600' :
+                          item.status === 'skipped' ? 'text-orange-500' :
                           item.status === 'in_call' ? 'text-green-600' :
                           item.status === 'not_picked' ? 'text-red-400' :
                           item.status === 'bot_called' ? 'text-indigo-500' : 'text-gray-400'
                         }`} />
                       </div>
-                      <div className="flex-1">
+                      <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-semibold text-gray-900">{item.leads?.name || 'Unknown'}</span>
                           {item.leads?.phone && <span className="text-xs text-gray-500">{item.leads.phone}</span>}
-                          <CrmStatusBadge status={item.leads?.crm_status} />
+                          {/* Show final CRM status from completed call */}
+                          {item.crm_status
+                            ? <CrmStatusBadge status={item.crm_status} />
+                            : <CrmStatusBadge status={item.leads?.crm_status} />
+                          }
+                          {/* Score badge for completed calls */}
+                          {item.status === 'completed' && item.score != null && (
+                            <LeadScoreBadge score={item.score} label={item.score_label} />
+                          )}
                         </div>
                         <p className="text-xs text-gray-400 mt-1">
-                          {item.called_at
+                          {item.completed_at
+                            ? `Completed: ${new Date(item.completed_at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}`
+                            : item.called_at
                             ? `Called: ${new Date(item.called_at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}`
                             : `Added: ${new Date(item.created_at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}`
                           }
