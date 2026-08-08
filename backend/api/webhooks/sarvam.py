@@ -789,7 +789,61 @@ async def tool_search_knowledge_base(request: Request):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Post-call webhook  (Sarvam sends transcript +      # transcript: Sarvam sends interaction_transcript as a list of turn objects
+# Post-call webhook  (Sarvam sends transcript + metadata when call ends)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.post("/post-call")
+async def sarvam_post_call(request: Request, background_tasks: BackgroundTasks):
+    body: dict = await request.json()
+
+    # DIAGNOSTIC: use print() so it always appears in docker logs stdout
+    import json as _json
+    try:
+        body_preview = _json.dumps(body, ensure_ascii=False, indent=2)
+    except Exception:
+        body_preview = str(body)
+
+    print("=" * 60)
+    print("[Sarvam/post-call] RAW PAYLOAD RECEIVED")
+    print(f"Keys: {list(body.keys())}")
+    print(f"lead_id (custom_data): {(body.get('custom_data') or {}).get('lead_id')!r}")
+    print(f"lead_id (metadata):    {(body.get('metadata') or {}).get('lead_id')!r}")
+    print(f"lead_id (agent_vars):  {(body.get('agent_variables') or {}).get('lead_id')!r}")
+    print(f"lead_id (top-level):   {body.get('lead_id')!r}")
+    print(f"transcript present:    {bool(body.get('transcript'))}")
+    print(f"transcript length:     {len(body.get('transcript') or '')}")
+    print(f"Full body:\n{body_preview[:3000]}")
+    print("=" * 60)
+
+    # ── validate early to reject malformed calls before queuing tasks ─────────
+    final_vars = body.get("final_agent_variables") or {}
+    lead_id = (
+        final_vars.get("lead_id")
+        or (body.get("webhook_config") or {}).get("metadata", {}).get("lead_id")
+        or (body.get("custom_data") or {}).get("lead_id")
+        or (body.get("metadata") or {}).get("lead_id")
+        or body.get("lead_id")
+        or ""
+    )
+    lead_id = str(lead_id).strip()
+    if not lead_id or lead_id == "None":
+        print("[Sarvam/post-call] REJECTED: Missing or invalid lead_id in payload")
+        raise HTTPException(status_code=400, detail="Missing lead_id")
+
+    background_tasks.add_task(_process_post_call, body, lead_id)
+    return {"status": "received"}
+
+
+async def _process_post_call(body: dict, lead_id: str):
+    """
+    Background task: score lead, save transcript, vectorize memory.
+    """
+    # ── Extract fields from Sarvam's actual payload ────────────────────────
+    call_id          = body.get("attempt_id") or body.get("call_id", "")
+    duration_seconds = body.get("duration") or body.get("duration_seconds", 0)
+    recording_url    = body.get("recording_url", "")
+
+    # transcript: Sarvam sends interaction_transcript as a list of turn objects
     raw_transcript = body.get("interaction_transcript") or body.get("transcript") or []
     if isinstance(raw_transcript, list):
         lines = []
