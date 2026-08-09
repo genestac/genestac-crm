@@ -362,35 +362,36 @@ async def trigger_ai_call(lead_id: str, current_user: dict=Depends(get_current_u
         if not phone:
             raise HTTPException(status_code=404, detail="Lead/User phone not found")
         
-        # Get AI exotel number
-        settings_res = supabase.table("global_settings").select("settings_value").eq("settings_key", "ai_call_settings").execute()
-        if not settings_res.data:
-            raise HTTPException(status_code=400, detail="AI Settings not configured")
-        
-        ai_settings = settings_res.data[0]["settings_value"]
-        exotel_number = ai_settings.get("exotel_caller_id") or ai_settings.get("exotel_number")
-        if not exotel_number:
-            raise HTTPException(status_code=400, detail="Exotel caller ID not configured in AI settings")
-            
-        # Create log
+        # Create log entry before initiating
         log_res = supabase.table("ai_call_logs").insert({
             "lead_id": lead_id,
             "status": "initiating"
         }).execute()
-        call_log_id = log_res.data[0]["id"]
+        call_log_id = log_res.data[0]["id"] if log_res.data else None
         
-        # Trigger
-        exotel_res = initiate_ai_call(from_number=exotel_number, to_number=phone, lead_id=lead_id)
+        # Trigger call via Sarvam (or configured provider)
+        # initiate_ai_call auto-selects Sarvam or Pipecat based on ai_call_settings
+        result = initiate_ai_call(from_number="", to_number=phone, lead_id=lead_id)
         
-        if exotel_res and "Call" in exotel_res:
-            call_sid = exotel_res["Call"].get("Sid")
-            supabase.table("ai_call_logs").update({"call_sid": call_sid, "status": "ringing"}).eq("id", call_log_id).execute()
-            return {"success": True, "message": "Call initiated"}
+        if result and not result.get("_lead_skip"):
+            # Success — Sarvam wraps response as {"Call": {"Sid": attempt_id}}
+            call_sid = (result.get("Call") or {}).get("Sid")
+            if call_log_id:
+                supabase.table("ai_call_logs").update({
+                    "status": "ringing",
+                    **({"call_sid": call_sid} if call_sid else {})
+                }).eq("id", call_log_id).execute()
+            return {"success": True, "message": "Call initiated successfully"}
         else:
-            supabase.table("ai_call_logs").update({"status": "failed_to_initiate"}).eq("id", call_log_id).execute()
-            raise HTTPException(status_code=500, detail="Failed to initiate Exotel call")
+            if call_log_id:
+                supabase.table("ai_call_logs").update({"status": "failed_to_initiate"}).eq("id", call_log_id).execute()
+            detail = "Failed to initiate call. Check AI settings in the admin panel."
+            if result and result.get("_lead_skip"):
+                detail = "Call skipped — invalid or blocked phone number."
+            raise HTTPException(status_code=500, detail=detail)
             
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+

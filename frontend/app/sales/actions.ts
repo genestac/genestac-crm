@@ -179,11 +179,28 @@ export async function getAICallLogs(leadId: string) {
 
 
 export async function triggerAICall(leadId: string) {
-  const response = await fetchAPI(`/api/sales/leads/${leadId}/trigger-ai-call`, {
-    method: 'POST',
-    headers: { 'Cookie': (await cookies()).toString() }
-  })
-  return response
+  try {
+    // Allow 30s for the Exotel API call to complete
+    const response = await fetchWithTimeout(
+      `${process.env.API_BASE_URL || 'http://localhost:8000'}/api/sales/leads/${leadId}/trigger-ai-call`,
+      {
+        method: 'POST',
+        headers: { 
+          'Cookie': (await cookies()).toString(),
+          'Authorization': `Bearer ${getAuthToken((await cookies()).getAll())}` 
+        }
+      },
+      30000
+    )
+    if (!response.ok) {
+      const errText = await response.text().catch(() => 'Unknown error')
+      throw new Error(errText)
+    }
+    return response.json()
+  } catch (error: any) {
+    console.error('triggerAICall error:', error)
+    throw error
+  }
 }
 
 export async function getWhatsappChats(leadId: string) {
