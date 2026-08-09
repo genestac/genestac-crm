@@ -2,7 +2,7 @@ import { cookies } from 'next/headers'
 import { getAuthToken } from './cookie-helper'
 
 const API_BASE_URL = process.env.API_BASE_URL || 'http://localhost:8000'
-const REQUEST_TIMEOUT_MS = Number(process.env.API_REQUEST_TIMEOUT_MS || 10000)
+const REQUEST_TIMEOUT_MS = Number(process.env.API_REQUEST_TIMEOUT_MS || 30000)
 
 export async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
   const controller = new AbortController()
