@@ -95,8 +95,11 @@ def initiate_ai_call(from_number: str, to_number: str, lead_id: str):
             return result
         return result
 
-    # ── Both failed → disable the service ────────────────────────────────────
-    logger.error("[AI Call] Both providers failed. Disabling AI calling service.")
+    # ── Both failed → only disable if it was a credential/API error, not a network error ──
+    if isinstance(result, dict) and result.get("_network_error"):
+        logger.warning("[AI Call] Both providers had network errors (transient). NOT disabling service.")
+        return None
+    logger.error("[AI Call] Both providers failed with API/credential errors. Disabling AI calling service.")
     _set_calling_disabled(supabase, ai_settings, True)
     return None
 
@@ -317,6 +320,10 @@ def _initiate_sarvam_call(to_number: str, lead_id: str, supabase):
         response.raise_for_status()
         data = response.json()
         return {"Call": {"Sid": data.get("attempt_id")}}
+    except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
+        # Network/DNS issue — transient, do NOT disable calling globally
+        logger.warning(f"[Sarvam] Network error for lead {lead_id} (transient, not disabling): {e}")
+        return {"_network_error": True}
     except requests.exceptions.HTTPError as e:
         logger.error(f"[Sarvam] HTTP error for lead {lead_id}: {e}")
         return None
