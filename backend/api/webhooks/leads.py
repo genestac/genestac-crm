@@ -53,8 +53,10 @@ async def ingest_sheet_lead(
     )
 
     # Build metadata from extra sheet fields
-    # city is stored in the real `city` column, not metadata
+    # city is stored in metadata (no dedicated city column in leads table)
     sheet_meta = {}
+    if payload.city:
+        sheet_meta["city"] = payload.city
     if payload.age:
         sheet_meta["age"] = payload.age
     if payload.current_weight:
@@ -82,8 +84,6 @@ async def ingest_sheet_lead(
         update_data: dict = {"metadata": existing_meta}
         if payload.name:
             update_data["name"] = payload.name
-        if payload.city:
-            update_data["city"] = payload.city
         # Only set source_id if it wasn't already assigned
         if payload.source_id and not existing.get("source_id"):
             update_data["source_id"] = payload.source_id
@@ -117,8 +117,6 @@ async def ingest_sheet_lead(
     }
     if payload.name:
         insert_data["name"] = payload.name
-    if payload.city:
-        insert_data["city"] = payload.city
     if payload.source_id:
         insert_data["source_id"] = payload.source_id
 
