@@ -95,9 +95,12 @@ def initiate_ai_call(from_number: str, to_number: str, lead_id: str):
             return result
         return result
 
-    # ── Both failed → only disable if it was a credential/API error, not a network error ──
+    # ── Both failed → only disable if it was a credential/API error, not a network/billing error ──
     if isinstance(result, dict) and result.get("_network_error"):
         logger.warning("[AI Call] Both providers had network errors (transient). NOT disabling service.")
+        return None
+    if isinstance(result, dict) and result.get("_billing_error"):
+        logger.error("[AI Call] ❌ Sarvam billing error (402). Please top up Sarvam credits. NOT disabling service.")
         return None
     logger.error("[AI Call] Both providers failed with API/credential errors. Disabling AI calling service.")
     _set_calling_disabled(supabase, ai_settings, True)
@@ -313,6 +316,10 @@ def _initiate_sarvam_call(to_number: str, lead_id: str, supabase):
             # Bad phone number or invalid request — lead-level failure, not a provider failure
             logger.warning(f"[Sarvam] Lead-level failure (HTTP {response.status_code}) for lead {lead_id}: {response.text[:200]}")
             return {"Call": {"Sid": None}, "_lead_skip": True}
+        if response.status_code == 402:
+            # Billing/credits exhausted — not a provider code bug, not a lead issue
+            logger.error(f"[Sarvam] ❌ PAYMENT REQUIRED (402) — Sarvam account has insufficient credits. Please top up your Sarvam balance. Calls will not work until this is resolved.")
+            return {"_billing_error": True}
         if response.status_code in (401, 403):
             # Credential failure — real provider failure
             logger.error(f"[Sarvam] Credential failure (HTTP {response.status_code}): {response.text[:200]}")

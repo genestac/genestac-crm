@@ -373,7 +373,7 @@ async def trigger_ai_call(lead_id: str, current_user: dict=Depends(get_current_u
         # initiate_ai_call auto-selects Sarvam or Pipecat based on ai_call_settings
         result = initiate_ai_call(from_number="", to_number=phone, lead_id=lead_id)
         
-        if result and not result.get("_lead_skip"):
+        if result and not result.get("_lead_skip") and not result.get("_billing_error") and not result.get("_network_error"):
             # Success — Sarvam wraps response as {"Call": {"Sid": attempt_id}}
             call_sid = (result.get("Call") or {}).get("Sid")
             if call_log_id:
@@ -385,9 +385,14 @@ async def trigger_ai_call(lead_id: str, current_user: dict=Depends(get_current_u
         else:
             if call_log_id:
                 supabase.table("ai_call_logs").update({"status": "failed_to_initiate"}).eq("id", call_log_id).execute()
-            detail = "Failed to initiate call. Check AI settings in the admin panel."
-            if result and result.get("_lead_skip"):
+            if result and result.get("_billing_error"):
+                detail = "❌ Sarvam account has insufficient credits (402). Please top up your Sarvam balance to make calls."
+            elif result and result.get("_lead_skip"):
                 detail = "Call skipped — invalid or blocked phone number."
+            elif result and result.get("_network_error"):
+                detail = "Network error reaching Sarvam. Check your internet connection and try again."
+            else:
+                detail = "Failed to initiate call. Check AI settings in the admin panel."
             raise HTTPException(status_code=500, detail=detail)
             
     except HTTPException:
