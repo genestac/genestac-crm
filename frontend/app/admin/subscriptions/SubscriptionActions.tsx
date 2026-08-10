@@ -25,7 +25,7 @@ export function SubscriptionActions({
   const [selectedVariantId, setSelectedVariantId] = useState('')
   const [loading, setLoading] = useState(false)
 
-  const filteredVariants = variants.filter(v => v.plan_id === selectedPlanId)
+  const filteredVariants = variants.filter(v => v.plan_id === selectedPlanId).sort((a, b) => (a.duration_days || 0) - (b.duration_days || 0))
 
   const handleSaveStatus = async () => {
     setLoading(true)
