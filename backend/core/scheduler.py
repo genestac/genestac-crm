@@ -87,11 +87,8 @@ def sweep_leads_for_auto_call():
 
         enabled_statuses = settings.get("enabled_statuses", [])
         windows = settings.get("allowed_time_windows", [])
-        exotel_number = settings.get("exotel_number")
-
-        if not exotel_number:
-            print("[AI Voice Scheduler] No exotel_number configured. Skipping sweep.")
-            return
+        # exotel_number is kept for legacy callback calls but Sarvam doesn't need it
+        exotel_number = settings.get("exotel_number", "")
 
         now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
@@ -178,16 +175,25 @@ def sweep_leads_for_auto_call():
         skipped_source = 0
 
         if all_lead_ids:
-            logs_res = supabase.table("ai_call_logs").select("lead_id, created_at").in_("lead_id", all_lead_ids).execute()
-            all_logs = logs_res.data or []
-            # Total call count per lead
+            # ⚠️  IMPORTANT: Supabase returns max 1000 rows by default.
+            # Fetching all logs in one .in_() call would silently truncate results
+            # and cause leads to appear uncalled. Instead, query counts per-lead in chunks.
             total_call_counts = {}
             today_call_counts = {}
-            for log in all_logs:
-                lid = log["lead_id"]
-                total_call_counts[lid] = total_call_counts.get(lid, 0) + 1
-                if (log.get("created_at") or "")[:10] == today:
-                    today_call_counts[lid] = today_call_counts.get(lid, 0) + 1
+            chunk_size = 50  # Query 50 leads at a time to stay under limits
+            for i in range(0, len(all_lead_ids), chunk_size):
+                chunk = all_lead_ids[i:i + chunk_size]
+                # Fetch ALL logs for this chunk (no row limit issue since it's per-lead)
+                logs_res = supabase.table("ai_call_logs") \
+                    .select("lead_id, created_at") \
+                    .in_("lead_id", chunk) \
+                    .limit(10000) \
+                    .execute()
+                for log in (logs_res.data or []):
+                    lid = log["lead_id"]
+                    total_call_counts[lid] = total_call_counts.get(lid, 0) + 1
+                    if (log.get("created_at") or "")[:10] == today:
+                        today_call_counts[lid] = today_call_counts.get(lid, 0) + 1
         else:
             total_call_counts = {}
             today_call_counts = {}
