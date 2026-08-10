@@ -111,7 +111,7 @@ export function SubscriptionActions({
             </p>
             <div className="space-y-2">
               <label className="text-sm font-medium">New Plan</label>
-              <Select value={selectedPlanId} onValueChange={(v) => { setSelectedPlanId(v); setSelectedVariantId('') }}>
+              <Select value={selectedPlanId} onValueChange={(v) => { setSelectedPlanId(v || ''); setSelectedVariantId('') }}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select a plan..." />
                 </SelectTrigger>
@@ -125,7 +125,7 @@ export function SubscriptionActions({
             {selectedPlanId && (
               <div className="space-y-2">
                 <label className="text-sm font-medium">Duration</label>
-                <Select value={selectedVariantId} onValueChange={setSelectedVariantId}>
+                <Select value={selectedVariantId} onValueChange={(v) => setSelectedVariantId(v || '')}>
                   <SelectTrigger>
                     <SelectValue placeholder="Select duration..." />
                   </SelectTrigger>
