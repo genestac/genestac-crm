@@ -31,7 +31,7 @@ async def list_subscriptions(
     """List all subscriptions, joined with users, plans, plan_variants, and inventory."""
     try:
         query = supabase.table("subscriptions").select(
-            "*, users(name, phone, email), plans(name), plan_variants(duration_label), inventory(medicine_name)"
+            "*, users(name, phone, email), plans(name), plan_variants(duration_label), inventory(name)"
         ).order("created_at", desc=True)
         
         if status:

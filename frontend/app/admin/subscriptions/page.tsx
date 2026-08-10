@@ -1,6 +1,7 @@
 import { getSubscriptions } from './actions'
 import { format } from 'date-fns'
 import { Badge } from '@/components/ui/badge'
+import { SubscriptionActions } from './SubscriptionActions'
 
 export default async function SubscriptionsPage() {
   const subscriptions = await getSubscriptions()
@@ -47,11 +48,12 @@ export default async function SubscriptionsPage() {
                     </td>
                     <td className="px-6 py-4">
                       <div className="font-medium text-gray-900">
-                        {sub.plans?.name ? `Plan: ${sub.plans.name}` : (sub.inventory?.medicine_name ? `Medicine: ${sub.inventory.medicine_name}` : 'Unknown')}
+                        {sub.plans?.name ? `Plan: ${sub.plans.name}` : (sub.inventory?.name ? `Medicine: ${sub.inventory.name}` : 'Unknown')}
                       </div>
                       {sub.plan_variants?.duration_label && (
                         <div className="text-muted-foreground text-xs mt-1">{sub.plan_variants.duration_label}</div>
                       )}
+                      <div className="text-xs text-indigo-600 mt-1">{sub.plan_type}</div>
                     </td>
                     <td className="px-6 py-4">
                       <div className="text-xs">
@@ -61,8 +63,7 @@ export default async function SubscriptionsPage() {
                     </td>
                     <td className="px-6 py-4">{getStatusBadge(sub.status)}</td>
                     <td className="px-6 py-4 text-right">
-                      {/* Placeholder for future Actions like Renew, Cancel, etc. */}
-                      <span className="text-gray-400 text-xs">Manage</span>
+                      <SubscriptionActions subscription={sub} />
                     </td>
                   </tr>
                 ))}
