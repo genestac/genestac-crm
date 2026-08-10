@@ -629,6 +629,19 @@ def check_and_send_whatsapp_report():
         print(f"[WhatsApp Report Trigger Error] {e}")
 
 
+def check_expired_subscriptions():
+    """Daily check to mark expired subscriptions"""
+    try:
+        from db.supabase import get_supabase_client
+        from datetime import datetime
+        sb = get_supabase_client()
+        today = datetime.now().strftime('%Y-%m-%d')
+        res = sb.table('subscriptions').update({'status': 'expired'}).lt('end_date', today).eq('status', 'active').execute()
+        if res.data:
+            print(f"Marked {len(res.data)} subscriptions as expired.")
+    except Exception as e:
+        print(f"Error checking expired subscriptions: {e}")
+
 def start_scheduler():
     if not scheduler.running:
         # Sweep for auto-calls and pending callbacks every 5 minutes
@@ -639,6 +652,8 @@ def start_scheduler():
         scheduler.add_job(sweep_whatsapp_campaigns, 'interval', minutes=1, id="whatsapp_campaign_sweep", replace_existing=True)
         # Check WhatsApp Daily Report trigger every 1 minute
         scheduler.add_job(check_and_send_whatsapp_report, 'interval', minutes=1, id="whatsapp_daily_report", replace_existing=True)
+        # Check expired subscriptions every hour
+        scheduler.add_job(check_expired_subscriptions, 'interval', hours=1, id="check_expired_subs", replace_existing=True)
         scheduler.start()
         print("Started Background Scheduler for AI Voice Calling and WhatsApp.")
 

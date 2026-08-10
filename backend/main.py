@@ -59,6 +59,8 @@ app.include_router(doctors.router, prefix="/api/admin/doctors", tags=["admin-doc
 from api.admin import consultations
 from api.admin import system_logs
 app.include_router(system_logs.router, prefix="/api/admin/system-logs", tags=["admin-system-logs"])
+from api.admin import subscriptions
+app.include_router(subscriptions.router, prefix="/api/admin/subscriptions", tags=["admin-subscriptions"])
 app.include_router(notifications.router, prefix="/api/admin/notifications", tags=["admin-notifications"])
 app.include_router(lead_scoring.router, prefix="/api/admin/lead-scoring", tags=["admin-lead-scoring"])
 from api.sales import scheduled_calls as scheduled_calls_router
