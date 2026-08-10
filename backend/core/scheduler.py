@@ -90,6 +90,11 @@ def sweep_leads_for_auto_call():
         # exotel_number is kept for legacy callback calls but Sarvam doesn't need it
         exotel_number = settings.get("exotel_number", "")
 
+        # Hard-stop: Sarvam billing error — admin must recharge before calls resume
+        if settings.get("sarvam_billing_error"):
+            print("[AI Voice Scheduler] ⛔ Sarvam billing error detected. All calling PAUSED. Recharge Sarvam credits and clear the error in admin settings.")
+            return
+
         now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
         # ─── PRIORITY QUEUE: Fire explicitly scheduled AI callbacks that are due ───
@@ -273,7 +278,19 @@ def sweep_leads_for_auto_call():
 
                 exotel_res = initiate_ai_call(from_number=exotel_number, to_number=phone, lead_id=lead_id)
 
-                if exotel_res and "Call" in exotel_res:
+                # ── Billing error: stop all calls and notify admin via DB flag ──
+                if isinstance(exotel_res, dict) and exotel_res.get("_billing_error"):
+                    if call_log_id:
+                        supabase.table("ai_call_logs").update({"status": "failed_to_initiate"}).eq("id", call_log_id).execute()
+                    queue[pending_idx]["status"] = "failed"
+                    # Set billing error flag in settings so UI shows recharge banner
+                    settings["sarvam_billing_error"] = True
+                    supabase.table("global_settings").update({"settings_value": settings}).eq("settings_key", "ai_call_settings").execute()
+                    supabase.table("global_settings").upsert({"settings_key": "ai_call_queue", "settings_value": queue}, on_conflict="settings_key").execute()
+                    print("[AI Voice Scheduler] ⛔ BILLING ERROR (402) — Sarvam credits exhausted. All calling paused. Recharge and clear error in admin panel.")
+                    return  # Stop this sweep entirely
+
+                elif exotel_res and "Call" in exotel_res:
                     # Check for lead-level skip (bad/invalid phone number)
                     if exotel_res.get("_lead_skip"):
                         if call_log_id:

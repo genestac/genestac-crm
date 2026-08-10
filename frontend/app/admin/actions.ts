@@ -53,6 +53,20 @@ export async function updateAISettings(data: any) {
   }
 }
 
+export async function clearSarvamBillingError() {
+  try {
+    const response = await fetchAPI('/api/admin/ai-settings/clear-billing-error', {
+      method: 'POST',
+      headers: { 'Cookie': (await cookies()).toString() }
+    })
+    return response
+  } catch (error) {
+    console.error('Failed to clear billing error:', error)
+    throw error
+  }
+}
+
+
 export async function getKnowledgeBase() {
   try {
     const response = await fetchAPI('/api/admin/ai-settings/knowledge-base', {

@@ -50,6 +50,29 @@ async def update_ai_settings(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.post("/clear-billing-error")
+async def clear_billing_error(
+    current_user: dict = Depends(get_current_user),
+    supabase: Client = Depends(get_supabase_client)
+):
+    """Clear the Sarvam billing error flag so calling can resume after recharging."""
+    try:
+        res = supabase.table("global_settings").select("settings_value").eq("settings_key", "ai_call_settings").execute()
+        if not res.data:
+            raise HTTPException(status_code=404, detail="AI settings not found")
+        settings = res.data[0]["settings_value"]
+        settings.pop("sarvam_billing_error", None)
+        settings["ai_calling_disabled"] = False
+        settings["ai_provider"] = "sarvam"
+        supabase.table("global_settings").update({"settings_value": settings}).eq("settings_key", "ai_call_settings").execute()
+        return {"success": True, "message": "Billing error cleared. AI calling will resume."}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
 @router.get("/knowledge-base")
 async def get_knowledge_base(
     category: str = None,

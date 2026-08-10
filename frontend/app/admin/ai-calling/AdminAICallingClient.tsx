@@ -1,14 +1,14 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { updateAISettings, addKnowledgeBaseItem, deleteKnowledgeBaseItem, getCallLogs, getCallQueue, updateCallQueue, processNextCall, getCallStats, getEligibleLeadsPreview, clearCallQueue, buildQueueFromFilters } from '../actions'
+import { updateAISettings, addKnowledgeBaseItem, deleteKnowledgeBaseItem, getCallLogs, getCallQueue, updateCallQueue, processNextCall, getCallStats, getEligibleLeadsPreview, clearCallQueue, buildQueueFromFilters, clearSarvamBillingError } from '../actions'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { toast } from 'sonner'
-import { Loader2, Plus, Trash2, Bot, Database, Clock, PhoneCall, ChevronDown, ChevronUp, RefreshCw, CheckCircle2, XCircle, PhoneOff, PhoneMissed, ListOrdered, GripVertical, Play } from 'lucide-react'
+import { Loader2, Plus, Trash2, Bot, Database, Clock, PhoneCall, ChevronDown, ChevronUp, RefreshCw, CheckCircle2, XCircle, PhoneOff, PhoneMissed, ListOrdered, GripVertical, Play, AlertTriangle, ExternalLink } from 'lucide-react'
 
 // ─── Lead Score Badge ────────────────────────────────────────────────────────
 function LeadScoreBadge({ score, label }: { score?: number | null; label?: string | null }) {
@@ -236,6 +236,20 @@ export function AdminAICallingClient({ initialSettings, initialKnowledgeBase, in
   const [savingTrigger, setSavingTrigger] = useState(false)
   const [clearingQueue, setClearingQueue] = useState(false)
   const [buildingQueue, setBuildingQueue] = useState(false)
+  const [clearingBillingError, setClearingBillingError] = useState(false)
+
+  const handleClearBillingError = async () => {
+    setClearingBillingError(true)
+    try {
+      await clearSarvamBillingError()
+      setSettings((prev: any) => ({ ...prev, sarvam_billing_error: false, ai_calling_disabled: false, ai_provider: 'sarvam' }))
+      toast.success('✅ Billing error cleared! AI calling has resumed.')
+    } catch {
+      toast.error('Failed to clear billing error. Please try again.')
+    } finally {
+      setClearingBillingError(false)
+    }
+  }
 
   const fetchPreview = async () => {
     setPreviewLoading(true)
@@ -513,6 +527,46 @@ export function AdminAICallingClient({ initialSettings, initialKnowledgeBase, in
           </div>
         </div>
       </div>
+
+      {/* ── Sarvam Billing Error Banner ── */}
+      {settings?.sarvam_billing_error && (
+        <div className="relative overflow-hidden rounded-2xl border-2 border-red-300 bg-gradient-to-r from-red-50 via-orange-50 to-yellow-50 shadow-lg">
+          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-red-500 via-orange-400 to-yellow-400" />
+          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 p-5">
+            <div className="flex-shrink-0 w-12 h-12 bg-red-100 border-2 border-red-200 rounded-2xl flex items-center justify-center">
+              <AlertTriangle className="w-6 h-6 text-red-600" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <h3 className="font-bold text-red-800 text-base flex items-center gap-2">
+                ⛔ AI Calling Paused — Sarvam Credits Exhausted
+              </h3>
+              <p className="text-red-700 text-sm mt-1">
+                Your Sarvam account has run out of credits. All automated AI calls have been <strong>stopped</strong>. 
+                Please top up your Sarvam balance to resume calling.
+              </p>
+            </div>
+            <div className="flex flex-col sm:flex-row gap-2 flex-shrink-0">
+              <a
+                href="https://app.sarvam.ai/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-white border-2 border-red-300 text-red-700 font-semibold text-sm hover:bg-red-50 transition-colors"
+              >
+                <ExternalLink className="w-4 h-4" />
+                Recharge Sarvam
+              </a>
+              <button
+                onClick={handleClearBillingError}
+                disabled={clearingBillingError}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-green-600 text-white font-semibold text-sm hover:bg-green-700 transition-colors disabled:opacity-60"
+              >
+                {clearingBillingError ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                I've Recharged — Resume Calling
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="flex gap-2 bg-white/50 backdrop-blur-xl rounded-2xl p-1.5 w-fit border border-gray-100 shadow-sm">
