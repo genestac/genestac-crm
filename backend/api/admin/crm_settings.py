@@ -13,6 +13,10 @@ async def list_plans(
     # Fetch plans with their variants
     try:
         res = supabase.table("plans").select("*, plan_variants(*)").order("created_at", desc=True).execute()
+        # Sort variants by duration_days ascending (1 Month before 3 Months) for consistent display
+        for plan in (res.data or []):
+            if plan.get("plan_variants"):
+                plan["plan_variants"] = sorted(plan["plan_variants"], key=lambda v: v.get("duration_days") or 0)
         return {"data": res.data}
     except Exception:
         # Fallback if plan_variants table isn't created yet
