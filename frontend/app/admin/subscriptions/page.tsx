@@ -1,10 +1,13 @@
-import { getSubscriptions } from './actions'
+import { getSubscriptions, getPlansAndVariants } from './actions'
 import { format } from 'date-fns'
 import { Badge } from '@/components/ui/badge'
 import { SubscriptionActions } from './SubscriptionActions'
 
 export default async function SubscriptionsPage() {
-  const subscriptions = await getSubscriptions()
+  const [subscriptions, { plans, variants }] = await Promise.all([
+    getSubscriptions(),
+    getPlansAndVariants()
+  ])
 
   const getStatusBadge = (status: string) => {
     switch (status?.toLowerCase()) {
@@ -23,6 +26,9 @@ export default async function SubscriptionsPage() {
           <p className="text-muted-foreground mt-2">
             Manage your subscribed members and their plan accesses.
           </p>
+        </div>
+        <div className="text-sm text-muted-foreground">
+          {subscriptions.length} total
         </div>
       </div>
 
@@ -48,22 +54,26 @@ export default async function SubscriptionsPage() {
                     </td>
                     <td className="px-6 py-4">
                       <div className="font-medium text-gray-900">
-                        {sub.plans?.name ? `Plan: ${sub.plans.name}` : (sub.inventory?.name ? `Medicine: ${sub.inventory.name}` : 'Unknown')}
+                        {sub.plans?.name
+                          ? sub.plans.name
+                          : sub.inventory?.name
+                          ? `Medicine: ${sub.inventory.name}`
+                          : 'Unknown'}
                       </div>
                       {sub.plan_variants?.duration_label && (
-                        <div className="text-muted-foreground text-xs mt-1">{sub.plan_variants.duration_label}</div>
+                        <div className="text-muted-foreground text-xs mt-0.5">{sub.plan_variants.duration_label}</div>
                       )}
-                      <div className="text-xs text-indigo-600 mt-1">{sub.plan_type}</div>
+                      <div className="text-xs text-indigo-600 mt-0.5">{sub.plan_type}</div>
                     </td>
                     <td className="px-6 py-4">
-                      <div className="text-xs">
-                        <span className="font-medium">Start:</span> {sub.start_date ? format(new Date(sub.start_date), 'MMM d, yyyy') : 'N/A'}<br/>
-                        <span className="font-medium">End:</span> {sub.end_date ? format(new Date(sub.end_date), 'MMM d, yyyy') : 'N/A'}
+                      <div className="text-xs space-y-0.5">
+                        <div><span className="font-medium text-gray-700">Start:</span> {sub.start_date ? format(new Date(sub.start_date), 'MMM d, yyyy') : 'N/A'}</div>
+                        <div><span className="font-medium text-gray-700">End:</span> {sub.end_date ? format(new Date(sub.end_date), 'MMM d, yyyy') : 'N/A'}</div>
                       </div>
                     </td>
                     <td className="px-6 py-4">{getStatusBadge(sub.status)}</td>
                     <td className="px-6 py-4 text-right">
-                      <SubscriptionActions subscription={sub} />
+                      <SubscriptionActions subscription={sub} plans={plans} variants={variants} />
                     </td>
                   </tr>
                 ))}
