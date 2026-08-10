@@ -1,0 +1,2818 @@
+{
+  "order_status_history": {
+    "required": [
+      "id",
+      "order_id",
+      "status"
+    ],
+    "properties": {
+      "id": {
+        "default": "gen_random_uuid()",
+        "description": "Note:\nThis is a Primary Key.<pk/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "order_id": {
+        "format": "uuid",
+        "type": "string"
+      },
+      "status": {
+        "format": "text",
+        "type": "string"
+      },
+      "changed_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "payments": {
+    "required": [
+      "id",
+      "provider_order_id",
+      "amount"
+    ],
+    "properties": {
+      "id": {
+        "default": "gen_random_uuid()",
+        "description": "Note:\nThis is a Primary Key.<pk/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "order_id": {
+        "description": "Note:\nThis is a Foreign Key to `orders.id`.<fk table='orders' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "user_id": {
+        "format": "uuid",
+        "type": "string"
+      },
+      "provider": {
+        "default": "razorpay",
+        "format": "text",
+        "type": "string"
+      },
+      "provider_order_id": {
+        "format": "text",
+        "type": "string"
+      },
+      "provider_payment_id": {
+        "format": "text",
+        "type": "string"
+      },
+      "amount": {
+        "format": "numeric",
+        "type": "number"
+      },
+      "status": {
+        "default": "pending",
+        "format": "text",
+        "type": "string"
+      },
+      "created_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "referrals": {
+    "required": [
+      "id",
+      "referrer_id",
+      "referee_id",
+      "referral_code_used",
+      "status"
+    ],
+    "properties": {
+      "id": {
+        "default": "gen_random_uuid()",
+        "description": "Note:\nThis is a Primary Key.<pk/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "referrer_id": {
+        "description": "Note:\nThis is a Foreign Key to `users.id`.<fk table='users' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "referee_id": {
+        "description": "Note:\nThis is a Foreign Key to `users.id`.<fk table='users' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "referral_code_used": {
+        "format": "text",
+        "type": "string"
+      },
+      "status": {
+        "default": "PENDING",
+        "format": "text",
+        "type": "string"
+      },
+      "qualifying_event": {
+        "format": "text",
+        "type": "string"
+      },
+      "qualified_at": {
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "rewarded_at": {
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "expires_at": {
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "created_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "updated_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "cart": {
+    "required": [
+      "id",
+      "user_id",
+      "plan_id"
+    ],
+    "properties": {
+      "id": {
+        "default": "gen_random_uuid()",
+        "description": "Note:\nThis is a Primary Key.<pk/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "user_id": {
+        "format": "uuid",
+        "type": "string"
+      },
+      "plan_id": {
+        "description": "Note:\nThis is a Foreign Key to `plans.id`.<fk table='plans' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "added_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "patient_reports": {
+    "required": [
+      "id",
+      "patient_id",
+      "title",
+      "file_url"
+    ],
+    "properties": {
+      "id": {
+        "default": "gen_random_uuid()",
+        "description": "Note:\nThis is a Primary Key.<pk/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "patient_id": {
+        "description": "Note:\nThis is a Foreign Key to `users.id`.<fk table='users' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "uploaded_by": {
+        "description": "Note:\nThis is a Foreign Key to `staffs.id`.<fk table='staffs' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "appointment_id": {
+        "description": "Note:\nThis is a Foreign Key to `appointments.id`.<fk table='appointments' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "title": {
+        "format": "text",
+        "type": "string"
+      },
+      "file_type": {
+        "format": "text",
+        "type": "string"
+      },
+      "file_url": {
+        "format": "text",
+        "type": "string"
+      },
+      "notes": {
+        "format": "text",
+        "type": "string"
+      },
+      "created_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "user_sources": {
+    "required": [
+      "id",
+      "name",
+      "created_at"
+    ],
+    "properties": {
+      "id": {
+        "default": "gen_random_uuid()",
+        "description": "Note:\nThis is a Primary Key.<pk/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "name": {
+        "format": "text",
+        "type": "string"
+      },
+      "is_active": {
+        "default": true,
+        "format": "boolean",
+        "type": "boolean"
+      },
+      "created_at": {
+        "default": "timezone('utc'::text, now())",
+        "format": "timestamp with time zone",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "proforma_invoices": {
+    "required": [
+      "id",
+      "base_price",
+      "total_amount"
+    ],
+    "properties": {
+      "id": {
+        "default": "gen_random_uuid()",
+        "description": "Note:\nThis is a Primary Key.<pk/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "user_id": {
+        "format": "uuid",
+        "type": "string"
+      },
+      "sales_rep_id": {
+        "description": "Note:\nThis is a Foreign Key to `staffs.id`.<fk table='staffs' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "plan_id": {
+        "description": "Note:\nThis is a Foreign Key to `plans.id`.<fk table='plans' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "base_price": {
+        "format": "numeric",
+        "type": "number"
+      },
+      "discount_percentage": {
+        "default": 0,
+        "format": "numeric",
+        "type": "number"
+      },
+      "total_amount": {
+        "format": "numeric",
+        "type": "number"
+      },
+      "razorpay_link_id": {
+        "format": "character varying",
+        "maxLength": 255,
+        "type": "string"
+      },
+      "razorpay_url": {
+        "format": "text",
+        "type": "string"
+      },
+      "status": {
+        "default": "PENDING",
+        "format": "character varying",
+        "maxLength": 50,
+        "type": "string"
+      },
+      "created_at": {
+        "default": "timezone('utc'::text, now())",
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "invoice_number": {
+        "format": "character varying",
+        "maxLength": 100,
+        "type": "string"
+      },
+      "invoice_date": {
+        "default": "CURRENT_DATE",
+        "format": "date",
+        "type": "string"
+      },
+      "gst_percentage": {
+        "default": 0,
+        "format": "numeric",
+        "type": "number"
+      },
+      "gst_amount": {
+        "default": 0,
+        "format": "numeric",
+        "type": "number"
+      }
+    },
+    "type": "object"
+  },
+  "orders": {
+    "required": [
+      "id"
+    ],
+    "properties": {
+      "id": {
+        "default": "gen_random_uuid()",
+        "description": "Note:\nThis is a Primary Key.<pk/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "user_id": {
+        "format": "uuid",
+        "type": "string"
+      },
+      "status": {
+        "default": "pending",
+        "format": "text",
+        "type": "string"
+      },
+      "payment_status": {
+        "default": "unpaid",
+        "format": "text",
+        "type": "string"
+      },
+      "invoice_no": {
+        "format": "text",
+        "type": "string"
+      },
+      "doctor_notes": {
+        "format": "text",
+        "type": "string"
+      },
+      "reviewed_at": {
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "original_amount": {
+        "default": 0,
+        "format": "numeric",
+        "type": "number"
+      },
+      "discount_amount": {
+        "default": 0,
+        "format": "numeric",
+        "type": "number"
+      },
+      "tax_amount": {
+        "default": 0,
+        "format": "numeric",
+        "type": "number"
+      },
+      "grand_total": {
+        "default": 0,
+        "format": "numeric",
+        "type": "number"
+      },
+      "created_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "updated_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "shipping_address_id": {
+        "description": "Note:\nThis is a Foreign Key to `addresses.id`.<fk table='addresses' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "referral_rules": {
+    "required": [
+      "id",
+      "qualifying_event",
+      "referrer_reward",
+      "referee_reward",
+      "is_active"
+    ],
+    "properties": {
+      "id": {
+        "default": "gen_random_uuid()",
+        "description": "Note:\nThis is a Primary Key.<pk/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "plan_id": {
+        "format": "uuid",
+        "type": "string"
+      },
+      "qualifying_event": {
+        "default": "PLAN_PURCHASED",
+        "format": "text",
+        "type": "string"
+      },
+      "referrer_reward": {
+        "default": 500.0,
+        "format": "numeric",
+        "type": "number"
+      },
+      "referee_reward": {
+        "default": 200.0,
+        "format": "numeric",
+        "type": "number"
+      },
+      "is_active": {
+        "default": true,
+        "format": "boolean",
+        "type": "boolean"
+      },
+      "created_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "subscriptions": {
+    "required": [
+      "id",
+      "user_id",
+      "medicine_id",
+      "plan_type",
+      "quantity",
+      "start_date"
+    ],
+    "properties": {
+      "id": {
+        "default": "gen_random_uuid()",
+        "description": "Note:\nThis is a Primary Key.<pk/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "user_id": {
+        "description": "Note:\nThis is a Foreign Key to `staffs.id`.<fk table='staffs' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "medicine_id": {
+        "description": "Note:\nThis is a Foreign Key to `inventory.id`.<fk table='inventory' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "plan_type": {
+        "format": "text",
+        "type": "string"
+      },
+      "quantity": {
+        "format": "integer",
+        "type": "integer"
+      },
+      "status": {
+        "default": "active",
+        "format": "text",
+        "type": "string"
+      },
+      "start_date": {
+        "default": "CURRENT_DATE",
+        "format": "date",
+        "type": "string"
+      },
+      "end_date": {
+        "format": "date",
+        "type": "string"
+      },
+      "next_delivery_date": {
+        "format": "date",
+        "type": "string"
+      },
+      "created_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "updated_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "role_permissions": {
+    "required": [
+      "role_id",
+      "permission_id"
+    ],
+    "properties": {
+      "role_id": {
+        "description": "Note:\nThis is a Primary Key.<pk/>\nThis is a Foreign Key to `roles.id`.<fk table='roles' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "permission_id": {
+        "description": "Note:\nThis is a Primary Key.<pk/>\nThis is a Foreign Key to `permissions.id`.<fk table='permissions' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "ai_call_logs": {
+    "required": [
+      "id"
+    ],
+    "properties": {
+      "id": {
+        "default": "gen_random_uuid()",
+        "description": "Note:\nThis is a Primary Key.<pk/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "lead_id": {
+        "format": "uuid",
+        "type": "string"
+      },
+      "call_sid": {
+        "format": "character varying",
+        "maxLength": 100,
+        "type": "string"
+      },
+      "status": {
+        "format": "character varying",
+        "maxLength": 50,
+        "type": "string"
+      },
+      "recording_url": {
+        "format": "text",
+        "type": "string"
+      },
+      "duration": {
+        "format": "integer",
+        "type": "integer"
+      },
+      "transcript": {
+        "format": "text",
+        "type": "string"
+      },
+      "summary": {
+        "format": "text",
+        "type": "string"
+      },
+      "created_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "lead_score": {
+        "format": "integer",
+        "type": "integer"
+      },
+      "score_label": {
+        "default": "NULL",
+        "format": "character varying",
+        "maxLength": 10,
+        "type": "string"
+      },
+      "score_reason": {
+        "format": "text",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "doctor_schedules": {
+    "required": [
+      "id",
+      "slot_duration_minutes",
+      "buffer_minutes"
+    ],
+    "properties": {
+      "id": {
+        "default": "gen_random_uuid()",
+        "description": "Note:\nThis is a Primary Key.<pk/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "staff_id": {
+        "description": "Note:\nThis is a Foreign Key to `staffs.id`.<fk table='staffs' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "exotel_number": {
+        "format": "character varying",
+        "maxLength": 20,
+        "type": "string"
+      },
+      "available_days": {
+        "format": "text[]",
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "start_time": {
+        "format": "time without time zone",
+        "type": "string"
+      },
+      "end_time": {
+        "format": "time without time zone",
+        "type": "string"
+      },
+      "is_active": {
+        "default": true,
+        "format": "boolean",
+        "type": "boolean"
+      },
+      "created_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "updated_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "slot_duration_minutes": {
+        "default": 10,
+        "description": "Default length of each appointment slot in minutes (e.g. 30, 45, 60).",
+        "format": "integer",
+        "type": "integer"
+      },
+      "buffer_minutes": {
+        "default": 0,
+        "description": "Gap to leave between back-to-back slots (e.g. 5 = 5-minute breather).",
+        "format": "integer",
+        "type": "integer"
+      },
+      "allow_ai_calls": {
+        "default": true,
+        "format": "boolean",
+        "type": "boolean"
+      },
+      "allow_scheduling": {
+        "default": true,
+        "format": "boolean",
+        "type": "boolean"
+      }
+    },
+    "type": "object"
+  },
+  "leads": {
+    "required": [
+      "id",
+      "status"
+    ],
+    "properties": {
+      "id": {
+        "default": "gen_random_uuid()",
+        "description": "Note:\nThis is a Primary Key.<pk/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "name": {
+        "format": "text",
+        "type": "string"
+      },
+      "email": {
+        "format": "text",
+        "type": "string"
+      },
+      "phone_number": {
+        "format": "text",
+        "type": "string"
+      },
+      "status": {
+        "default": "NEW",
+        "format": "text",
+        "type": "string"
+      },
+      "lead_status": {
+        "default": "new",
+        "format": "text",
+        "type": "string"
+      },
+      "source": {
+        "default": "website_form",
+        "format": "text",
+        "type": "string"
+      },
+      "source_id": {
+        "description": "Note:\nThis is a Foreign Key to `user_sources.id`.<fk table='user_sources' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "assigned_sales_rep_id": {
+        "description": "Note:\nThis is a Foreign Key to `staffs.id`.<fk table='staffs' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "interested_plan_id": {
+        "description": "Note:\nThis is a Foreign Key to `plans.id`.<fk table='plans' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "priority": {
+        "default": "MEDIUM",
+        "format": "text",
+        "type": "string"
+      },
+      "next_followup_date": {
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "followup_notes": {
+        "format": "text",
+        "type": "string"
+      },
+      "metadata": {
+        "format": "jsonb"
+      },
+      "created_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "updated_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "ai_callback_time": {
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "whatsapp_opt_out": {
+        "default": false,
+        "format": "boolean",
+        "type": "boolean"
+      },
+      "city": {
+        "format": "text",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "call_transfers": {
+    "required": [
+      "id"
+    ],
+    "properties": {
+      "id": {
+        "description": "Note:\nThis is a Primary Key.<pk/>",
+        "format": "bigint",
+        "type": "integer"
+      },
+      "conversation_id": {
+        "format": "text",
+        "type": "string"
+      },
+      "doctor_number": {
+        "format": "text",
+        "type": "string"
+      },
+      "transferred_at": {
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "created_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "whatsapp_logs": {
+    "required": [
+      "id",
+      "campaign_id",
+      "lead_id",
+      "status"
+    ],
+    "properties": {
+      "id": {
+        "default": "gen_random_uuid()",
+        "description": "Note:\nThis is a Primary Key.<pk/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "campaign_id": {
+        "description": "Note:\nThis is a Foreign Key to `whatsapp_campaigns.id`.<fk table='whatsapp_campaigns' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "lead_id": {
+        "format": "uuid",
+        "type": "string"
+      },
+      "phone_number": {
+        "format": "text",
+        "type": "string"
+      },
+      "status": {
+        "default": "PENDING",
+        "format": "text",
+        "type": "string"
+      },
+      "error_msg": {
+        "format": "text",
+        "type": "string"
+      },
+      "created_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "updated_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "blogs": {
+    "required": [
+      "id",
+      "title",
+      "slug",
+      "content_layout",
+      "status",
+      "created_at",
+      "updated_at"
+    ],
+    "properties": {
+      "id": {
+        "default": "gen_random_uuid()",
+        "description": "Note:\nThis is a Primary Key.<pk/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "title": {
+        "format": "text",
+        "type": "string"
+      },
+      "slug": {
+        "format": "text",
+        "type": "string"
+      },
+      "content_layout": {
+        "format": "jsonb"
+      },
+      "status": {
+        "default": "draft",
+        "format": "text",
+        "type": "string"
+      },
+      "published_at": {
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "author_id": {
+        "description": "Note:\nThis is a Foreign Key to `staffs.id`.<fk table='staffs' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "meta_title": {
+        "format": "text",
+        "type": "string"
+      },
+      "meta_description": {
+        "format": "text",
+        "type": "string"
+      },
+      "focus_keywords": {
+        "format": "text[]",
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "og_image": {
+        "format": "text",
+        "type": "string"
+      },
+      "canonical_url": {
+        "format": "text",
+        "type": "string"
+      },
+      "dynamic_schema_json": {
+        "format": "jsonb"
+      },
+      "created_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "updated_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "faqs": {
+        "format": "jsonb"
+      },
+      "cover_image": {
+        "format": "text",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "whatsapp_templates": {
+    "required": [
+      "id",
+      "name",
+      "content",
+      "status"
+    ],
+    "properties": {
+      "id": {
+        "default": "gen_random_uuid()",
+        "description": "Note:\nThis is a Primary Key.<pk/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "name": {
+        "format": "text",
+        "type": "string"
+      },
+      "content": {
+        "format": "text",
+        "type": "string"
+      },
+      "status": {
+        "default": "APPROVED",
+        "format": "text",
+        "type": "string"
+      },
+      "created_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "updated_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "language": {
+        "default": "en_US",
+        "format": "character varying",
+        "maxLength": 10,
+        "type": "string"
+      },
+      "default_components": {
+        "format": "jsonb"
+      }
+    },
+    "type": "object"
+  },
+  "user_notes": {
+    "required": [
+      "id",
+      "user_id",
+      "author_id",
+      "content"
+    ],
+    "properties": {
+      "id": {
+        "default": "gen_random_uuid()",
+        "description": "Note:\nThis is a Primary Key.<pk/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "user_id": {
+        "format": "uuid",
+        "type": "string"
+      },
+      "author_id": {
+        "format": "uuid",
+        "type": "string"
+      },
+      "content": {
+        "format": "text",
+        "type": "string"
+      },
+      "created_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "ai_knowledge_base": {
+    "required": [
+      "id",
+      "category",
+      "title",
+      "content"
+    ],
+    "properties": {
+      "id": {
+        "default": "gen_random_uuid()",
+        "description": "Note:\nThis is a Primary Key.<pk/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "category": {
+        "format": "character varying",
+        "maxLength": 50,
+        "type": "string"
+      },
+      "title": {
+        "format": "character varying",
+        "maxLength": 255,
+        "type": "string"
+      },
+      "content": {
+        "format": "text",
+        "type": "string"
+      },
+      "created_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "updated_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "embedding": {
+        "format": "public.vector(1536)",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "reward_transactions": {
+    "required": [
+      "id",
+      "user_id",
+      "type",
+      "amount",
+      "status"
+    ],
+    "properties": {
+      "id": {
+        "default": "gen_random_uuid()",
+        "description": "Note:\nThis is a Primary Key.<pk/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "user_id": {
+        "description": "Note:\nThis is a Foreign Key to `users.id`.<fk table='users' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "referral_id": {
+        "description": "Note:\nThis is a Foreign Key to `referrals.id`.<fk table='referrals' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "type": {
+        "format": "text",
+        "type": "string"
+      },
+      "amount": {
+        "format": "numeric",
+        "type": "number"
+      },
+      "status": {
+        "default": "COMPLETED",
+        "format": "text",
+        "type": "string"
+      },
+      "notes": {
+        "format": "text",
+        "type": "string"
+      },
+      "created_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "clinical_assessments": {
+    "required": [
+      "id",
+      "patient_id"
+    ],
+    "properties": {
+      "id": {
+        "default": "gen_random_uuid()",
+        "description": "Note:\nThis is a Primary Key.<pk/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "patient_id": {
+        "description": "Note:\nThis is a Foreign Key to `staffs.id`.<fk table='staffs' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "recorded_by": {
+        "description": "Note:\nThis is a Foreign Key to `staffs.id`.<fk table='staffs' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "communication_id": {
+        "description": "Note:\nThis is a Foreign Key to `communications.id`.<fk table='communications' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "weight_kg": {
+        "format": "numeric",
+        "type": "number"
+      },
+      "height_cm": {
+        "format": "numeric",
+        "type": "number"
+      },
+      "blood_pressure": {
+        "format": "text",
+        "type": "string"
+      },
+      "conditions": {
+        "format": "jsonb"
+      },
+      "current_medications": {
+        "format": "text",
+        "type": "string"
+      },
+      "doctor_timeline_notes": {
+        "format": "text",
+        "type": "string"
+      },
+      "created_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "active_calls": {
+    "required": [
+      "id",
+      "phone_number"
+    ],
+    "properties": {
+      "id": {
+        "default": "gen_random_uuid()",
+        "description": "Note:\nThis is a Primary Key.<pk/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "phone_number": {
+        "format": "text",
+        "type": "string"
+      },
+      "caller_name": {
+        "format": "text",
+        "type": "string"
+      },
+      "status": {
+        "default": "active",
+        "format": "text",
+        "type": "string"
+      },
+      "started_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "ended_at": {
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "call_sid": {
+        "format": "text",
+        "type": "string"
+      },
+      "created_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "updated_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "conference_name": {
+        "format": "text",
+        "type": "string"
+      },
+      "customer_call_sid": {
+        "format": "text",
+        "type": "string"
+      },
+      "executive_number": {
+        "format": "text",
+        "type": "string"
+      },
+      "executive_call_sid": {
+        "format": "text",
+        "type": "string"
+      },
+      "doctor_number": {
+        "format": "text",
+        "type": "string"
+      },
+      "doctor_call_sid": {
+        "format": "text",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "hanger_scenarios": {
+    "required": [
+      "id",
+      "question",
+      "avatar_emoji",
+      "options"
+    ],
+    "properties": {
+      "id": {
+        "description": "Note:\nThis is a Primary Key.<pk/>",
+        "format": "bigint",
+        "type": "integer"
+      },
+      "question": {
+        "format": "text",
+        "type": "string"
+      },
+      "avatar_emoji": {
+        "format": "text",
+        "type": "string"
+      },
+      "options": {
+        "format": "jsonb"
+      },
+      "created_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "appointments": {
+    "required": [
+      "id",
+      "doctor_id",
+      "sales_rep_id",
+      "scheduled_at"
+    ],
+    "properties": {
+      "id": {
+        "default": "gen_random_uuid()",
+        "description": "Note:\nThis is a Primary Key.<pk/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "patient_id": {
+        "description": "Note:\nThis is a Foreign Key to `users.id`.<fk table='users' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "doctor_id": {
+        "description": "Note:\nThis is a Foreign Key to `staffs.id`.<fk table='staffs' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "sales_rep_id": {
+        "description": "Note:\nThis is a Foreign Key to `staffs.id`.<fk table='staffs' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "scheduled_at": {
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "duration_minutes": {
+        "default": 30,
+        "format": "integer",
+        "type": "integer"
+      },
+      "status": {
+        "default": "pending",
+        "format": "text",
+        "type": "string"
+      },
+      "meeting_link": {
+        "format": "text",
+        "type": "string"
+      },
+      "notes": {
+        "format": "text",
+        "type": "string"
+      },
+      "created_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "updated_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "title": {
+        "format": "text",
+        "type": "string"
+      },
+      "type": {
+        "format": "text",
+        "type": "string"
+      },
+      "related_to": {
+        "format": "text",
+        "type": "string"
+      },
+      "location": {
+        "format": "text",
+        "type": "string"
+      },
+      "plan_details": {
+        "format": "jsonb"
+      },
+      "plan_id": {
+        "description": "Note:\nThis is a Foreign Key to `plans.id`.<fk table='plans' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "global_settings": {
+    "required": [
+      "id",
+      "settings_key",
+      "settings_value"
+    ],
+    "properties": {
+      "id": {
+        "default": "gen_random_uuid()",
+        "description": "Note:\nThis is a Primary Key.<pk/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "settings_key": {
+        "format": "text",
+        "type": "string"
+      },
+      "settings_value": {
+        "format": "jsonb"
+      },
+      "updated_at": {
+        "default": "timezone('utc'::text, now())",
+        "format": "timestamp with time zone",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "whatsapp_campaigns": {
+    "required": [
+      "id",
+      "name",
+      "template_id",
+      "scheduled_time",
+      "status"
+    ],
+    "properties": {
+      "id": {
+        "default": "gen_random_uuid()",
+        "description": "Note:\nThis is a Primary Key.<pk/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "name": {
+        "format": "text",
+        "type": "string"
+      },
+      "template_id": {
+        "description": "Note:\nThis is a Foreign Key to `whatsapp_templates.id`.<fk table='whatsapp_templates' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "scheduled_time": {
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "status": {
+        "default": "PENDING",
+        "format": "text",
+        "type": "string"
+      },
+      "created_by": {
+        "format": "uuid",
+        "type": "string"
+      },
+      "created_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "updated_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "audience_filter": {
+        "format": "jsonb"
+      }
+    },
+    "type": "object"
+  },
+  "prescriptions": {
+    "required": [
+      "id",
+      "patient_id",
+      "doctor_id"
+    ],
+    "properties": {
+      "id": {
+        "default": "gen_random_uuid()",
+        "description": "Note:\nThis is a Primary Key.<pk/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "patient_id": {
+        "description": "Note:\nThis is a Foreign Key to `users.id`.<fk table='users' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "doctor_id": {
+        "description": "Note:\nThis is a Foreign Key to `staffs.id`.<fk table='staffs' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "communication_id": {
+        "description": "Note:\nThis is a Foreign Key to `communications.id`.<fk table='communications' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "status": {
+        "default": "active",
+        "format": "text",
+        "type": "string"
+      },
+      "superseded_by_id": {
+        "description": "Note:\nThis is a Foreign Key to `prescriptions.id`.<fk table='prescriptions' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "valid_until": {
+        "format": "date",
+        "type": "string"
+      },
+      "general_instructions": {
+        "format": "text",
+        "type": "string"
+      },
+      "created_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "updated_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "permissions": {
+    "required": [
+      "id",
+      "action",
+      "module"
+    ],
+    "properties": {
+      "id": {
+        "default": "gen_random_uuid()",
+        "description": "Note:\nThis is a Primary Key.<pk/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "action": {
+        "format": "text",
+        "type": "string"
+      },
+      "description": {
+        "format": "text",
+        "type": "string"
+      },
+      "module": {
+        "default": "General",
+        "format": "text",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "processed_messages": {
+    "required": [
+      "message_id"
+    ],
+    "properties": {
+      "message_id": {
+        "description": "Note:\nThis is a Primary Key.<pk/>",
+        "format": "text",
+        "type": "string"
+      },
+      "created_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "FAQ": {
+    "required": [
+      "id",
+      "created_at"
+    ],
+    "properties": {
+      "id": {
+        "description": "Note:\nThis is a Primary Key.<pk/>",
+        "format": "bigint",
+        "type": "integer"
+      },
+      "created_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "question": {
+        "format": "text",
+        "type": "string"
+      },
+      "answer": {
+        "format": "text",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "system_notifications": {
+    "required": [
+      "id"
+    ],
+    "properties": {
+      "id": {
+        "default": "extensions.uuid_generate_v4()",
+        "description": "Note:\nThis is a Primary Key.<pk/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "target_role": {
+        "format": "text",
+        "type": "string"
+      },
+      "target_id": {
+        "format": "uuid",
+        "type": "string"
+      },
+      "notification_type": {
+        "format": "text",
+        "type": "string"
+      },
+      "title": {
+        "format": "text",
+        "type": "string"
+      },
+      "message": {
+        "format": "text",
+        "type": "string"
+      },
+      "metadata": {
+        "format": "jsonb"
+      },
+      "is_read": {
+        "default": false,
+        "format": "boolean",
+        "type": "boolean"
+      },
+      "created_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "prescription_items": {
+    "required": [
+      "id",
+      "prescription_id",
+      "inventory_id",
+      "dosage",
+      "frequency",
+      "duration_days",
+      "total_quantity_prescribed"
+    ],
+    "properties": {
+      "id": {
+        "default": "gen_random_uuid()",
+        "description": "Note:\nThis is a Primary Key.<pk/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "prescription_id": {
+        "description": "Note:\nThis is a Foreign Key to `prescriptions.id`.<fk table='prescriptions' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "inventory_id": {
+        "description": "Note:\nThis is a Foreign Key to `inventory.id`.<fk table='inventory' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "dosage": {
+        "format": "text",
+        "type": "string"
+      },
+      "frequency": {
+        "format": "text",
+        "type": "string"
+      },
+      "duration_days": {
+        "format": "integer",
+        "type": "integer"
+      },
+      "total_quantity_prescribed": {
+        "format": "integer",
+        "type": "integer"
+      },
+      "before_lunch": {
+        "default": false,
+        "format": "boolean",
+        "type": "boolean"
+      },
+      "after_lunch": {
+        "default": false,
+        "format": "boolean",
+        "type": "boolean"
+      },
+      "time": {
+        "format": "text",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "order_items": {
+    "required": [
+      "id",
+      "item_type",
+      "item_name"
+    ],
+    "properties": {
+      "id": {
+        "default": "gen_random_uuid()",
+        "description": "Note:\nThis is a Primary Key.<pk/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "order_id": {
+        "description": "Note:\nThis is a Foreign Key to `orders.id`.<fk table='orders' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "item_type": {
+        "format": "text",
+        "type": "string"
+      },
+      "item_name": {
+        "format": "text",
+        "type": "string"
+      },
+      "quantity": {
+        "default": 1,
+        "format": "integer",
+        "type": "integer"
+      },
+      "unit_price": {
+        "default": 0,
+        "format": "numeric",
+        "type": "number"
+      },
+      "total_price": {
+        "default": 0,
+        "format": "numeric",
+        "type": "number"
+      },
+      "doctor_name": {
+        "format": "text",
+        "type": "string"
+      },
+      "created_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "health_assessments": {
+    "required": [
+      "id",
+      "user_id",
+      "full_name",
+      "email",
+      "phone",
+      "age",
+      "height_cm",
+      "weight_kg",
+      "health_goals",
+      "consent_given",
+      "status"
+    ],
+    "properties": {
+      "id": {
+        "default": "gen_random_uuid()",
+        "description": "Note:\nThis is a Primary Key.<pk/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "user_id": {
+        "description": "Note:\nThis is a Foreign Key to `users.id`.<fk table='users' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "full_name": {
+        "format": "text",
+        "type": "string"
+      },
+      "email": {
+        "format": "text",
+        "type": "string"
+      },
+      "phone": {
+        "format": "text",
+        "type": "string"
+      },
+      "age": {
+        "format": "integer",
+        "type": "integer"
+      },
+      "gender": {
+        "format": "text",
+        "type": "string"
+      },
+      "height_cm": {
+        "format": "numeric",
+        "type": "number"
+      },
+      "weight_kg": {
+        "format": "numeric",
+        "type": "number"
+      },
+      "city": {
+        "format": "text",
+        "type": "string"
+      },
+      "health_goals": {
+        "format": "text[]",
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "diabetes": {
+        "format": "text",
+        "type": "string"
+      },
+      "high_blood_pressure": {
+        "format": "text",
+        "type": "string"
+      },
+      "thyroid_disorder": {
+        "format": "text",
+        "type": "string"
+      },
+      "consent_given": {
+        "default": false,
+        "format": "boolean",
+        "type": "boolean"
+      },
+      "status": {
+        "default": "SUBMITTED",
+        "format": "text",
+        "type": "string"
+      },
+      "created_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "updated_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "coupons": {
+    "required": [
+      "id",
+      "influencer_name",
+      "coupon_code",
+      "start_date",
+      "plan_discounts"
+    ],
+    "properties": {
+      "id": {
+        "default": "gen_random_uuid()",
+        "description": "Note:\nThis is a Primary Key.<pk/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "influencer_name": {
+        "format": "text",
+        "type": "string"
+      },
+      "influencer_email": {
+        "format": "text",
+        "type": "string"
+      },
+      "influencer_phone": {
+        "format": "text",
+        "type": "string"
+      },
+      "coupon_code": {
+        "format": "text",
+        "type": "string"
+      },
+      "start_date": {
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "end_date": {
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "plan_discounts": {
+        "format": "jsonb"
+      },
+      "max_uses": {
+        "format": "integer",
+        "type": "integer"
+      },
+      "usage_count": {
+        "default": 0,
+        "format": "integer",
+        "type": "integer"
+      },
+      "is_active": {
+        "default": true,
+        "format": "boolean",
+        "type": "boolean"
+      },
+      "created_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "communications": {
+    "required": [
+      "id"
+    ],
+    "properties": {
+      "id": {
+        "default": "gen_random_uuid()",
+        "description": "Note:\nThis is a Primary Key.<pk/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "lead_id": {
+        "description": "Note:\nThis is a Foreign Key to `users.id`.<fk table='users' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "patient_id": {
+        "description": "Note:\nThis is a Foreign Key to `staffs.id`.<fk table='staffs' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "sales_rep_id": {
+        "description": "Note:\nThis is a Foreign Key to `staffs.id`.<fk table='staffs' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "doctor_id": {
+        "description": "Note:\nThis is a Foreign Key to `staffs.id`.<fk table='staffs' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "twilio_sid": {
+        "format": "text",
+        "type": "string"
+      },
+      "call_status": {
+        "format": "text",
+        "type": "string"
+      },
+      "recording_url": {
+        "format": "text",
+        "type": "string"
+      },
+      "duration_seconds": {
+        "format": "integer",
+        "type": "integer"
+      },
+      "internal_notes": {
+        "format": "text",
+        "type": "string"
+      },
+      "created_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "lead_context_memory": {
+    "required": [
+      "id",
+      "memory_text"
+    ],
+    "properties": {
+      "id": {
+        "default": "gen_random_uuid()",
+        "description": "Note:\nThis is a Primary Key.<pk/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "lead_id": {
+        "description": "Note:\nThis is a Foreign Key to `leads.id`.<fk table='leads' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "memory_text": {
+        "format": "text",
+        "type": "string"
+      },
+      "embedding": {
+        "format": "public.vector(1536)",
+        "type": "string"
+      },
+      "source_call_id": {
+        "description": "Note:\nThis is a Foreign Key to `ai_call_logs.id`.<fk table='ai_call_logs' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "created_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "user_plans": {
+    "required": [
+      "id",
+      "user_id",
+      "created_at",
+      "updated_at"
+    ],
+    "properties": {
+      "id": {
+        "default": "gen_random_uuid()",
+        "description": "Note:\nThis is a Primary Key.<pk/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "user_id": {
+        "format": "uuid",
+        "type": "string"
+      },
+      "diet_plan": {
+        "format": "jsonb"
+      },
+      "exercise_plan": {
+        "format": "jsonb"
+      },
+      "created_at": {
+        "default": "timezone('utc'::text, now())",
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "updated_at": {
+        "default": "timezone('utc'::text, now())",
+        "format": "timestamp with time zone",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "staffs": {
+    "required": [
+      "id",
+      "email"
+    ],
+    "properties": {
+      "id": {
+        "description": "Note:\nThis is a Primary Key.<pk/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "full_name": {
+        "format": "text",
+        "type": "string"
+      },
+      "email": {
+        "format": "text",
+        "type": "string"
+      },
+      "phone": {
+        "format": "text",
+        "type": "string"
+      },
+      "address": {
+        "format": "text",
+        "type": "string"
+      },
+      "city": {
+        "format": "text",
+        "type": "string"
+      },
+      "state": {
+        "format": "text",
+        "type": "string"
+      },
+      "pincode": {
+        "format": "text",
+        "type": "string"
+      },
+      "created_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "updated_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "role_id": {
+        "description": "Note:\nThis is a Foreign Key to `roles.id`.<fk table='roles' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "date_of_birth": {
+        "format": "date",
+        "type": "string"
+      },
+      "gender": {
+        "format": "text",
+        "type": "string"
+      },
+      "avatar_url": {
+        "format": "text",
+        "type": "string"
+      },
+      "is_active": {
+        "default": true,
+        "format": "boolean",
+        "type": "boolean"
+      }
+    },
+    "type": "object"
+  },
+  "plans": {
+    "required": [
+      "id",
+      "name",
+      "price",
+      "created_at"
+    ],
+    "properties": {
+      "id": {
+        "default": "gen_random_uuid()",
+        "description": "Note:\nThis is a Primary Key.<pk/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "name": {
+        "format": "text",
+        "type": "string"
+      },
+      "price": {
+        "default": 0,
+        "format": "numeric",
+        "type": "number"
+      },
+      "is_active": {
+        "default": true,
+        "format": "boolean",
+        "type": "boolean"
+      },
+      "created_at": {
+        "default": "timezone('utc'::text, now())",
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "description": {
+        "format": "text",
+        "type": "string"
+      },
+      "cart_name": {
+        "format": "text",
+        "type": "string"
+      },
+      "cadence": {
+        "format": "text",
+        "type": "string"
+      },
+      "term": {
+        "format": "text",
+        "type": "string"
+      },
+      "cta": {
+        "format": "text",
+        "type": "string"
+      },
+      "features": {
+        "format": "text[]",
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "is_featured": {
+        "default": false,
+        "format": "boolean",
+        "type": "boolean"
+      },
+      "note": {
+        "format": "text",
+        "type": "string"
+      },
+      "is_entry_level": {
+        "default": false,
+        "format": "boolean",
+        "type": "boolean"
+      },
+      "duration_value": {
+        "format": "integer",
+        "type": "integer"
+      },
+      "duration_unit": {
+        "format": "text",
+        "type": "string"
+      },
+      "gst_percentage": {
+        "default": 5,
+        "format": "numeric",
+        "type": "number"
+      }
+    },
+    "type": "object"
+  },
+  "plan_variants": {
+    "required": [
+      "id",
+      "plan_id",
+      "duration_label",
+      "duration_days",
+      "base_price"
+    ],
+    "properties": {
+      "id": {
+        "default": "extensions.uuid_generate_v4()",
+        "description": "Note:\nThis is a Primary Key.<pk/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "plan_id": {
+        "description": "Note:\nThis is a Foreign Key to `plans.id`.<fk table='plans' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "duration_label": {
+        "format": "text",
+        "type": "string"
+      },
+      "duration_days": {
+        "format": "integer",
+        "type": "integer"
+      },
+      "base_price": {
+        "format": "numeric",
+        "type": "number"
+      },
+      "discounted_price": {
+        "format": "numeric",
+        "type": "number"
+      },
+      "discount_text": {
+        "format": "text",
+        "type": "string"
+      },
+      "discount_end_date": {
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "is_active": {
+        "default": true,
+        "format": "boolean",
+        "type": "boolean"
+      },
+      "created_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "daily_logs": {
+    "required": [
+      "id",
+      "user_id",
+      "created_at",
+      "date"
+    ],
+    "properties": {
+      "id": {
+        "default": "gen_random_uuid()",
+        "description": "Note:\nThis is a Primary Key.<pk/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "user_id": {
+        "description": "Note:\nThis is a Foreign Key to `users.id`.<fk table='users' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "created_at": {
+        "default": "timezone('utc'::text, now())",
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "date": {
+        "format": "date",
+        "type": "string"
+      },
+      "weight": {
+        "format": "numeric",
+        "type": "number"
+      },
+      "mood": {
+        "format": "integer",
+        "type": "integer"
+      },
+      "notes": {
+        "format": "text",
+        "type": "string"
+      },
+      "coach_feedback": {
+        "format": "text",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "whatsapp_messages": {
+    "required": [
+      "id",
+      "message_body",
+      "sender_type"
+    ],
+    "properties": {
+      "id": {
+        "default": "gen_random_uuid()",
+        "description": "Note:\nThis is a Primary Key.<pk/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "lead_id": {
+        "description": "Note:\nThis is a Foreign Key to `leads.id`.<fk table='leads' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "user_id": {
+        "description": "Note:\nThis is a Foreign Key to `users.id`.<fk table='users' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "message_body": {
+        "format": "text",
+        "type": "string"
+      },
+      "sender_type": {
+        "format": "text",
+        "type": "string"
+      },
+      "wa_message_id": {
+        "format": "text",
+        "type": "string"
+      },
+      "created_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "inventory": {
+    "required": [
+      "id",
+      "name",
+      "price",
+      "stock_quantity"
+    ],
+    "properties": {
+      "id": {
+        "default": "gen_random_uuid()",
+        "description": "Note:\nThis is a Primary Key.<pk/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "name": {
+        "format": "text",
+        "type": "string"
+      },
+      "manufacturer": {
+        "format": "text",
+        "type": "string"
+      },
+      "category": {
+        "format": "text",
+        "type": "string"
+      },
+      "price": {
+        "format": "numeric",
+        "type": "number"
+      },
+      "stock_quantity": {
+        "default": 0,
+        "format": "integer",
+        "type": "integer"
+      },
+      "requires_prescription": {
+        "default": false,
+        "format": "boolean",
+        "type": "boolean"
+      },
+      "image_url": {
+        "format": "text",
+        "type": "string"
+      },
+      "expiry_date": {
+        "format": "date",
+        "type": "string"
+      },
+      "created_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "updated_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "Condition/Symptoms": {
+        "format": "jsonb"
+      },
+      "Dosage/Strength": {
+        "format": "text",
+        "type": "string"
+      },
+      "sku": {
+        "format": "text",
+        "type": "string"
+      },
+      "min_stock_threshold": {
+        "default": 10,
+        "format": "integer",
+        "type": "integer"
+      }
+    },
+    "type": "object"
+  },
+  "addresses": {
+    "required": [
+      "id",
+      "user_id",
+      "house_no",
+      "address_line_1",
+      "city",
+      "state",
+      "country",
+      "postal_code",
+      "is_default",
+      "created_at",
+      "updated_at"
+    ],
+    "properties": {
+      "id": {
+        "default": "gen_random_uuid()",
+        "description": "Note:\nThis is a Primary Key.<pk/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "user_id": {
+        "description": "Note:\nThis is a Foreign Key to `users.id`.<fk table='users' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "house_no": {
+        "format": "text",
+        "type": "string"
+      },
+      "address_line_1": {
+        "format": "text",
+        "type": "string"
+      },
+      "address_line_2": {
+        "format": "text",
+        "type": "string"
+      },
+      "landmark": {
+        "format": "text",
+        "type": "string"
+      },
+      "city": {
+        "format": "text",
+        "type": "string"
+      },
+      "state": {
+        "format": "text",
+        "type": "string"
+      },
+      "country": {
+        "default": "India",
+        "format": "text",
+        "type": "string"
+      },
+      "postal_code": {
+        "format": "text",
+        "type": "string"
+      },
+      "is_default": {
+        "default": false,
+        "format": "boolean",
+        "type": "boolean"
+      },
+      "created_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "updated_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "users": {
+    "required": [
+      "id",
+      "phone",
+      "wallet_balance",
+      "total_referrals_count",
+      "total_earned"
+    ],
+    "properties": {
+      "id": {
+        "default": "gen_random_uuid()",
+        "description": "Note:\nThis is a Primary Key.<pk/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "source": {
+        "format": "text",
+        "type": "string"
+      },
+      "status": {
+        "default": "NEW",
+        "format": "text",
+        "type": "string"
+      },
+      "phone": {
+        "format": "text",
+        "type": "string"
+      },
+      "metadata": {
+        "format": "jsonb"
+      },
+      "assigned_sales_rep_id": {
+        "description": "Note:\nThis is a Foreign Key to `staffs.id`.<fk table='staffs' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "converted_patient_id": {
+        "description": "Note:\nThis is a Foreign Key to `staffs.id`.<fk table='staffs' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "created_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "updated_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "next_followup_date": {
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "followup_notes": {
+        "format": "text",
+        "type": "string"
+      },
+      "priority": {
+        "default": "MEDIUM",
+        "format": "text",
+        "type": "string"
+      },
+      "name": {
+        "format": "text",
+        "type": "string"
+      },
+      "email": {
+        "format": "text",
+        "type": "string"
+      },
+      "street_address": {
+        "format": "text",
+        "type": "string"
+      },
+      "city": {
+        "format": "text",
+        "type": "string"
+      },
+      "state": {
+        "format": "text",
+        "type": "string"
+      },
+      "postal_code": {
+        "format": "text",
+        "type": "string"
+      },
+      "country": {
+        "format": "text",
+        "type": "string"
+      },
+      "interested_plan_id": {
+        "description": "Note:\nThis is a Foreign Key to `plans.id`.<fk table='plans' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "source_id": {
+        "description": "Note:\nThis is a Foreign Key to `user_sources.id`.<fk table='user_sources' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "weight_loss_journey": {
+        "format": "jsonb"
+      },
+      "ai_callback_time": {
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "referral_code": {
+        "format": "text",
+        "type": "string"
+      },
+      "referred_by_code": {
+        "format": "text",
+        "type": "string"
+      },
+      "referred_by_user_id": {
+        "description": "Note:\nThis is a Foreign Key to `users.id`.<fk table='users' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "wallet_balance": {
+        "default": 0,
+        "format": "numeric",
+        "type": "number"
+      },
+      "total_referrals_count": {
+        "default": 0,
+        "format": "integer",
+        "type": "integer"
+      },
+      "total_earned": {
+        "default": 0,
+        "format": "numeric",
+        "type": "number"
+      }
+    },
+    "type": "object"
+  },
+  "user_documents": {
+    "required": [
+      "id",
+      "user_id",
+      "file_url",
+      "file_name"
+    ],
+    "properties": {
+      "id": {
+        "default": "gen_random_uuid()",
+        "description": "Note:\nThis is a Primary Key.<pk/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "user_id": {
+        "description": "Note:\nThis is a Foreign Key to `users.id`.<fk table='users' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "file_url": {
+        "format": "text",
+        "type": "string"
+      },
+      "file_name": {
+        "format": "text",
+        "type": "string"
+      },
+      "uploaded_by": {
+        "description": "Note:\nThis is a Foreign Key to `staffs.id`.<fk table='staffs' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "uploaded_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "roles": {
+    "required": [
+      "id",
+      "name"
+    ],
+    "properties": {
+      "id": {
+        "default": "gen_random_uuid()",
+        "description": "Note:\nThis is a Primary Key.<pk/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "name": {
+        "format": "text",
+        "type": "string"
+      },
+      "description": {
+        "format": "text",
+        "type": "string"
+      },
+      "created_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "notifications": {
+    "required": [
+      "id",
+      "type",
+      "title"
+    ],
+    "properties": {
+      "id": {
+        "default": "gen_random_uuid()",
+        "description": "Note:\nThis is a Primary Key.<pk/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "staff_id": {
+        "description": "Note:\nThis is a Foreign Key to `staffs.id`.<fk table='staffs' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "type": {
+        "format": "text",
+        "type": "string"
+      },
+      "title": {
+        "format": "text",
+        "type": "string"
+      },
+      "body": {
+        "format": "text",
+        "type": "string"
+      },
+      "lead_id": {
+        "format": "uuid",
+        "type": "string"
+      },
+      "is_read": {
+        "default": false,
+        "format": "boolean",
+        "type": "boolean"
+      },
+      "created_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "audit_logs": {
+    "required": [
+      "id",
+      "action",
+      "entity_table"
+    ],
+    "properties": {
+      "id": {
+        "default": "gen_random_uuid()",
+        "description": "Note:\nThis is a Primary Key.<pk/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "actor_id": {
+        "format": "uuid",
+        "type": "string"
+      },
+      "action": {
+        "format": "text",
+        "type": "string"
+      },
+      "entity_table": {
+        "format": "text",
+        "type": "string"
+      },
+      "entity_id": {
+        "format": "uuid",
+        "type": "string"
+      },
+      "old_data": {
+        "format": "jsonb"
+      },
+      "new_data": {
+        "format": "jsonb"
+      },
+      "created_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  }
+}
