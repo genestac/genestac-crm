@@ -26,8 +26,8 @@ export function SubscriptionActions({ subscription }: { subscription: any }) {
 
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
-      <DialogTrigger asChild>
-        <Button variant="outline" size="sm">Manage</Button>
+      <DialogTrigger render={<Button variant="outline" size="sm" />}>
+        Manage
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
