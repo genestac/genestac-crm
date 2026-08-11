@@ -100,40 +100,45 @@ async def sync_templates(current_user: dict = Depends(get_current_user), supabas
                             })
                             
                 elif comp.get("type") == "HEADER":
+                    # Prefer the header_handle (Meta media ID of the uploaded image/video/doc)
+                    # over any external URL. header_handle is returned by Meta in comp["example"]
+                    example = comp.get("example", {})
+                    header_handles = example.get("header_handle", [])
+                    handle = header_handles[0] if header_handles else None
+
                     if comp.get("format") == "IMAGE":
+                        image_param = {"id": handle} if handle else {"link": "https://upload.wikimedia.org/wikipedia/commons/c/ca/1x1.png"}
                         default_components.append({
                             "type": "header",
                             "parameters": [
                                 {
                                     "type": "image",
-                                    "image": {
-                                        "link": "https://upload.wikimedia.org/wikipedia/commons/c/ca/1x1.png"
-                                    }
+                                    "image": image_param
                                 }
                             ]
                         })
                     elif comp.get("format") == "DOCUMENT":
+                        doc_param = {"id": handle} if handle else {
+                            "link": "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf",
+                            "filename": "document.pdf"
+                        }
                         default_components.append({
                             "type": "header",
                             "parameters": [
                                 {
                                     "type": "document",
-                                    "document": {
-                                        "link": "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf",
-                                        "filename": "document.pdf"
-                                    }
+                                    "document": doc_param
                                 }
                             ]
                         })
                     elif comp.get("format") == "VIDEO":
+                        video_param = {"id": handle} if handle else {"link": "https://sample-videos.com/video123/mp4/720/big_buck_bunny_720p_1mb.mp4"}
                         default_components.append({
                             "type": "header",
                             "parameters": [
                                 {
                                     "type": "video",
-                                    "video": {
-                                        "link": "https://sample-videos.com/video123/mp4/720/big_buck_bunny_720p_1mb.mp4"
-                                    }
+                                    "video": video_param
                                 }
                             ]
                         })
