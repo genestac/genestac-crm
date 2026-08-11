@@ -480,7 +480,30 @@ def sweep_whatsapp_campaigns():
             whatsapp_template = campaign.get('whatsapp_templates')
             template_name = whatsapp_template['name'] if whatsapp_template else None
             language_code = whatsapp_template.get('language') or 'en_US' if whatsapp_template else 'en_US'
-            components = whatsapp_template.get('default_components') if whatsapp_template else None
+            raw_components = whatsapp_template.get('default_components') if whatsapp_template else None
+            
+            # Build the actual API components list from stored metadata
+            components = []
+            if raw_components:
+                for comp in raw_components:
+                    if comp.get("_meta"):
+                        # This is a media header that needs a URL set by the admin
+                        fmt = comp.get("header_format", "IMAGE")
+                        url = comp.get("header_media_url")
+                        if not url:
+                            print(f"[WhatsApp Scheduler] ⚠️ Template '{template_name}' has a {fmt} header but no media URL set. Skipping header component.")
+                            continue
+                        type_key = fmt.lower()  # "image", "document", "video"
+                        param = {"type": type_key, type_key: {"link": url}}
+                        if type_key == "document":
+                            param[type_key]["filename"] = "document.pdf"
+                        components.append({"type": "header", "parameters": [param]})
+                    else:
+                        # Regular body/button component — use as-is
+                        components.append(comp)
+            
+            components = components or None  # Pass None if empty so payload omits the key
+
             
             if not template_name:
                 supabase.table("whatsapp_campaigns").update({"status": "FAILED"}).eq("id", campaign_id).execute()

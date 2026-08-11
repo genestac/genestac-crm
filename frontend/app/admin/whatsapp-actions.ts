@@ -109,3 +109,13 @@ export async function syncWhatsAppTemplates() {
   revalidatePath('/admin/whatsapp')
   return response
 }
+
+export async function setTemplateHeaderUrl(templateId: string, headerMediaUrl: string) {
+  const response = await fetchAPI(`/api/admin/whatsapp/templates/${templateId}/header-url`, {
+    method: 'PATCH',
+    headers: { 'Cookie': (await cookies()).toString(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ header_media_url: headerMediaUrl })
+  })
+  revalidatePath('/admin/whatsapp')
+  return response
+}

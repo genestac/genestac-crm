@@ -100,47 +100,16 @@ async def sync_templates(current_user: dict = Depends(get_current_user), supabas
                             })
                             
                 elif comp.get("type") == "HEADER":
-                    # Prefer the header_handle (Meta media ID of the uploaded image/video/doc)
-                    # over any external URL. header_handle is returned by Meta in comp["example"]
-                    example = comp.get("example", {})
-                    header_handles = example.get("header_handle", [])
-                    handle = header_handles[0] if header_handles else None
-
-                    if comp.get("format") == "IMAGE":
-                        image_param = {"id": handle} if handle else {"link": "https://upload.wikimedia.org/wikipedia/commons/c/ca/1x1.png"}
+                    header_format = comp.get("format", "")
+                    # Store header metadata so the frontend knows this template needs a media URL.
+                    # The header_handle from Meta's example is a creation-time opaque string and
+                    # cannot be used as image.id (which requires an integer) or as a link URL.
+                    # Admins must set a real public media URL via PATCH /templates/{id}/header-url.
+                    if header_format in ("IMAGE", "DOCUMENT", "VIDEO"):
                         default_components.append({
-                            "type": "header",
-                            "parameters": [
-                                {
-                                    "type": "image",
-                                    "image": image_param
-                                }
-                            ]
-                        })
-                    elif comp.get("format") == "DOCUMENT":
-                        doc_param = {"id": handle} if handle else {
-                            "link": "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf",
-                            "filename": "document.pdf"
-                        }
-                        default_components.append({
-                            "type": "header",
-                            "parameters": [
-                                {
-                                    "type": "document",
-                                    "document": doc_param
-                                }
-                            ]
-                        })
-                    elif comp.get("format") == "VIDEO":
-                        video_param = {"id": handle} if handle else {"link": "https://sample-videos.com/video123/mp4/720/big_buck_bunny_720p_1mb.mp4"}
-                        default_components.append({
-                            "type": "header",
-                            "parameters": [
-                                {
-                                    "type": "video",
-                                    "video": video_param
-                                }
-                            ]
+                            "_meta": True,
+                            "header_format": header_format,
+                            "header_media_url": None  # Admin must configure this
                         })
             
             # Upsert by name
@@ -164,6 +133,49 @@ async def sync_templates(current_user: dict = Depends(get_current_user), supabas
             synced_count += 1
             
     return {"message": f"Successfully synced {synced_count} templates"}
+
+class TemplateHeaderUrl(BaseModel):
+    header_media_url: str
+
+@router.patch('/templates/{template_id}/header-url')
+async def set_template_header_url(template_id: str, data: TemplateHeaderUrl, current_user: dict = Depends(get_current_user), supabase: Client = Depends(get_supabase_client)):
+    """
+    Set a public media URL for a template that has an IMAGE/DOCUMENT/VIDEO header.
+    This is required because Meta's header_handle (returned during template sync) is 
+    an opaque creation-time string and cannot be used directly when sending messages.
+    """
+    if not is_admin(current_user, supabase):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    # Fetch the template's current default_components
+    res = supabase.table("whatsapp_templates").select("id, default_components").eq("id", template_id).execute()
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Template not found")
+    
+    template = res.data[0]
+    components = template.get("default_components") or []
+    
+    # Find the _meta header entry and update it with the URL
+    header_format = None
+    updated_components = []
+    for comp in components:
+        if comp.get("_meta") and comp.get("header_format"):
+            header_format = comp["header_format"]
+            updated_components.append({
+                **comp,
+                "header_media_url": data.header_media_url
+            })
+        else:
+            updated_components.append(comp)
+    
+    if not header_format:
+        raise HTTPException(status_code=400, detail="This template does not have an IMAGE/DOCUMENT/VIDEO header.")
+    
+    supabase.table("whatsapp_templates").update({
+        "default_components": updated_components
+    }).eq("id", template_id).execute()
+    
+    return {"message": f"Header URL updated successfully for {header_format} template."}
 
 @router.get('/campaigns')
 async def get_campaigns(current_user: dict = Depends(get_current_user), supabase: Client = Depends(get_supabase_client)):
