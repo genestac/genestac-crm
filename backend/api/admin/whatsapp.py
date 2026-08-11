@@ -141,11 +141,34 @@ class TemplateHeaderUrl(BaseModel):
 async def set_template_header_url(template_id: str, data: TemplateHeaderUrl, current_user: dict = Depends(get_current_user), supabase: Client = Depends(get_supabase_client)):
     """
     Set a public media URL for a template that has an IMAGE/DOCUMENT/VIDEO header.
-    This is required because Meta's header_handle (returned during template sync) is 
-    an opaque creation-time string and cannot be used directly when sending messages.
+    Validates that the URL actually returns an image/video/document content-type,
+    not an HTML page (which would cause Meta error 131053).
     """
     if not is_admin(current_user, supabase):
         raise HTTPException(status_code=403, detail="Admin access required")
+    
+    # Validate the URL actually serves media, not a webpage (Meta rejects text/html)
+    import httpx
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=10.0) as client:
+            resp = await client.head(data.header_media_url)
+            content_type = resp.headers.get("content-type", "")
+        
+        ALLOWED_TYPES = ("image/", "video/", "application/pdf", "application/octet-stream")
+        if not any(content_type.startswith(t) for t in ALLOWED_TYPES):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"The URL returns '{content_type}' instead of an image, video, or document. "
+                    f"Meta will reject it with 'Unsupported Image mime type'. "
+                    f"Please use a direct link to the file (e.g. ending in .jpg, .png, .webp, .mp4, .pdf) "
+                    f"not a webpage URL."
+                )
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Could not reach the URL to validate it: {e}")
     
     # Fetch the template's current default_components
     res = supabase.table("whatsapp_templates").select("id, default_components").eq("id", template_id).execute()

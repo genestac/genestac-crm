@@ -530,15 +530,24 @@ def sweep_whatsapp_campaigns():
                         supabase.table("whatsapp_logs").update({"status": "SENT"}).eq("id", log['id']).execute()
                         # Log to whatsapp_messages for live chat visibility
                         if log.get('lead_id'):
-                            # Find out if we need user_id or lead_id? Since WhatsApp Campaigns only target leads right now, we use lead_id.
+                            # The lead_id column in whatsapp_logs can store IDs from either
+                            # the `leads` table OR the `users` table. Try leads first, fallback to users.
                             try:
                                 supabase.table("whatsapp_messages").insert({
                                     "lead_id": log["lead_id"],
                                     "message_body": f"[Campaign: {template_name}]",
                                     "sender_type": "bot"
                                 }).execute()
-                            except Exception as db_err:
-                                print(f"[WhatsApp Scheduler] Failed to log chat message: {db_err}")
+                            except Exception:
+                                # FK violation — the ID belongs to the users table, not leads
+                                try:
+                                    supabase.table("whatsapp_messages").insert({
+                                        "user_id": log["lead_id"],
+                                        "message_body": f"[Campaign: {template_name}]",
+                                        "sender_type": "bot"
+                                    }).execute()
+                                except Exception as inner_err:
+                                    print(f"[WhatsApp Scheduler] Failed to log chat message: {inner_err}")
                     else:
                         err = str(res_json.get("error", "Unknown error")) if res_json else "Empty response"
                         supabase.table("whatsapp_logs").update({"status": "FAILED", "error_msg": err}).eq("id", log['id']).execute()
