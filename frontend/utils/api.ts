@@ -23,7 +23,7 @@ export async function fetchWithTimeout(url: string, options: RequestInit = {}, t
   }
 }
 
-export async function fetchAPI(endpoint: string, options: RequestInit = {}) {
+export async function fetchAPI(endpoint: string, options: RequestInit = {}, timeoutMs?: number) {
   const cookieStore = await cookies()
   const token = getAuthToken(cookieStore.getAll())
   
@@ -42,7 +42,7 @@ export async function fetchAPI(endpoint: string, options: RequestInit = {}) {
     cache: 'no-store', // Prevent Next.js from caching authenticated API responses
     ...options,
     headers
-  })
+  }, timeoutMs ?? REQUEST_TIMEOUT_MS)
   
   if (!res.ok) {
     let errorStatus = res.status

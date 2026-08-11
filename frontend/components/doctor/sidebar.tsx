@@ -10,6 +10,7 @@ import {
   LogOut,
   Stethoscope,
   Users,
+  UserCheck,
   Pin,
   FileText,
 } from 'lucide-react'
@@ -20,6 +21,7 @@ const routes = [
   { name: 'Appointments', path: '/doctor/appointments', icon: CalendarCheck },
   { name: 'Availability', path: '/doctor/availability', icon: Activity },
   { name: 'Patients', path: '/doctor/patients', icon: Users },
+  { name: 'Onboarded', path: '/doctor/onboarded', icon: UserCheck },
   { name: 'Consultations', path: '/doctor/consultations', icon: Stethoscope },
   { name: 'Prescription Settings', path: '/doctor/prescription-settings', icon: FileText },
 ]

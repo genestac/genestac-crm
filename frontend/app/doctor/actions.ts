@@ -35,6 +35,38 @@ export async function getDoctorMetrics() {
   return response
 }
 
+export async function getOnboardedPatients() {
+  const response = await fetchAPI('/api/doctor/patients/onboarded')
+  return response || []
+}
+
+export async function getPatientUserPlans(userId: string) {
+  if (!userId) return null
+  const response = await fetchAPI(`/api/doctor/patients/${userId}/user-plans`)
+  return response
+}
+
+export async function generatePatientPlans(userId: string, target: 'diet' | 'exercise' | 'both', healthGoals?: string, patientName?: string) {
+  // AI plan generation can take 60–90s for both plans — use a 2 min timeout
+  const response = await fetchAPI(`/api/doctor/patients/${userId}/generate-plans`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ target, health_goals: healthGoals || '', patient_name: patientName || '' })
+  }, 120000)
+  revalidatePath('/doctor/onboarded')
+  return response
+}
+
+export async function updatePatientUserPlans(userId: string, data: { diet_plan?: any, exercise_plan?: any }) {
+  const response = await fetchAPI(`/api/doctor/patients/${userId}/user-plans`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  })
+  revalidatePath('/doctor/onboarded')
+  return response
+}
+
 export async function getPatientHistory(patientId: string) {
   if (!patientId || patientId === 'null' || patientId === 'undefined') return []
   const response = await fetchAPI(`/api/doctor/patients/${patientId}/history`)
