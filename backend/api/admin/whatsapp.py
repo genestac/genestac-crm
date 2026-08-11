@@ -79,13 +79,65 @@ async def sync_templates(current_user: dict = Depends(get_current_user), supabas
             name = t.get("name")
             language = t.get("language", "en_US")
             components = t.get("components", [])
-            # Extract content from BODY component
+            # Extract content from BODY component and create default_components
             content = ""
+            default_components = []
+            
             for comp in components:
                 if comp.get("type") == "BODY":
                     content = comp.get("text", "")
-                    break
                     
+                    # If body has examples, it usually means it has variables
+                    # Example format: "example": {"body_text": [["Variable 1", "Variable 2"]]}
+                    if "example" in comp and "body_text" in comp["example"] and comp["example"]["body_text"]:
+                        params = []
+                        for _ in comp["example"]["body_text"][0]:
+                            params.append({"type": "text", "text": "Greetings"})
+                        if params:
+                            default_components.append({
+                                "type": "body",
+                                "parameters": params
+                            })
+                            
+                elif comp.get("type") == "HEADER":
+                    if comp.get("format") == "IMAGE":
+                        default_components.append({
+                            "type": "header",
+                            "parameters": [
+                                {
+                                    "type": "image",
+                                    "image": {
+                                        "link": "https://upload.wikimedia.org/wikipedia/commons/c/ca/1x1.png"
+                                    }
+                                }
+                            ]
+                        })
+                    elif comp.get("format") == "DOCUMENT":
+                        default_components.append({
+                            "type": "header",
+                            "parameters": [
+                                {
+                                    "type": "document",
+                                    "document": {
+                                        "link": "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf",
+                                        "filename": "document.pdf"
+                                    }
+                                }
+                            ]
+                        })
+                    elif comp.get("format") == "VIDEO":
+                        default_components.append({
+                            "type": "header",
+                            "parameters": [
+                                {
+                                    "type": "video",
+                                    "video": {
+                                        "link": "https://sample-videos.com/video123/mp4/720/big_buck_bunny_720p_1mb.mp4"
+                                    }
+                                }
+                            ]
+                        })
+            
             # Upsert by name
             # Check if exists
             existing = supabase.table("whatsapp_templates").select("id").eq("name", name).execute()
@@ -93,14 +145,16 @@ async def sync_templates(current_user: dict = Depends(get_current_user), supabas
                 supabase.table("whatsapp_templates").update({
                     "content": content,
                     "language": language,
-                    "status": "APPROVED"
+                    "status": "APPROVED",
+                    "default_components": default_components
                 }).eq("id", existing.data[0]["id"]).execute()
             else:
                 supabase.table("whatsapp_templates").insert({
                     "name": name,
                     "content": content,
                     "language": language,
-                    "status": "APPROVED"
+                    "status": "APPROVED",
+                    "default_components": default_components
                 }).execute()
             synced_count += 1
             
