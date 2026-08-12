@@ -174,7 +174,8 @@ def sweep_leads_for_auto_call():
 
         # ── Batch-fetch call counts for all candidate leads (single DB query) ──
         all_lead_ids = [l["id"] for l in all_leads]
-        today = datetime.datetime.now().date().isoformat()
+        import pytz as _pytz_sweep
+        today = datetime.datetime.now(_pytz_sweep.timezone("Asia/Kolkata")).date().isoformat()
         skipped_max = 0
         skipped_today = 0
         skipped_source = 0
@@ -673,9 +674,9 @@ def check_expired_subscriptions():
     """Daily check to mark expired subscriptions"""
     try:
         from db.supabase import get_supabase_client
-        from datetime import datetime
+        import pytz as _pytz_exp
         sb = get_supabase_client()
-        today = datetime.now().strftime('%Y-%m-%d')
+        today = datetime.datetime.now(_pytz_exp.timezone("Asia/Kolkata")).strftime('%Y-%m-%d')
         res = sb.table('subscriptions').update({'status': 'expired'}).lt('end_date', today).eq('status', 'active').execute()
         if res.data:
             print(f"Marked {len(res.data)} subscriptions as expired.")
