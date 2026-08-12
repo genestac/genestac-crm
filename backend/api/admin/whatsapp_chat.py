@@ -63,13 +63,13 @@ async def get_conversations(
                 user = users_dict[person_id]
                 conv["name"] = user.get("name") or "Unknown User"
                 conv["phone"] = user.get("phone")
-                conv["bot_paused"] = user.get("metadata", {}).get("bot_paused", False)
+                conv["bot_paused"] = (user.get("metadata") or {}).get("bot_paused", False)
                 final_list.append(conv)
             elif not conv["is_user"] and person_id in leads_dict:
                 lead = leads_dict[person_id]
                 conv["name"] = lead.get("name") or "Unknown Lead"
                 conv["phone"] = lead.get("phone_number")
-                conv["bot_paused"] = lead.get("metadata", {}).get("bot_paused", False)
+                conv["bot_paused"] = (lead.get("metadata") or {}).get("bot_paused", False)
                 final_list.append(conv)
                 
         # They are already roughly ordered because we processed messages in DESC order,
