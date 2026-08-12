@@ -59,21 +59,19 @@ export function AutoResponderSettings({ templates }: { templates: any[] }) {
           <Label htmlFor="autoresponder">Enable Auto-Responder</Label>
         </div>
         
-        {enabled && (
-          <div className="space-y-2 mt-4 max-w-md">
-            <Label>Select Template</Label>
-            <Select value={templateId} onValueChange={(val) => setTemplateId(val || '')}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select a welcome template" />
-              </SelectTrigger>
-              <SelectContent>
-                {templates.map(t => (
-                  <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        )}
+        <div className={`space-y-2 mt-4 max-w-md ${!enabled ? 'opacity-50 pointer-events-none' : ''}`}>
+          <Label>Select Template</Label>
+          <Select value={templateId} onValueChange={(val) => setTemplateId(val || '')}>
+            <SelectTrigger>
+              <SelectValue placeholder="Select a welcome template" />
+            </SelectTrigger>
+            <SelectContent>
+              {templates.map(t => (
+                <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
         
         <Button onClick={handleSave} disabled={saving} className="mt-4">
           {saving ? "Saving..." : "Save Settings"}
