@@ -137,3 +137,27 @@ export async function setTemplateHeaderUrl(templateId: string, headerMediaUrl: s
   revalidatePath('/admin/whatsapp')
   return response
 }
+
+export async function getSubscriberEngagementSettings() {
+  const response = await fetchAPI('/api/admin/whatsapp/settings/subscriber-engagement', {
+    headers: { 'Cookie': (await cookies()).toString() }
+  })
+  return response.data || {}
+}
+
+export async function updateSubscriberEngagementSettings(settings: {
+  enabled: boolean
+  reminder_template_id: string | null
+  motivation_template_id: string | null
+  inactivity_days_threshold: number
+  min_days_between_nudges: number
+  send_time: string
+}) {
+  const response = await fetchAPI('/api/admin/whatsapp/settings/subscriber-engagement', {
+    method: 'PUT',
+    headers: { 'Cookie': (await cookies()).toString(), 'Content-Type': 'application/json' },
+    body: JSON.stringify(settings)
+  })
+  revalidatePath('/admin/whatsapp')
+  return response.data
+}

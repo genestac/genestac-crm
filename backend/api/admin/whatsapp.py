@@ -483,6 +483,31 @@ async def update_autoresponder(data: AutoResponderSettings, current_user: dict =
         
     return {"data": val}
 
+class SubscriberEngagementSettingsModel(BaseModel):
+    enabled: bool
+    reminder_template_id: Optional[str] = None   # template for inactive users
+    motivation_template_id: Optional[str] = None  # template for active users
+    inactivity_days_threshold: int = 1
+    min_days_between_nudges: int = 1
+    send_time: str = "09:00"
+
+@router.get('/settings/subscriber-engagement')
+async def get_subscriber_engagement(current_user: dict = Depends(get_current_user), supabase: Client = Depends(get_supabase_client)):
+    if not is_admin(current_user, supabase):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    res = supabase.table("global_settings").select("settings_value").eq("settings_key", "whatsapp_subscriber_engagement").execute()
+    if res.data:
+        return {"data": res.data[0]["settings_value"]}
+    return {"data": {"enabled": False, "reminder_template_id": None, "motivation_template_id": None, "inactivity_days_threshold": 1, "min_days_between_nudges": 1, "send_time": "09:00"}}
+
+@router.put('/settings/subscriber-engagement')
+async def update_subscriber_engagement(data: SubscriberEngagementSettingsModel, current_user: dict = Depends(get_current_user), supabase: Client = Depends(get_supabase_client)):
+    if not is_admin(current_user, supabase):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    val = data.model_dump()
+    supabase.table("global_settings").upsert({"settings_key": "whatsapp_subscriber_engagement", "settings_value": val}, on_conflict="settings_key").execute()
+    return {"data": val}
+
 @router.get('/webhook')
 async def verify_webhook(
     hub_mode: str = Query(None, alias="hub.mode"),

@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { ManageTemplatesModal } from './ManageTemplatesModal'
 import { AutoResponderSettings } from './AutoResponderSettings'
+import { SubscriberEngagementSettings } from './SubscriberEngagementSettings'
 import { CampaignStatsModal } from './CampaignStatsModal'
 import Link from 'next/link'
 import { deleteWhatsAppCampaign, startWhatsAppCampaignNow, pauseWhatsAppCampaign, continueWhatsAppCampaign } from '../whatsapp-actions'
@@ -95,6 +96,8 @@ export function WhatsAppDashboardClient({ initialCampaigns, templates, leadStatu
       </div>
 
       <AutoResponderSettings templates={templates} />
+
+      <SubscriberEngagementSettings templates={templates} />
 
       <Card>
         <CardHeader>

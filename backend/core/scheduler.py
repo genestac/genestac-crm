@@ -682,6 +682,197 @@ def check_expired_subscriptions():
     except Exception as e:
         print(f"Error checking expired subscriptions: {e}")
 
+
+def sweep_subscriber_engagement():
+    """
+    Runs every minute, fires at the configured send_time once per day.
+    Checks each active subscriber's user_plans row:
+      - If no log entry in the last `inactivity_days_threshold` days  → send REMINDER template
+      - If logged data today                                           → send MOTIVATION template
+    Respects `min_days_between_nudges` to avoid spamming the same user.
+    """
+    try:
+        supabase = get_supabase_client()
+
+        # 1. Load settings
+        res = supabase.table("global_settings").select("settings_value").eq("settings_key", "whatsapp_subscriber_engagement").execute()
+        if not res.data:
+            return
+        cfg = res.data[0]["settings_value"]
+        if not cfg.get("enabled"):
+            return
+
+        send_time = cfg.get("send_time", "09:00")
+        import pytz
+        ist = pytz.timezone("Asia/Kolkata")
+        now_ist = datetime.datetime.now(ist)
+        current_time_str = now_ist.strftime("%H:%M")
+        if current_time_str != send_time:
+            return  # Not the right minute yet
+
+        reminder_template_id  = cfg.get("reminder_template_id")
+        motivation_template_id = cfg.get("motivation_template_id")
+        inactivity_days       = int(cfg.get("inactivity_days_threshold") or 1)
+        min_nudge_gap         = int(cfg.get("min_days_between_nudges") or 1)
+
+        if not reminder_template_id and not motivation_template_id:
+            print("[Subscriber Engagement] No templates configured. Skipping.")
+            return
+
+        # 2. Fetch all active subscriptions with user phone
+        subs_res = supabase.table("subscriptions") \
+            .select("user_id, users(phone, name)") \
+            .eq("status", "active") \
+            .execute()
+        subscribers = subs_res.data or []
+        if not subscribers:
+            return
+
+        print(f"[Subscriber Engagement] Checking {len(subscribers)} active subscribers...")
+
+        # 3. Pre-fetch template names from DB
+        template_names = {}
+        template_ids_needed = [tid for tid in [reminder_template_id, motivation_template_id] if tid]
+        if template_ids_needed:
+            t_res = supabase.table("whatsapp_templates").select("id, name, language, default_components").in_("id", template_ids_needed).execute()
+            for t in (t_res.data or []):
+                template_names[t["id"]] = t
+
+        # 4. Fetch recent WhatsApp logs so we know who was already nudged recently
+        from datetime import date as date_cls, timedelta
+        cutoff_nudge = (now_ist.date() - timedelta(days=min_nudge_gap)).isoformat()
+        recent_logs_res = supabase.table("whatsapp_logs").select("lead_id").gte("created_at", cutoff_nudge).execute()
+        recently_nudged_ids = {log["lead_id"] for log in (recent_logs_res.data or [])}
+
+        import asyncio
+        from services.whatsapp_service import send_whatsapp_template
+
+        today_str = now_ist.date().isoformat()
+        inactivity_cutoff = (now_ist.date() - timedelta(days=inactivity_days)).isoformat()
+
+        async def process_subscribers():
+            for sub in subscribers:
+                user_id = sub.get("user_id")
+                user = sub.get("users") or {}
+                phone = user.get("phone")
+                name  = user.get("name") or "there"
+
+                if not phone or not user_id:
+                    continue
+
+                # Skip if recently nudged
+                if user_id in recently_nudged_ids:
+                    continue
+
+                # 5. Fetch user_plans row
+                plan_res = supabase.table("user_plans").select(
+                    "water_history, sleep_history, steps_history, measurement_history"
+                ).eq("user_id", user_id).single().execute()
+
+                if not plan_res.data:
+                    # User has no plan row at all — treat as inactive
+                    logged_today = False
+                    last_log_date = None
+                else:
+                    plan = plan_res.data
+
+                    # Find the most recent date entry across all history arrays
+                    all_dates = []
+                    for field in ["water_history", "sleep_history", "steps_history"]:
+                        history = plan.get(field) or []
+                        for entry in (history if isinstance(history, list) else []):
+                            d = entry.get("date") if isinstance(entry, dict) else None
+                            if d:
+                                all_dates.append(d)
+                    # measurement_history may be a dict with a 'measurements' list
+                    mh = plan.get("measurement_history") or {}
+                    if isinstance(mh, dict):
+                        for entry in mh.get("measurements") or []:
+                            d = entry.get("date") if isinstance(entry, dict) else None
+                            if d:
+                                all_dates.append(d)
+                    elif isinstance(mh, list):
+                        for entry in mh:
+                            d = entry.get("date") if isinstance(entry, dict) else None
+                            if d:
+                                all_dates.append(d)
+
+                    last_log_date = max(all_dates) if all_dates else None
+                    logged_today  = (last_log_date == today_str) if last_log_date else False
+
+                # 6. Decide which template to send
+                if logged_today and motivation_template_id:
+                    template_info = template_names.get(motivation_template_id)
+                    send_reason = "motivation"
+                elif not logged_today and reminder_template_id:
+                    # Only send reminder if truly inactive for inactivity_days
+                    is_inactive = (not last_log_date) or (last_log_date <= inactivity_cutoff)
+                    if not is_inactive:
+                        continue  # Logged recently but not today — no message
+                    template_info = template_names.get(reminder_template_id)
+                    send_reason = "reminder"
+                else:
+                    continue
+
+                if not template_info:
+                    continue
+
+                clean_phone = ''.join(filter(str.isdigit, phone))
+                template_name = template_info["name"]
+                language_code = template_info.get("language") or "en_US"
+
+                # Build components
+                components = None
+                raw_components = template_info.get("default_components") or []
+                built = []
+                for comp in raw_components:
+                    if comp.get("_meta"):
+                        url = comp.get("header_media_url")
+                        if not url:
+                            continue
+                        fmt = comp.get("header_format", "IMAGE").lower()
+                        param = {"type": fmt, fmt: {"link": url}}
+                        built.append({"type": "header", "parameters": [param]})
+                    else:
+                        built.append(comp)
+                if built:
+                    components = built
+
+                # 7. Send the message
+                res_json = await send_whatsapp_template(clean_phone, template_name, language_code=language_code, components=components)
+
+                if res_json and "error" not in res_json:
+                    print(f"[Subscriber Engagement] ✅ Sent {send_reason} to {name} ({clean_phone})")
+                    # Log to whatsapp_logs so min_nudge_gap works correctly
+                    supabase.table("whatsapp_logs").insert({
+                        "lead_id": user_id,
+                        "phone_number": clean_phone,
+                        "status": "SENT",
+                        "campaign_id": None
+                    }).execute()
+                    # Optionally log to chat inbox
+                    try:
+                        supabase.table("whatsapp_messages").insert({
+                            "user_id": user_id,
+                            "message_body": f"[Engagement: {template_name}]",
+                            "sender_type": "bot"
+                        }).execute()
+                    except Exception:
+                        pass
+                else:
+                    err = str(res_json.get("error", "Unknown")) if res_json else "Empty response"
+                    print(f"[Subscriber Engagement] ❌ Failed for {clean_phone}: {err}")
+
+        asyncio.run(process_subscribers())
+        print("[Subscriber Engagement] Done.")
+
+    except _NETWORK_ERRORS as e:
+        print(f"[Subscriber Engagement] ⚠️ Network error: {type(e).__name__}")
+    except Exception as e:
+        import traceback
+        print(f"[Subscriber Engagement] Error: {e}")
+        traceback.print_exc()
+
 def start_scheduler():
     if not scheduler.running:
         # Sweep for auto-calls and pending callbacks every 5 minutes
@@ -694,6 +885,8 @@ def start_scheduler():
         scheduler.add_job(check_and_send_whatsapp_report, 'interval', minutes=1, id="whatsapp_daily_report", replace_existing=True)
         # Check expired subscriptions every hour
         scheduler.add_job(check_expired_subscriptions, 'interval', hours=1, id="check_expired_subs", replace_existing=True)
+        # Check subscriber engagement (reminder/motivation) every minute, fires at configured send_time
+        scheduler.add_job(sweep_subscriber_engagement, 'interval', minutes=1, id="subscriber_engagement_sweep", replace_existing=True)
         scheduler.start()
         print("Started Background Scheduler for AI Voice Calling and WhatsApp.")
 
