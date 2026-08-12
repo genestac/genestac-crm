@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { PlusCircle, FileText, Send, Clock, CheckCircle2, XCircle, MessageCircle, Trash2, Edit, Repeat, Play } from 'lucide-react'
+import { PlusCircle, FileText, Send, Clock, CheckCircle2, XCircle, MessageCircle, Trash2, Edit, Repeat, Play, Pause } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -9,7 +9,7 @@ import { ManageTemplatesModal } from './ManageTemplatesModal'
 import { AutoResponderSettings } from './AutoResponderSettings'
 import { CampaignStatsModal } from './CampaignStatsModal'
 import Link from 'next/link'
-import { deleteWhatsAppCampaign, startWhatsAppCampaignNow } from '../whatsapp-actions'
+import { deleteWhatsAppCampaign, startWhatsAppCampaignNow, pauseWhatsAppCampaign, continueWhatsAppCampaign } from '../whatsapp-actions'
 import { toast } from 'sonner'
 import { useRouter } from 'next/navigation'
 
@@ -40,6 +40,26 @@ export function WhatsAppDashboardClient({ initialCampaigns, templates, leadStatu
     }
   }
 
+  const handlePause = async (id: string) => {
+    try {
+      await pauseWhatsAppCampaign(id)
+      setCampaigns(campaigns.map(c => c.id === id ? { ...c, status: 'PAUSED' } : c))
+      toast.success("Campaign paused")
+    } catch (e) {
+      toast.error("Failed to pause campaign")
+    }
+  }
+
+  const handleContinue = async (id: string) => {
+    try {
+      await continueWhatsAppCampaign(id)
+      setCampaigns(campaigns.map(c => c.id === id ? { ...c, status: 'RUNNING' } : c))
+      toast.success("Campaign is continuing in the background!")
+    } catch (e) {
+      toast.error("Failed to continue campaign")
+    }
+  }
+
   const getStatusIcon = (status: string) => {
     switch(status) {
       case 'COMPLETED': return <CheckCircle2 className="w-4 h-4 text-green-500" />
@@ -54,6 +74,7 @@ export function WhatsAppDashboardClient({ initialCampaigns, templates, leadStatu
       case 'COMPLETED': return <Badge variant="secondary" className="bg-green-100 text-green-700">Completed</Badge>
       case 'PENDING': return <Badge variant="secondary" className="bg-orange-100 text-orange-700">Scheduled</Badge>
       case 'RUNNING': return <Badge variant="secondary" className="bg-blue-100 text-blue-700">Running</Badge>
+      case 'PAUSED': return <Badge variant="secondary" className="bg-yellow-100 text-yellow-800">Paused</Badge>
       default: return <Badge variant="secondary" className="bg-red-100 text-red-700">Failed/Cancelled</Badge>
     }
   }
@@ -126,6 +147,18 @@ export function WhatsAppDashboardClient({ initialCampaigns, templates, leadStatu
                     <div className="flex items-center gap-2">
                       <Button variant="ghost" size="sm" onClick={() => setSelectedStatsCampaign(camp)}>View Stats</Button>
                       
+                      {camp.status === 'RUNNING' && (
+                        <Button variant="ghost" size="icon" title="Pause" onClick={() => handlePause(camp.id)}>
+                          <Pause className="w-4 h-4 text-yellow-600" />
+                        </Button>
+                      )}
+
+                      {camp.status === 'PAUSED' && (
+                        <Button variant="ghost" size="icon" title="Continue" onClick={() => handleContinue(camp.id)}>
+                          <Play className="w-4 h-4 text-blue-600" />
+                        </Button>
+                      )}
+
                       {camp.status === 'PENDING' && (
                         <>
                           <Button variant="ghost" size="icon" title="Start Now" onClick={() => handleStartNow(camp.id)}>

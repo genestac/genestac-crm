@@ -75,6 +75,24 @@ export async function startWhatsAppCampaignNow(campaignId: string) {
   return response.data
 }
 
+export async function pauseWhatsAppCampaign(campaignId: string) {
+  const response = await fetchAPI(`/api/admin/whatsapp/campaigns/${campaignId}/pause`, {
+    method: 'POST',
+    headers: { 'Cookie': (await cookies()).toString() }
+  })
+  revalidatePath('/admin/whatsapp')
+  return response.data
+}
+
+export async function continueWhatsAppCampaign(campaignId: string) {
+  const response = await fetchAPI(`/api/admin/whatsapp/campaigns/${campaignId}/continue`, {
+    method: 'POST',
+    headers: { 'Cookie': (await cookies()).toString() }
+  })
+  revalidatePath('/admin/whatsapp')
+  return response.data
+}
+
 export async function deleteWhatsAppCampaign(campaignId: string) {
   const response = await fetchAPI(`/api/admin/whatsapp/campaigns/${campaignId}`, {
     method: 'DELETE',

@@ -388,6 +388,33 @@ async def start_campaign_now(campaign_id: str, background_tasks: BackgroundTasks
     
     return {'status': 'success'}
 
+@router.post('/campaigns/{campaign_id}/pause')
+async def pause_campaign(campaign_id: str, current_user: dict = Depends(get_current_user), supabase: Client = Depends(get_supabase_client)):
+    if not is_admin(current_user, supabase):
+        raise HTTPException(status_code=403, detail="Admin access required")
+        
+    supabase.table('whatsapp_campaigns').update({
+        'status': 'PAUSED'
+    }).eq('id', campaign_id).execute()
+    
+    return {'status': 'success'}
+
+@router.post('/campaigns/{campaign_id}/continue')
+async def continue_campaign(campaign_id: str, background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user), supabase: Client = Depends(get_supabase_client)):
+    if not is_admin(current_user, supabase):
+        raise HTTPException(status_code=403, detail="Admin access required")
+        
+    # Set to PENDING and scheduled_time to now so scheduler picks it up immediately
+    supabase.table('whatsapp_campaigns').update({
+        'status': 'PENDING',
+        'scheduled_time': datetime.now(timezone.utc).isoformat()
+    }).eq('id', campaign_id).execute()
+    
+    from core.scheduler import sweep_whatsapp_campaigns
+    background_tasks.add_task(sweep_whatsapp_campaigns)
+    
+    return {'status': 'success'}
+
 @router.put('/campaigns/{campaign_id}')
 async def update_campaign(campaign_id: str, data: CampaignCreate, current_user: dict = Depends(get_current_user), supabase: Client = Depends(get_supabase_client)):
     if not is_admin(current_user, supabase):

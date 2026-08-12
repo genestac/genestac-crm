@@ -518,6 +518,12 @@ def sweep_whatsapp_campaigns():
             
             async def process_logs():
                 for log in logs:
+                    # Check if campaign was paused mid-execution
+                    camp_check = supabase.table("whatsapp_campaigns").select("status").eq("id", campaign_id).execute()
+                    if camp_check.data and camp_check.data[0].get("status") == "PAUSED":
+                        print(f"[WhatsApp Scheduler] Campaign {campaign_id} paused. Stopping batch.")
+                        return # Exits the loop, leaving remaining logs PENDING
+
                     phone = log.get('phone_number')
                     if not phone:
                         supabase.table("whatsapp_logs").update({"status": "FAILED", "error_msg": "No phone number"}).eq("id", log['id']).execute()
@@ -555,9 +561,11 @@ def sweep_whatsapp_campaigns():
             # Run async execution
             asyncio.run(process_logs())
             
-            # Mark campaign completed
-            supabase.table("whatsapp_campaigns").update({"status": "COMPLETED"}).eq("id", campaign_id).execute()
-            print(f"[WhatsApp Scheduler] ✅ Completed campaign {campaign_id}")
+            # If the loop finished and the status is still RUNNING, all logs are processed. Mark COMPLETED.
+            final_check = supabase.table("whatsapp_campaigns").select("status").eq("id", campaign_id).execute()
+            if final_check.data and final_check.data[0].get("status") == "RUNNING":
+                supabase.table("whatsapp_campaigns").update({"status": "COMPLETED"}).eq("id", campaign_id).execute()
+                print(f"[WhatsApp Scheduler] ✅ Completed campaign {campaign_id}")
             
     except _NETWORK_ERRORS as e:
         print(f"[WhatsApp Scheduler] ⚠️  Network unavailable (DNS?), skipping sweep: {type(e).__name__}")
