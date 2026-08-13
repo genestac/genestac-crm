@@ -180,7 +180,7 @@ export function SubscriberEngagementSettings({ templates }: { templates: any[] }
               <div className="space-y-2">
                 <Label className="font-semibold text-orange-600">😴 Reminder Template</Label>
                 <p className="text-xs text-muted-foreground">
-                  Sent when a user hasn&apos;t logged data. (e.g. &quot;Hey {{1}}, you forgot to log today! 🏋️&quot;)
+                  Sent when a user hasn&apos;t logged data. (e.g. &quot;Hey { "{{1}}" }, you forgot to log today! 🏋️&quot;)
                 </p>
                 <Select value={reminderTemplateId} onValueChange={(val) => setReminderTemplateId(val || '')}>
                   <SelectTrigger>
@@ -202,7 +202,7 @@ export function SubscriberEngagementSettings({ templates }: { templates: any[] }
               <div className="space-y-2">
                 <Label className="font-semibold text-green-600">💪 Motivation Template</Label>
                 <p className="text-xs text-muted-foreground">
-                  Sent when a user HAS logged data today. (e.g. &quot;{{1}}, you&apos;re crushing it! 🔥&quot;)
+                  Sent when a user HAS logged data today. (e.g. &quot;{ "{{1}}" }, you&apos;re crushing it! 🔥&quot;)
                 </p>
                 <Select value={motivationTemplateId} onValueChange={(val) => setMotivationTemplateId(val || '')}>
                   <SelectTrigger>
@@ -310,7 +310,7 @@ export function SubscriberEngagementSettings({ templates }: { templates: any[] }
                   )}
 
                   {!reminderTemplate?.content && reminderTemplateId && (
-                    <p className="text-xs text-muted-foreground italic">Reminder template has no detectable variables ({{'{{}}'}} patterns).</p>
+                    <p className="text-xs text-muted-foreground italic">Reminder template has no detectable variables ({ "{{}}" } patterns).</p>
                   )}
 
                   {motivationTemplate?.content && (
