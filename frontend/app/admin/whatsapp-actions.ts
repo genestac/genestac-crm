@@ -152,6 +152,7 @@ export async function updateSubscriberEngagementSettings(settings: {
   inactivity_days_threshold: number
   min_days_between_nudges: number
   send_time: string
+  variable_mappings?: { reminder: Record<string, string>, motivation: Record<string, string> }
 }) {
   const response = await fetchAPI('/api/admin/whatsapp/settings/subscriber-engagement', {
     method: 'PUT',

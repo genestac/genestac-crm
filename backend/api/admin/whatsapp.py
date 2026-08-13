@@ -490,6 +490,9 @@ class SubscriberEngagementSettingsModel(BaseModel):
     inactivity_days_threshold: int = 1
     min_days_between_nudges: int = 1
     send_time: str = "09:00"
+    # Maps {{1}}, {{2}} etc. → subscriber data field
+    # e.g. {"reminder": {"1": "name", "2": "days_inactive"}, "motivation": {"1": "name"}}
+    variable_mappings: Optional[dict] = None
 
 @router.get('/settings/subscriber-engagement')
 async def get_subscriber_engagement(current_user: dict = Depends(get_current_user), supabase: Client = Depends(get_supabase_client)):
@@ -498,7 +501,7 @@ async def get_subscriber_engagement(current_user: dict = Depends(get_current_use
     res = supabase.table("global_settings").select("settings_value").eq("settings_key", "whatsapp_subscriber_engagement").execute()
     if res.data:
         return {"data": res.data[0]["settings_value"]}
-    return {"data": {"enabled": False, "reminder_template_id": None, "motivation_template_id": None, "inactivity_days_threshold": 1, "min_days_between_nudges": 1, "send_time": "09:00"}}
+    return {"data": {"enabled": False, "reminder_template_id": None, "motivation_template_id": None, "inactivity_days_threshold": 1, "min_days_between_nudges": 1, "send_time": "09:00", "variable_mappings": {"reminder": {}, "motivation": {}}}}
 
 @router.put('/settings/subscriber-engagement')
 async def update_subscriber_engagement(data: SubscriberEngagementSettingsModel, current_user: dict = Depends(get_current_user), supabase: Client = Depends(get_supabase_client)):

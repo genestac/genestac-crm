@@ -3,6 +3,10 @@
 import { Users, UserPlus, ShieldCheck, IndianRupee, Activity, FileText, ArrowRight, ShoppingCart, TrendingUp } from 'lucide-react'
 import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import WhatsappReportConfig from './WhatsappReportConfig'
+import dynamic from 'next/dynamic'
+
+// Dynamically import the heatmap to avoid SSR issues with mapbox/maplibre
+const LeadsHeatmap = dynamic(() => import('./LeadsHeatmap'), { ssr: false })
 
 export default function AdminDashboardClient({ metrics }: { metrics: any }) {
   const { 
@@ -199,6 +203,9 @@ export default function AdminDashboardClient({ metrics }: { metrics: any }) {
         </div>
 
       </div>
+
+      {/* MapLibre Heatmap Area */}
+      <LeadsHeatmap geojson={metrics.locations_geojson} stateStats={metrics.state_stats || []} />
 
       {/* WhatsApp Report Config */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mt-8">

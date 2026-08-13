@@ -6,6 +6,7 @@ python-jose[cryptography]
 passlib[bcrypt]
 python-multipart
 pydantic-settings>=2.0.0
+httpx
 
 razorpay
 

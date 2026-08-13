@@ -822,18 +822,60 @@ def sweep_subscriber_engagement():
                 template_name = template_info["name"]
                 language_code = template_info.get("language") or "en_US"
 
-                # Build components
+                # Build per-subscriber personalized variables dict
+                variable_mappings = cfg.get("variable_mappings") or {}
+                mappings_for_type = variable_mappings.get(send_reason, {})  # e.g. {"1": "name", "2": "days_inactive"}
+
+                days_inactive = 0
+                if last_log_date:
+                    try:
+                        from datetime import date as _date
+                        delta = now_ist.date() - _date.fromisoformat(last_log_date)
+                        days_inactive = delta.days
+                    except Exception:
+                        pass
+
+                first_name = name.split()[0] if name and name != "there" else name
+
+                # Available personalization fields
+                subscriber_vars = {
+                    "name": name or "there",
+                    "first_name": first_name or "there",
+                    "days_inactive": str(days_inactive) if days_inactive else "a few",
+                    "last_log_date": last_log_date or "N/A",
+                    "today": today_str,
+                    "phone": clean_phone,
+                }
+
+                # Build components — replace body parameters if variable mappings exist
                 components = None
                 raw_components = template_info.get("default_components") or []
                 built = []
                 for comp in raw_components:
                     if comp.get("_meta"):
+                        # Media header
                         url = comp.get("header_media_url")
                         if not url:
                             continue
                         fmt = comp.get("header_format", "IMAGE").lower()
                         param = {"type": fmt, fmt: {"link": url}}
                         built.append({"type": "header", "parameters": [param]})
+                    elif comp.get("type") == "body" and mappings_for_type:
+                        # Rebuild body parameters using variable mappings
+                        existing_params = comp.get("parameters") or []
+                        new_params = []
+                        # Use mappings to resolve {{1}}, {{2}} etc.
+                        # Sort by slot index so order is preserved
+                        sorted_slots = sorted(mappings_for_type.keys(), key=lambda x: int(x) if x.isdigit() else 99)
+                        for slot in sorted_slots:
+                            field_key = mappings_for_type[slot]
+                            value = subscriber_vars.get(field_key, field_key)
+                            new_params.append({"type": "text", "text": value})
+                        if new_params:
+                            built.append({"type": "body", "parameters": new_params})
+                        elif existing_params:
+                            # Fall back to stored defaults
+                            built.append(comp)
                     else:
                         built.append(comp)
                 if built:
@@ -874,6 +916,77 @@ def sweep_subscriber_engagement():
         print(f"[Subscriber Engagement] Error: {e}")
         traceback.print_exc()
 
+def geocode_missing_cities():
+    """
+    Background task to fetch coordinates for cities from Nominatim API (1 req/sec limit)
+    Updates 'city_coordinates_cache' in global_settings.
+    """
+    try:
+        from db.supabase import get_supabase_client
+        supabase = get_supabase_client()
+        import requests
+        import time
+
+        # Fetch all unique cities from leads
+        leads_res = supabase.table("leads").select("city, metadata").execute()
+        raw_cities = set()
+        for lead in (leads_res.data or []):
+            city = lead.get("city")
+            if not city and isinstance(lead.get("metadata"), dict):
+                city = lead["metadata"].get("city")
+            if city and isinstance(city, str) and city.strip():
+                raw_cities.add(city.strip().lower())
+                
+        if not raw_cities:
+            return
+
+        # Fetch cache
+        cache_res = supabase.table("global_settings").select("settings_value").eq("settings_key", "city_coordinates_cache").execute()
+        city_cache = cache_res.data[0].get("settings_value", {}) if cache_res.data else {}
+        
+        missing_cities = [c for c in raw_cities if c not in city_cache]
+        
+        if not missing_cities:
+            return
+            
+        print(f"[Geocode] Found {len(missing_cities)} missing cities. Processing up to 20...")
+        
+        # Process in small batches so we don't block the scheduler thread for too long
+        batch = missing_cities[:20]
+        updated = False
+        headers = {"User-Agent": "GenestacCRMHeatmap/1.0 (contact: admin@genestac.com)"}
+        
+        for city in batch:
+            try:
+                # Add India to help disambiguate unless they provided country
+                query = city if "india" in city.lower() else f"{city}, India"
+                url = f"https://nominatim.openstreetmap.org/search?format=json&q={requests.utils.quote(query)}&limit=1"
+                resp = requests.get(url, headers=headers, timeout=10)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if data and len(data) > 0:
+                        city_cache[city] = {
+                            "lat": float(data[0]["lat"]),
+                            "lng": float(data[0]["lon"])
+                        }
+                    else:
+                        # Cache empty so we don't retry endlessly
+                        city_cache[city] = {"lat": None, "lng": None}
+                    updated = True
+                time.sleep(1.2) # Respect 1 req/sec limit
+            except Exception as e:
+                print(f"[Geocode] Error geocoding {city}: {e}")
+                
+        if updated:
+            supabase.table("global_settings").upsert({
+                "settings_key": "city_coordinates_cache",
+                "settings_value": city_cache
+            }, on_conflict="settings_key").execute()
+            print(f"[Geocode] Updated cache with new locations.")
+
+    except Exception as e:
+        print(f"[Geocode] Error in background task: {e}")
+
 def start_scheduler():
     if not scheduler.running:
         # Sweep for auto-calls and pending callbacks every 5 minutes
@@ -888,6 +1001,7 @@ def start_scheduler():
         scheduler.add_job(check_expired_subscriptions, 'interval', hours=1, id="check_expired_subs", replace_existing=True)
         # Check subscriber engagement (reminder/motivation) every minute, fires at configured send_time
         scheduler.add_job(sweep_subscriber_engagement, 'interval', minutes=1, id="subscriber_engagement_sweep", replace_existing=True)
+        # Background task to geocode lead cities for the heatmap
+        scheduler.add_job(geocode_missing_cities, 'interval', hours=1, id="geocode_cities_sweep", replace_existing=True)
         scheduler.start()
         print("Started Background Scheduler for AI Voice Calling and WhatsApp.")
-
