@@ -4,23 +4,36 @@ import { getAuthToken } from './cookie-helper'
 const API_BASE_URL = process.env.API_BASE_URL || 'http://localhost:8000'
 const REQUEST_TIMEOUT_MS = Number(process.env.API_REQUEST_TIMEOUT_MS || 30000)
 
-export async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
-  const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+export async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = REQUEST_TIMEOUT_MS, retries = 1) {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
 
-  try {
-    return await fetch(url, {
-      ...options,
-      signal: controller.signal,
-    })
-  } catch (error: any) {
-    if (error?.name === 'AbortError') {
-      throw new Error(`Request timed out after ${timeoutMs}ms`)
+    try {
+      return await fetch(url, {
+        ...options,
+        signal: controller.signal,
+      })
+    } catch (error: any) {
+      if (error?.name === 'AbortError') {
+        throw new Error(`Request timed out after ${timeoutMs}ms`)
+      }
+      const isSocketError = 
+        error?.code === 'UND_ERR_SOCKET' ||
+        error?.cause?.code === 'UND_ERR_SOCKET' ||
+        error?.message?.includes('fetch failed')
+
+      if (attempt < retries && isSocketError) {
+        console.warn(`[fetchWithTimeout] Socket connection dropped on ${url}, retrying... (${attempt + 1}/${retries})`)
+        await new Promise((resolve) => setTimeout(resolve, 300))
+        continue
+      }
+      throw error
+    } finally {
+      clearTimeout(timeoutId)
     }
-    throw error
-  } finally {
-    clearTimeout(timeoutId)
   }
+  throw new Error(`Request to ${url} failed`)
 }
 
 export async function fetchAPI(endpoint: string, options: RequestInit = {}, timeoutMs?: number) {

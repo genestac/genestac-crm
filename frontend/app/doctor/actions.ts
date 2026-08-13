@@ -57,7 +57,7 @@ export async function generatePatientPlans(userId: string, target: 'diet' | 'exe
   return response
 }
 
-export async function updatePatientUserPlans(userId: string, data: { diet_plan?: any, exercise_plan?: any }) {
+export async function updatePatientUserPlans(userId: string, data: { diet_plan?: any, exercise_plan?: any, doctor_review?: boolean }) {
   const response = await fetchAPI(`/api/doctor/patients/${userId}/user-plans`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },

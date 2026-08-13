@@ -17,7 +17,7 @@ async def get_onboarded_patients(current_user: dict=Depends(get_current_user), s
         
         if user_ids:
             try:
-                plans_res = supabase.table('user_plans').select('user_id, diet_plan, exercise_plan').in_('user_id', user_ids).execute()
+                plans_res = supabase.table('user_plans').select('user_id, diet_plan, exercise_plan, doctor_review').in_('user_id', user_ids).execute()
                 plans_map = {p['user_id']: p for p in (plans_res.data or []) if p.get('user_id')}
                 for u in users:
                     u['user_plans'] = plans_map.get(u['id'])
@@ -183,6 +183,7 @@ async def update_patient_user_plans(
 ):
     diet_plan = payload.get('diet_plan')
     exercise_plan = payload.get('exercise_plan')
+    doctor_review = payload.get('doctor_review')
 
     existing_res = supabase.table('user_plans').select('*').eq('user_id', user_id).execute()
     existing_row = existing_res.data[0] if (existing_res.data and len(existing_res.data) > 0) else None
@@ -193,6 +194,8 @@ async def update_patient_user_plans(
         update_data['diet_plan'] = diet_plan
     if exercise_plan is not None:
         update_data['exercise_plan'] = exercise_plan
+    if doctor_review is not None:
+        update_data['doctor_review'] = doctor_review
 
     if existing_row:
         up_res = supabase.table('user_plans').update(update_data).eq('id', existing_row['id']).execute()
@@ -202,6 +205,7 @@ async def update_patient_user_plans(
             'user_id': user_id,
             'diet_plan': diet_plan or {},
             'exercise_plan': exercise_plan or {},
+            'doctor_review': doctor_review if doctor_review is not None else False,
             'created_at': now_iso,
             'updated_at': now_iso
         }

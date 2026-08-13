@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { getOnboardedPatients, generatePatientPlans } from '@/app/doctor/actions'
+import { getOnboardedPatients, generatePatientPlans, updatePatientUserPlans } from '@/app/doctor/actions'
 import { 
   UserCheck, 
   Search, 
@@ -19,7 +19,9 @@ import {
   Flame, 
   ChevronRight,
   RefreshCw,
-  Info
+  Info,
+  CheckCircle2,
+  Stethoscope
 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -40,6 +42,7 @@ type OnboardedUser = {
   user_plans?: {
     diet_plan?: any
     exercise_plan?: any
+    doctor_review?: boolean
   }
 }
 
@@ -88,9 +91,56 @@ export default function DoctorOnboardedPatientsPage() {
   const [isGenerating, setIsGenerating] = useState(false)
   const [generatingTarget, setGeneratingTarget] = useState<'diet' | 'exercise' | 'both' | null>(null)
 
+  // Doctor Review Toggle Loading State
+  const [togglingUserIds, setTogglingUserIds] = useState<Record<string, boolean>>({})
+
   useEffect(() => {
     loadOnboardedUsers()
   }, [])
+
+  const handleToggleDoctorReview = async (user: OnboardedUser, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation()
+    const currentStatus = Boolean(user.user_plans?.doctor_review)
+    const newStatus = !currentStatus
+    const userId = user.id
+
+    setTogglingUserIds((prev) => ({ ...prev, [userId]: true }))
+
+    // Optimistic update locally
+    setUsers((prevUsers) =>
+      prevUsers.map((u) =>
+        u.id === userId
+          ? { ...u, user_plans: { ...u.user_plans, doctor_review: newStatus } }
+          : u
+      )
+    )
+    setSelectedUser((prev) =>
+      prev && prev.id === userId
+        ? { ...prev, user_plans: { ...prev.user_plans, doctor_review: newStatus } }
+        : prev
+    )
+
+    try {
+      await updatePatientUserPlans(userId, { doctor_review: newStatus })
+    } catch (err) {
+      console.error("Failed to update doctor review status:", err)
+      // Revert optimistic update on failure
+      setUsers((prevUsers) =>
+        prevUsers.map((u) =>
+          u.id === userId
+            ? { ...u, user_plans: { ...u.user_plans, doctor_review: currentStatus } }
+            : u
+        )
+      )
+      setSelectedUser((prev) =>
+        prev && prev.id === userId
+          ? { ...prev, user_plans: { ...prev.user_plans, doctor_review: currentStatus } }
+          : prev
+      )
+    } finally {
+      setTogglingUserIds((prev) => ({ ...prev, [userId]: false }))
+    }
+  }
 
   const loadOnboardedUsers = async () => {
     try {
@@ -310,6 +360,36 @@ export default function DoctorOnboardedPatientsPage() {
                         </div>
                       )}
                     </div>
+
+                    {/* Doctor Review Toggle Button */}
+                    <div 
+                      className="flex items-center justify-between pt-2.5 pb-1 border-t border-gray-100 mb-3"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <span className="text-xs font-semibold text-gray-500 flex items-center gap-1">
+                        <Stethoscope className="w-3.5 h-3.5 text-teal-600" />
+                        Doctor Review:
+                      </span>
+                      <button
+                        type="button"
+                        onClick={(e) => handleToggleDoctorReview(u, e)}
+                        disabled={togglingUserIds[u.id]}
+                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold transition-all shadow-2xs border ${
+                          u.user_plans?.doctor_review
+                            ? 'bg-emerald-500 text-white border-emerald-600 hover:bg-emerald-600'
+                            : 'bg-amber-50 text-amber-800 border-amber-300/80 hover:bg-amber-100'
+                        }`}
+                      >
+                        {togglingUserIds[u.id] ? (
+                          <Loader2 className="w-3 h-3 animate-spin text-current" />
+                        ) : u.user_plans?.doctor_review ? (
+                          <CheckCircle2 className="w-3.5 h-3.5 text-white" />
+                        ) : (
+                          <Clock className="w-3.5 h-3.5 text-amber-600" />
+                        )}
+                        {u.user_plans?.doctor_review ? 'Reviewed' : 'Pending'}
+                      </button>
+                    </div>
                   </div>
 
                   <div className="pt-3 border-t border-gray-100 flex items-center justify-between text-xs text-teal-600 font-semibold group-hover:text-teal-700">
@@ -349,6 +429,26 @@ export default function DoctorOnboardedPatientsPage() {
               </div>
 
               <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={(e) => handleToggleDoctorReview(selectedUser, e)}
+                  disabled={togglingUserIds[selectedUser.id]}
+                  className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-bold transition-all shadow-sm border ${
+                    selectedUser.user_plans?.doctor_review
+                      ? 'bg-emerald-400 text-emerald-950 border-emerald-300 hover:bg-emerald-300'
+                      : 'bg-white/20 text-white border-white/40 hover:bg-white/30 backdrop-blur-md'
+                  }`}
+                >
+                  {togglingUserIds[selectedUser.id] ? (
+                    <Loader2 className="w-4 h-4 animate-spin text-current" />
+                  ) : selectedUser.user_plans?.doctor_review ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-950" />
+                  ) : (
+                    <Stethoscope className="w-4 h-4 text-white" />
+                  )}
+                  {selectedUser.user_plans?.doctor_review ? 'Doctor Reviewed' : 'Mark as Reviewed'}
+                </button>
+
                 <Button
                   onClick={() => handleGeneratePlan('both')}
                   disabled={isGenerating}
