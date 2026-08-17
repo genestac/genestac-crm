@@ -479,6 +479,42 @@ async def save_whatsapp_config(
     
     return {"success": True}
 
+class OrderSettingsConfig(BaseModel):
+    order_review_notifications_enabled: bool
+
+@router.get("/order-settings")
+async def get_order_settings(
+    current_user: dict = Depends(get_current_user),
+    supabase: Client = Depends(get_supabase_client)
+):
+    if not is_admin(current_user, supabase):
+        raise HTTPException(status_code=403, detail="Not authorized.")
+    
+    res = supabase.table("global_settings").select("settings_value").eq("settings_key", "order_settings").execute()
+    
+    enabled = True # default true
+    if res.data and "order_review_notifications_enabled" in res.data[0].get("settings_value", {}):
+        enabled = res.data[0]["settings_value"]["order_review_notifications_enabled"]
+        
+    return {"order_review_notifications_enabled": enabled}
+
+@router.post("/order-settings")
+async def save_order_settings(
+    config: OrderSettingsConfig,
+    current_user: dict = Depends(get_current_user),
+    supabase: Client = Depends(get_supabase_client)
+):
+    if not is_admin(current_user, supabase):
+        raise HTTPException(status_code=403, detail="Not authorized.")
+        
+    supabase.table("global_settings").upsert({
+        "settings_key": "order_settings",
+        "settings_value": {"order_review_notifications_enabled": config.order_review_notifications_enabled}
+    }, on_conflict="settings_key").execute()
+    
+    return {"success": True}
+
+
 @router.post("/send-whatsapp-report")
 async def trigger_whatsapp_report(
     current_user: dict = Depends(get_current_user),

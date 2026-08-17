@@ -63,6 +63,58 @@ async def list_orders(current_user: dict=Depends(get_current_user), supabase: Cl
                 print(f'Error enriching orders user data: {e}')
                 traceback.print_exc()
     return {'data': orders_data}
+
+class OrderUpdate(BaseModel):
+    status: Optional[str] = None
+    prescription_status: Optional[str] = None
+    prescription_url: Optional[str] = None
+
+@router.put('/orders/{order_id}')
+async def update_order(order_id: str, update_data: OrderUpdate, current_user: dict=Depends(get_current_user), supabase: Client=Depends(get_supabase_client)):
+    admin = is_admin(current_user, supabase)
+    if not admin:
+        raise HTTPException(status_code=403, detail="Only admins can update orders")
+    
+    update_dict = {}
+    if update_data.status is not None:
+        update_dict['status'] = update_data.status
+    if update_data.prescription_status is not None:
+        update_dict['prescription_status'] = update_data.prescription_status
+    if update_data.prescription_url is not None:
+        update_dict['prescription_url'] = update_data.prescription_url
+        
+    if not update_dict:
+        return {'success': True}
+        
+    res = supabase.table('orders').update(update_dict).eq('id', order_id).execute()
+    if not res.data:
+        raise HTTPException(status_code=400, detail="Failed to update order")
+        
+    return {'success': True, 'data': res.data[0]}
+
+@router.post('/orders/{order_id}/prescription/upload')
+async def upload_order_prescription(order_id: str, file: UploadFile = File(...), current_user: dict=Depends(get_current_user), supabase: Client=Depends(get_supabase_client)):
+    admin = is_admin(current_user, supabase)
+    if not admin:
+        raise HTTPException(status_code=403, detail="Only admins can upload prescriptions")
+        
+    file_bytes = await file.read()
+    url = upload_file_to_cloudinary(file_bytes, folder="prescriptions")
+    
+    if not url:
+        raise HTTPException(status_code=500, detail="Failed to upload file")
+        
+    res = supabase.table('orders').update({
+        'prescription_url': url,
+        'prescription_status': 'pending_review',
+        'status': 'under_review'
+    }).eq('id', order_id).execute()
+    
+    if not res.data:
+        raise HTTPException(status_code=400, detail="Failed to update order with prescription")
+        
+    return {'success': True, 'url': url}
+
 @router.get('/carts')
 async def list_carts(current_user: dict=Depends(get_current_user), supabase: Client=Depends(get_supabase_client)):
     admin = is_admin(current_user, supabase)

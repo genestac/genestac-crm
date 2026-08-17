@@ -2,10 +2,22 @@ import { fetchAPI } from '@/utils/api'
 import { format } from 'date-fns'
 import { Badge } from '@/components/ui/badge'
 import { OrderDetailsSheet } from '@/app/sales/orders/order-details-sheet'
+import { NotificationToggle } from './notification-toggle'
+import { getOrderSettings } from './actions'
 
-export default async function OrdersPage() {
+import Link from 'next/link'
+
+export default async function OrdersPage({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
   const response = await fetchAPI('/api/sales/orders')
-  const orders = response?.data || []
+  let orders = response?.data || []
+  
+  const params = await searchParams;
+  const currentTab = params.tab || 'all'
+  if (currentTab === 'requests') {
+    orders = orders.filter((o: any) => o.status === 'under_review')
+  }
+
+  const settings = await getOrderSettings()
 
   const getStatusBadge = (status: string) => {
     switch (status?.toLowerCase()) {
@@ -13,6 +25,7 @@ export default async function OrdersPage() {
       case 'pending': return <Badge className="bg-yellow-100 text-yellow-800 hover:bg-yellow-100">Pending</Badge>
       case 'fulfilled': return <Badge className="bg-green-100 text-green-800 hover:bg-green-100">Fulfilled</Badge>
       case 'cancelled': return <Badge className="bg-red-100 text-red-800 hover:bg-red-100">Cancelled</Badge>
+      case 'under_review': return <Badge className="bg-purple-100 text-purple-800 hover:bg-purple-100">Rx Review</Badge>
       default: return <Badge variant="outline">{status}</Badge>
     }
   }
@@ -35,6 +48,16 @@ export default async function OrdersPage() {
           <p className="text-muted-foreground mt-2">
             View and manage all orders across the platform.
           </p>
+        </div>
+        <div className="flex items-center space-x-4">
+          <NotificationToggle initialEnabled={settings.order_review_notifications_enabled} />
+          <div className="flex bg-gray-100 p-1 rounded-lg">
+          <Link href="/admin/orders?tab=all" className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${currentTab === 'all' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+            All Orders
+          </Link>
+          <Link href="/admin/orders?tab=requests" className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${currentTab === 'requests' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+            Prescription Requests
+          </Link>
         </div>
       </div>
 
