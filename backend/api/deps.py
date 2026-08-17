@@ -31,10 +31,14 @@ def get_current_user(request: Request, supabase: Client = Depends(get_supabase_c
             raise credentials_exception
         token_data = TokenData(user_id=user_id)
     except JWTError as e:
-        import traceback, sys
-        err = traceback.format_exc()
-        print(f"JWT decode error: {err}")
-        sys.stdout.flush()
+        # Expired token is a normal/expected condition — log cleanly, no traceback
+        from jose.exceptions import ExpiredSignatureError
+        if isinstance(e, ExpiredSignatureError):
+            import logging
+            logging.getLogger("auth").warning("JWT token expired — client will be redirected to login.")
+        else:
+            import logging
+            logging.getLogger("auth").warning(f"JWT decode failed: {e}")
         raise credentials_exception
         
     # verify user exists in Supabase staffs table using service role (bypassing RLS)
