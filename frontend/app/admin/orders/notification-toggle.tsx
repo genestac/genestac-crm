@@ -4,7 +4,7 @@ import { useState, useTransition } from 'react'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
 import { updateOrderSettings } from './actions'
-import { toast } from 'react-hot-toast'
+import { toast } from 'sonner'
 import { Loader2 } from 'lucide-react'
 
 export function NotificationToggle({ initialEnabled }: { initialEnabled: boolean }) {

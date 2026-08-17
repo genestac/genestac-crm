@@ -60,6 +60,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
           </Link>
         </div>
       </div>
+      </div>
 
       <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
         {orders.length > 0 ? (
