@@ -1,14 +1,15 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
-import { Pencil, Package, Trash2, Plus } from 'lucide-react'
+import { Pencil, Package, Trash2, Plus, UploadCloud, X, Loader2 } from 'lucide-react'
 import { updateInventoryItem } from './actions'
+import { toast } from 'sonner'
 
 interface VariantRow {
   label: string
@@ -50,6 +51,41 @@ export function EditInventoryModal({ item }: { item: any }) {
     setVariants(prev => prev.map((v, idx) => idx === i ? { ...v, [field]: val } : v))
   }
 
+  // ── Image upload state ──
+  const [imageUrl, setImageUrl] = useState(item.image_url || '')
+  const [uploading, setUploading] = useState(false)
+  const [dragOver, setDragOver] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const uploadImage = useCallback(async (file: File) => {
+    setUploading(true)
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      const res = await fetch('/api/proxy/upload-inventory-image', { method: 'POST', body: fd })
+      if (!res.ok) throw new Error('Upload failed')
+      const data = await res.json()
+      setImageUrl(data.url)
+      toast.success('Image uploaded!')
+    } catch (err: any) {
+      toast.error('Upload failed: ' + err.message)
+    } finally {
+      setUploading(false)
+    }
+  }, [])
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    setDragOver(false)
+    const file = e.dataTransfer.files[0]
+    if (file && file.type.startsWith('image/')) uploadImage(file)
+  }, [uploadImage])
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) uploadImage(file)
+  }
+
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     setLoading(true)
@@ -64,12 +100,13 @@ export function EditInventoryModal({ item }: { item: any }) {
       manufacturer: fd.get('manufacturer') || null,
       category: fd.get('category') || null,
       sku: fd.get('sku') || null,
+      slug: fd.get('slug') || null,
       price: Number(fd.get('price')),
       compare_at_price: fd.get('compare_at_price') ? Number(fd.get('compare_at_price')) : null,
       stock_quantity: Number(fd.get('stock_quantity') || 0),
       min_stock_threshold: Number(fd.get('min_stock_threshold') || 10),
       requires_prescription: requiresRx,
-      image_url: fd.get('image_url') || null,
+      image_url: imageUrl || null,
       expiry_date: fd.get('expiry_date') || null,
       dosage_strength: fd.get('dosage_strength') || null,
       unit: fd.get('unit') || null,
@@ -93,9 +130,10 @@ export function EditInventoryModal({ item }: { item: any }) {
 
     try {
       await updateInventoryItem(item.id, payload)
+      toast.success('Product updated!')
       setOpen(false)
     } catch (err: any) {
-      alert(err.message)
+      toast.error(err.message)
     } finally {
       setLoading(false)
     }
@@ -136,6 +174,10 @@ export function EditInventoryModal({ item }: { item: any }) {
                 <div>
                   <Label>SKU</Label>
                   <Input name="sku" defaultValue={item.sku || ''} />
+                </div>
+                <div>
+                  <Label>Slug <span className="text-gray-400 font-normal">(URL-friendly, e.g. semaglutide-10mg)</span></Label>
+                  <Input name="slug" defaultValue={item.slug || ''} placeholder="auto-generated if blank" />
                 </div>
                 <div className="md:col-span-2">
                   <Label>Description</Label>
@@ -213,11 +255,52 @@ export function EditInventoryModal({ item }: { item: any }) {
             <div className="space-y-1">
               <p className="text-xs font-bold uppercase tracking-wider text-gray-400">Media & Tags</p>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
-                <div>
-                  <Label>Image URL</Label>
-                  <Input name="image_url" defaultValue={item.image_url || ''} />
+                {/* ── Drag & Drop Image Upload ── */}
+                <div className="md:col-span-2">
+                  <Label>Product Image</Label>
+                  <div
+                    onDrop={handleDrop}
+                    onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
+                    onDragLeave={() => setDragOver(false)}
+                    onClick={() => !imageUrl && fileInputRef.current?.click()}
+                    className={`mt-1 relative flex flex-col items-center justify-center border-2 border-dashed rounded-xl transition-colors cursor-pointer
+                      ${dragOver ? 'border-blue-400 bg-blue-50' : 'border-gray-200 bg-gray-50 hover:border-blue-300 hover:bg-blue-50/40'}
+                      ${imageUrl ? 'h-40' : 'h-32 py-6'}`}
+                  >
+                    <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
+                    {uploading ? (
+                      <div className="flex flex-col items-center gap-2 text-blue-500">
+                        <Loader2 className="w-6 h-6 animate-spin" />
+                        <span className="text-sm font-medium">Uploading…</span>
+                      </div>
+                    ) : imageUrl ? (
+                      <>
+                        <img src={imageUrl} alt="Product" className="h-full w-full object-contain rounded-lg" />
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); setImageUrl('') }}
+                          className="absolute top-2 right-2 bg-white border rounded-full p-1 shadow hover:bg-red-50 text-red-500 transition"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click() }}
+                          className="absolute bottom-2 right-2 bg-white border rounded-md px-2 py-1 text-xs text-gray-600 shadow hover:bg-gray-50 transition flex items-center gap-1"
+                        >
+                          <UploadCloud className="w-3 h-3" /> Change
+                        </button>
+                      </>
+                    ) : (
+                      <div className="flex flex-col items-center gap-2 text-gray-400 pointer-events-none">
+                        <UploadCloud className="w-7 h-7" />
+                        <span className="text-sm font-medium">Drag & drop or <span className="text-blue-500">click to upload</span></span>
+                        <span className="text-xs">PNG, JPG, WEBP up to 10MB</span>
+                      </div>
+                    )}
+                  </div>
                 </div>
-                <div>
+                <div className="md:col-span-2">
                   <Label>Tags</Label>
                   <Input name="tags" defaultValue={tagsStr} />
                 </div>

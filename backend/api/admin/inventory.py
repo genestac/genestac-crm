@@ -53,6 +53,7 @@ class UpdateInventoryRequest(BaseModel):
     manufacturer: Optional[str] = None
     category: Optional[str] = None
     sku: Optional[str] = None
+    slug: Optional[str] = None
     price: Optional[float] = None
     compare_at_price: Optional[float] = None
     stock_quantity: Optional[int] = None
