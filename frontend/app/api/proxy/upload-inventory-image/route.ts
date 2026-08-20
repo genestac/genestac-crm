@@ -8,6 +8,7 @@ export async function POST(req: NextRequest) {
   const token = cookieStore.get('access_token')?.value
 
   const formData = await req.formData()
+  formData.append('folder', 'inventory')
 
   const res = await fetch(`${API_BASE_URL}/api/admin/blogs/upload-image`, {
     method: 'POST',

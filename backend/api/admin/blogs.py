@@ -280,6 +280,7 @@ async def delete_blog(
 @router.post("/upload-image")
 async def upload_blog_image(
     file: UploadFile = File(...),
+    folder: str = Form("blogs"),
     current_user: dict = Depends(get_current_user),
 ):
     require_dm_role(current_user)
@@ -290,14 +291,23 @@ async def upload_blog_image(
             api_secret=settings.CLOUDINARY_API_SECRET,
         )
         contents = await file.read()
+        
+        # Ensure the folder is either blogs or inventory to prevent arbitrary folder creation
+        safe_folder = "inventory" if folder == "inventory" else "blogs"
+        
         result = cloudinary.uploader.upload(
             contents,
-            folder="genestac/blogs",
+            folder=f"genestac/{safe_folder}",
             resource_type="image",
             format="webp",
-            quality="auto:good",
+            quality="auto",
             transformation=[
-                {"fetch_format": "webp", "quality": "auto:good"},
+                {
+                    "width": 1200, 
+                    "crop": "limit",
+                    "fetch_format": "webp", 
+                    "quality": "auto"
+                }
             ],
         )
         return {"success": True, "url": result["secure_url"], "public_id": result["public_id"]}
