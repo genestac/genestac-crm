@@ -90,7 +90,13 @@ app.include_router(custom_fields.router, prefix="/api/admin/custom-fields", tags
 app.include_router(public.router, prefix="/api/public", tags=["public"])
 app.include_router(admin_proforma_routes.router, prefix="/api/v2/admin/proforma-invoices", tags=["admin-proformas"])
 app.include_router(invoice_settings_routes.router, prefix="/api/v2/admin/invoice-settings", tags=["admin-invoice-settings"])
+
+# ── Mobile App — AI Health Coach Chat ─────────────────────────────────────────
+from api.mobile import health_chat as mobile_health_chat
+app.include_router(mobile_health_chat.router, prefix="/api/mobile/health-chat", tags=["mobile-health-chat"])
+
 # Production deployment health check endpoint
 @app.get("/")
 def read_root():
     return {"message": "Welcome to Genestac API"}
+
