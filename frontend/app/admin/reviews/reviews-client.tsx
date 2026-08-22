@@ -189,7 +189,7 @@ export function ReviewsClient({ initialReviews, stats: initialStats, total: init
       setReviews(prev => prev.map(r => r.id === id ? { ...r, status, admin_note: note } : r))
       setStats(prev => ({
         ...prev,
-        pending: status === 'pending' ? prev.pending - 1 : prev.pending,
+        pending: prev.pending - 1,
         approved: status === 'approved' ? prev.approved + 1 : prev.approved,
         rejected: status === 'rejected' ? prev.rejected + 1 : prev.rejected,
       }))
