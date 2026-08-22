@@ -1,9 +1,9 @@
 'use client'
 import { useState, useEffect, useCallback } from 'react'
 import { getWhatsappConversations } from '@/app/sales/actions'
-import { getInactiveSubscriberConversations, backfillEngagementMessages } from '@/app/admin/whatsapp-actions'
+import { getInactiveSubscriberConversations } from '@/app/admin/whatsapp-actions'
 import { WhatsappChat } from '@/components/sales/whatsapp-chat'
-import { Loader2, Search, User, MessageCircle, Bell, Clock, Users, RefreshCw, CheckCircle2, AlertCircle } from 'lucide-react'
+import { Loader2, Search, User, MessageCircle, Bell, Clock, Users } from 'lucide-react'
 
 type ConversationEntry = {
   id: string
@@ -29,9 +29,6 @@ export default function WhatsappInboxPage() {
   const [activeLeadId, setActiveLeadId] = useState<string | null>(null)
   const [activeLeadName, setActiveLeadName] = useState<string>('Lead')
   const [activeTab, setActiveTab] = useState<ActiveTab>('all')
-  const [backfilling, setBackfilling] = useState(false)
-  const [backfillResult, setBackfillResult] = useState<{ success: boolean; message: string } | null>(null)
-
 
   const fetchAll = useCallback(async () => {
     const [convData, reminderData] = await Promise.all([
@@ -67,21 +64,6 @@ export default function WhatsappInboxPage() {
       return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     }
     return date.toLocaleDateString([], { month: 'short', day: 'numeric' })
-  }
-
-  const handleBackfill = async () => {
-    setBackfilling(true)
-    setBackfillResult(null)
-    try {
-      const res = await backfillEngagementMessages()
-      setBackfillResult({ success: true, message: res.message || `Updated ${res.updated} message(s).` })
-      // Refresh conversations to show new content
-      await fetchAll()
-    } catch (err: any) {
-      setBackfillResult({ success: false, message: err.message || 'Backfill failed.' })
-    } finally {
-      setBackfilling(false)
-    }
   }
 
   const displayList = activeTab === 'all' ? filteredConversations : filteredReminders
@@ -149,46 +131,15 @@ export default function WhatsappInboxPage() {
           </div>
         </div>
 
-        {/* Reminders Tab Info Banner + Backfill Button */}
+        {/* Reminders Tab Info Banner */}
         {activeTab === 'reminders' && !loading && (
-          <div className="bg-amber-50 border-b border-amber-100 px-4 py-2.5 flex-shrink-0 space-y-2">
-            <div className="flex items-center justify-between gap-2">
-              <p className="text-xs text-amber-700 font-medium flex items-center gap-1.5">
-                <Bell className="w-3.5 h-3.5 flex-shrink-0" />
-                Subscribed users who haven't engaged since joining
-              </p>
-              <button
-                onClick={handleBackfill}
-                disabled={backfilling}
-                title="Populate older placeholder messages with real template content"
-                className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-60 transition-colors whitespace-nowrap flex-shrink-0"
-              >
-                {backfilling
-                  ? <><Loader2 className="w-3 h-3 animate-spin" /> Populating…</>
-                  : <><RefreshCw className="w-3 h-3" /> Populate Old Messages</>
-                }
-              </button>
-            </div>
-            {backfillResult && (
-              <div className={`flex items-center gap-2 text-xs rounded-lg px-3 py-1.5 ${
-                backfillResult.success
-                  ? 'bg-green-50 text-green-700 border border-green-200'
-                  : 'bg-red-50 text-red-700 border border-red-200'
-              }`}>
-                {backfillResult.success
-                  ? <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" />
-                  : <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
-                }
-                <span>{backfillResult.message}</span>
-                <button
-                  onClick={() => setBackfillResult(null)}
-                  className="ml-auto text-current opacity-60 hover:opacity-100"
-                >✕</button>
-              </div>
-            )}
+          <div className="bg-amber-50 border-b border-amber-100 px-4 py-2 flex-shrink-0">
+            <p className="text-xs text-amber-700 font-medium flex items-center gap-1.5">
+              <Bell className="w-3.5 h-3.5 flex-shrink-0" />
+              Subscribed users who haven't engaged since joining
+            </p>
           </div>
         )}
-
 
         {/* Conversation List */}
         <div className="flex-1 overflow-y-auto scrollbar-thin">

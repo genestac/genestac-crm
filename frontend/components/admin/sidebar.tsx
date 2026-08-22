@@ -25,7 +25,8 @@ import {
   PhoneCall,
   ListOrdered,
   ChevronDown,
-  ChevronRight
+  ChevronRight,
+  Star
 } from 'lucide-react'
 import { logout } from '@/app/auth/actions'
 
@@ -49,6 +50,7 @@ const modules: { title: string; routes: RouteItem[] }[] = [
       { name: 'Orders', path: '/admin/orders', icon: ShoppingCart },
       { name: 'Abandoned Carts', path: '/admin/carts', icon: ShoppingCart },
       { name: 'Inventory', path: '/admin/inventory', icon: Box },
+      { name: 'Reviews', path: '/admin/reviews', icon: Star },
       { name: 'Logistics', path: '/admin/logistics', icon: Truck },
     ]
   },

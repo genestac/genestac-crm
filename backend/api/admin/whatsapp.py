@@ -557,8 +557,31 @@ async def webhook_handler(payload: dict, background_tasks: BackgroundTasks, supa
                             
                             # Check for STOP intent
                             if text_body.lower() in ["stop", "unsubscribe", "cancel"]:
-                                supabase.table("leads").update({"whatsapp_opt_out": True}).eq("phone_number", f"+{clean_phone}").execute()
+                                # Opt out leads table
+                                supabase.table("leads").update({"whatsapp_opt_out": True}).ilike("phone_number", f"%{clean_phone}%").execute()
+                                # Opt out subscribed users via metadata flag
+                                u_res = supabase.table("users").select("id, metadata").ilike("phone", f"%{clean_phone}%").execute()
+                                for u_row in (u_res.data or []):
+                                    meta = u_row.get("metadata") or {}
+                                    meta["engagement_opted_out"] = True
+                                    supabase.table("users").update({"metadata": meta}).eq("id", u_row["id"]).execute()
+                                # Send confirmation
+                                await send_whatsapp_text(f"{clean_phone}", "You have been unsubscribed from Genestac health reminders. Reply START anytime to re-enable them. \U0001f64f")
                                 print(f"[WhatsApp Webhook] Opted out phone: {clean_phone}")
+                                continue
+
+                            # Check for START / re-subscribe intent
+                            if text_body.lower() in ["start", "subscribe", "yes"]:
+                                # Re-enable leads
+                                supabase.table("leads").update({"whatsapp_opt_out": False}).ilike("phone_number", f"%{clean_phone}%").execute()
+                                # Re-enable subscribed users
+                                u_res = supabase.table("users").select("id, metadata").ilike("phone", f"%{clean_phone}%").execute()
+                                for u_row in (u_res.data or []):
+                                    meta = u_row.get("metadata") or {}
+                                    meta["engagement_opted_out"] = False
+                                    supabase.table("users").update({"metadata": meta}).eq("id", u_row["id"]).execute()
+                                await send_whatsapp_text(f"{clean_phone}", "Welcome back! \U0001f44b You are now re-subscribed to daily health reminders from Genestac. Keep logging to stay on track! \U0001f4aa")
+                                print(f"[WhatsApp Webhook] Re-subscribed phone: {clean_phone}")
                                 continue
                                 
                             # ----- State Machine Logic -----

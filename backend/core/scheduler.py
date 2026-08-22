@@ -765,6 +765,13 @@ def sweep_subscriber_engagement():
                 if user_id in recently_nudged_ids:
                     continue
 
+                # Skip if user opted out via STOP
+                user_meta_res = supabase.table("users").select("metadata").eq("id", user_id).single().execute()
+                user_metadata = (user_meta_res.data or {}).get("metadata") or {}
+                if user_metadata.get("engagement_opted_out"):
+                    print(f"[Subscriber Engagement] ⏭️ Skipping {name} — opted out")
+                    continue
+
                 # 5. Fetch user_plans row
                 plan_res = supabase.table("user_plans").select(
                     "water_history, sleep_history, steps_history, measurement_history"

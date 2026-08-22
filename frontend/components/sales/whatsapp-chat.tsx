@@ -71,6 +71,21 @@ export function WhatsappChat({ leadId, leadName: initialLeadName, showManageButt
   const autoDismiss = (setter: (v: BtnState) => void) =>
     setTimeout(() => setter(null), 2500)
 
+  /** Returns 'Today', 'Yesterday', or a locale date string for date separators */
+  const getDateLabel = (isoString: string): string => {
+    const msgDate   = new Date(isoString)
+    const today     = new Date()
+    const yesterday = new Date()
+    yesterday.setDate(today.getDate() - 1)
+    const sameDay = (a: Date, b: Date) =>
+      a.getFullYear() === b.getFullYear() &&
+      a.getMonth()    === b.getMonth()    &&
+      a.getDate()     === b.getDate()
+    if (sameDay(msgDate, today))     return 'Today'
+    if (sameDay(msgDate, yesterday)) return 'Yesterday'
+    return msgDate.toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })
+  }
+
   const fetchChats = async () => {
     try {
       const res = await getWhatsappChats(leadId)
@@ -468,78 +483,94 @@ export function WhatsappChat({ leadId, leadName: initialLeadName, showManageButt
             No messages found. Say hi!
           </div>
         ) : (
-          messages.map((msg) => {
+          messages.map((msg, idx) => {
             const isMe = msg.sender_type === 'bot' || msg.sender_type === 'admin'
-            const isHovered = hoveredId === msg.id
-            const isDeleting = deletingId === msg.id
+            const isHovered    = hoveredId      === msg.id
+            const isDeleting   = deletingId     === msg.id
             const isConfirming = deleteConfirmId === msg.id
 
+            // ── Date separator ─────────────────────────────────────────
+            const currentLabel  = getDateLabel(msg.created_at)
+            const prevLabel     = idx > 0 ? getDateLabel(messages[idx - 1].created_at) : null
+            const showSeparator = currentLabel !== prevLabel
+
             return (
-              <div
-                key={msg.id}
-                className={`flex ${isMe ? 'justify-end' : 'justify-start'} items-center gap-1`}
-                onMouseEnter={() => setHoveredId(msg.id)}
-                onMouseLeave={() => setHoveredId(null)}
-              >
-                {/* Left delete controls (incoming) */}
-                {!isMe && (
-                  <div className={`flex items-center gap-0.5 shrink-0 transition-all duration-150 ${isHovered || isConfirming ? 'opacity-100' : 'opacity-0'}`}>
-                    {isConfirming ? (
-                      <>
-                        <button onClick={() => handleDeleteConfirm(msg.id)} className="p-1 rounded-full bg-red-500 text-white hover:bg-red-600 transition shadow-sm" title="Yes, delete">
-                          <Check className="w-3 h-3" />
-                        </button>
-                        <button onClick={() => setDeleteConfirmId(null)} className="p-1 rounded-full bg-gray-400 text-white hover:bg-gray-500 transition shadow-sm" title="Cancel">
-                          <X className="w-3 h-3" />
-                        </button>
-                      </>
-                    ) : isDeleting ? (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin text-gray-400 mx-1" />
-                    ) : (
-                      <button onClick={() => handleDeleteClick(msg.id)} className="p-1 rounded-full bg-white/80 text-red-400 hover:text-red-600 hover:bg-white shadow-sm transition" title="Delete message">
-                        <Trash2 className="w-3 h-3" />
-                      </button>
-                    )}
+              <>
+                {/* WhatsApp-style date pill */}
+                {showSeparator && (
+                  <div key={`sep-${msg.id}`} className="flex justify-center my-2">
+                    <span className="bg-[#e1f2fb]/90 text-[#54656f] text-[11.5px] font-medium px-3 py-1 rounded-full shadow-sm select-none backdrop-blur-sm">
+                      {currentLabel}
+                    </span>
                   </div>
                 )}
 
-                {/* Message bubble */}
-                <div className={`max-w-[75%] rounded-lg px-3 py-2 shadow-sm relative ${isMe ? 'bg-[#dcf8c6] rounded-tr-none' : 'bg-white rounded-tl-none'} ${isDeleting ? 'opacity-40 pointer-events-none' : ''}`}>
-                  {msg.sender_type === 'bot' && (
-                    <div className="text-[10px] text-primary flex items-center gap-1 font-semibold mb-1"><Bot className="w-3 h-3" /> AI Bot</div>
+                <div
+                  key={msg.id}
+                  className={`flex ${isMe ? 'justify-end' : 'justify-start'} items-center gap-1`}
+                  onMouseEnter={() => setHoveredId(msg.id)}
+                  onMouseLeave={() => setHoveredId(null)}
+                >
+                  {/* Left delete controls (incoming) */}
+                  {!isMe && (
+                    <div className={`flex items-center gap-0.5 shrink-0 transition-all duration-150 ${isHovered || isConfirming ? 'opacity-100' : 'opacity-0'}`}>
+                      {isConfirming ? (
+                        <>
+                          <button onClick={() => handleDeleteConfirm(msg.id)} className="p-1 rounded-full bg-red-500 text-white hover:bg-red-600 transition shadow-sm" title="Yes, delete">
+                            <Check className="w-3 h-3" />
+                          </button>
+                          <button onClick={() => setDeleteConfirmId(null)} className="p-1 rounded-full bg-gray-400 text-white hover:bg-gray-500 transition shadow-sm" title="Cancel">
+                            <X className="w-3 h-3" />
+                          </button>
+                        </>
+                      ) : isDeleting ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin text-gray-400 mx-1" />
+                      ) : (
+                        <button onClick={() => handleDeleteClick(msg.id)} className="p-1 rounded-full bg-white/80 text-red-400 hover:text-red-600 hover:bg-white shadow-sm transition" title="Delete message">
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      )}
+                    </div>
                   )}
-                  {msg.sender_type === 'admin' && (
-                    <div className="text-[10px] text-gray-500 flex items-center gap-1 font-semibold mb-1"><User className="w-3 h-3" /> You (Admin)</div>
-                  )}
-                  <div className="text-[15px] text-gray-800 break-words whitespace-pre-wrap">{msg.message_body}</div>
-                  <div className="text-[10px] text-gray-500 text-right mt-1 flex justify-end items-center gap-1">
-                    {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    {isMe && <CheckCheck className="w-3 h-3 text-blue-500" />}
+
+                  {/* Message bubble */}
+                  <div className={`max-w-[75%] rounded-lg px-3 py-2 shadow-sm relative ${isMe ? 'bg-[#dcf8c6] rounded-tr-none' : 'bg-white rounded-tl-none'} ${isDeleting ? 'opacity-40 pointer-events-none' : ''}`}>
+                    {msg.sender_type === 'bot' && (
+                      <div className="text-[10px] text-primary flex items-center gap-1 font-semibold mb-1"><Bot className="w-3 h-3" /> AI Bot</div>
+                    )}
+                    {msg.sender_type === 'admin' && (
+                      <div className="text-[10px] text-gray-500 flex items-center gap-1 font-semibold mb-1"><User className="w-3 h-3" /> You (Admin)</div>
+                    )}
+                    <div className="text-[15px] text-gray-800 break-words whitespace-pre-wrap">{msg.message_body}</div>
+                    <div className="text-[10px] text-gray-500 text-right mt-1 flex justify-end items-center gap-1">
+                      {new Date(msg.created_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })}
+                      {isMe && <CheckCheck className="w-3 h-3 text-blue-500" />}
+                    </div>
                   </div>
+
+                  {/* Right delete controls (outgoing) */}
+                  {isMe && (
+                    <div className={`flex items-center gap-0.5 shrink-0 transition-all duration-150 ${isHovered || isConfirming ? 'opacity-100' : 'opacity-0'}`}>
+                      {isConfirming ? (
+                        <>
+                          <button onClick={() => handleDeleteConfirm(msg.id)} className="p-1 rounded-full bg-red-500 text-white hover:bg-red-600 transition shadow-sm" title="Yes, delete">
+                            <Check className="w-3 h-3" />
+                          </button>
+                          <button onClick={() => setDeleteConfirmId(null)} className="p-1 rounded-full bg-gray-400 text-white hover:bg-gray-500 transition shadow-sm" title="Cancel">
+                            <X className="w-3 h-3" />
+                          </button>
+                        </>
+                      ) : isDeleting ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin text-gray-400 mx-1" />
+                      ) : (
+                        <button onClick={() => handleDeleteClick(msg.id)} className="p-1 rounded-full bg-white/80 text-red-400 hover:text-red-600 hover:bg-white shadow-sm transition" title="Delete message">
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
-
-                {/* Right delete controls (outgoing) */}
-                {isMe && (
-                  <div className={`flex items-center gap-0.5 shrink-0 transition-all duration-150 ${isHovered || isConfirming ? 'opacity-100' : 'opacity-0'}`}>
-                    {isConfirming ? (
-                      <>
-                        <button onClick={() => handleDeleteConfirm(msg.id)} className="p-1 rounded-full bg-red-500 text-white hover:bg-red-600 transition shadow-sm" title="Yes, delete">
-                          <Check className="w-3 h-3" />
-                        </button>
-                        <button onClick={() => setDeleteConfirmId(null)} className="p-1 rounded-full bg-gray-400 text-white hover:bg-gray-500 transition shadow-sm" title="Cancel">
-                          <X className="w-3 h-3" />
-                        </button>
-                      </>
-                    ) : isDeleting ? (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin text-gray-400 mx-1" />
-                    ) : (
-                      <button onClick={() => handleDeleteClick(msg.id)} className="p-1 rounded-full bg-white/80 text-red-400 hover:text-red-600 hover:bg-white shadow-sm transition" title="Delete message">
-                        <Trash2 className="w-3 h-3" />
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
+              </>
             )
           })
         )}

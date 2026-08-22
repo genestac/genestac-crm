@@ -175,18 +175,3 @@ export async function getInactiveSubscriberConversations() {
     return []
   }
 }
-
-export async function backfillEngagementMessages() {
-  try {
-    const response = await fetchAPI('/api/admin/whatsapp/chat/backfill-engagement-messages', {
-      method: 'POST',
-      headers: { 'Cookie': (await cookies()).toString() },
-    })
-    return response
-  } catch (error: any) {
-    console.error('Failed to backfill engagement messages:', error)
-    throw new Error(error.message || 'Backfill failed')
-  }
-}
-
-
