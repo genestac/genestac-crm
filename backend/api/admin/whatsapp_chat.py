@@ -3,10 +3,12 @@ from pydantic import BaseModel
 from supabase import Client
 from db.supabase import get_supabase_client
 from api.deps import get_current_user
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from services.whatsapp_service import send_whatsapp_text
+from datetime import datetime, timezone
 
 router = APIRouter()
+
 
 @router.get("/conversations")
 async def get_conversations(
@@ -82,10 +84,239 @@ async def get_conversations(
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.post("/backfill-engagement-messages")
+async def backfill_engagement_messages(
+    current_user: dict = Depends(get_current_user),
+    supabase: Client = Depends(get_supabase_client)
+):
+    """
+    One-time (idempotent) backfill: finds all whatsapp_messages where message_body
+    matches the old placeholder format '[Engagement: <template_name>]' and replaces
+    them with the real template content (with user name filled in where possible).
+    Safe to re-run — only processes unprocessed placeholder rows.
+    """
+    try:
+        import re
+
+        # 1. Fetch all placeholder messages (old format)
+        placeholder_pattern = "[Engagement:"
+        msgs_res = supabase.table("whatsapp_messages") \
+            .select("id, user_id, lead_id, message_body, sender_type") \
+            .like("message_body", f"{placeholder_pattern}%") \
+            .order("created_at", desc=False) \
+            .execute()
+
+        old_msgs = msgs_res.data or []
+        if not old_msgs:
+            return {"success": True, "updated": 0, "message": "No old placeholder messages found. Already up to date!"}
+
+        # 2. Extract unique template names from placeholders
+        #    Format: [Engagement: some_template_name]
+        template_name_set: set = set()
+        for msg in old_msgs:
+            body = msg.get("message_body", "")
+            m = re.match(r"\[Engagement:\s*(.+?)\]", body)
+            if m:
+                template_name_set.add(m.group(1).strip())
+
+        # 3. Load all matching templates by name
+        template_map: Dict[str, str] = {}  # name -> content
+        if template_name_set:
+            t_res = supabase.table("whatsapp_templates") \
+                .select("name, content") \
+                .in_("name", list(template_name_set)) \
+                .execute()
+            for t in (t_res.data or []):
+                template_map[t["name"]] = t.get("content") or ""
+
+        # 4. Load user names for personalisation
+        user_ids = list({msg["user_id"] for msg in old_msgs if msg.get("user_id")})
+        lead_ids = list({msg["lead_id"] for msg in old_msgs if msg.get("lead_id")})
+
+        user_name_map: Dict[str, str] = {}
+        if user_ids:
+            u_res = supabase.table("users").select("id, name").in_("id", user_ids).execute()
+            for u in (u_res.data or []):
+                user_name_map[u["id"]] = u.get("name") or "there"
+        if lead_ids:
+            l_res = supabase.table("leads").select("id, name").in_("id", lead_ids).execute()
+            for l in (l_res.data or []):
+                user_name_map[l["id"]] = l.get("name") or "there"
+
+        # 5. Update each message
+        updated = 0
+        for msg in old_msgs:
+            body = msg.get("message_body", "")
+            m = re.match(r"\[Engagement:\s*(.+?)\]", body)
+            if not m:
+                continue
+
+            t_name = m.group(1).strip()
+            content = template_map.get(t_name, "")
+            if not content:
+                # Template not found — use a clean label instead of raw placeholder
+                content = f"📩 Automated reminder sent via WhatsApp template: {t_name}"
+
+            # Fill in {{1}} with the user/lead name if available
+            person_id = msg.get("user_id") or msg.get("lead_id")
+            name = user_name_map.get(person_id, "there") if person_id else "there"
+            first_name = name.split()[0] if name and name != "there" else name
+
+            # Replace common single-variable templates ({{1}} = name)
+            filled = content
+            filled = re.sub(r"\{\{1\}\}", first_name, filled)
+            filled = re.sub(r"\{\{2\}\}", name, filled)
+            # Leave remaining {{N}} placeholders as-is (we don't have history data)
+
+            supabase.table("whatsapp_messages") \
+                .update({
+                    "message_body": filled,
+                    "metadata": {
+                        "backfilled": True,
+                        "original_placeholder": body,
+                        "template_name": t_name
+                    }
+                }) \
+                .eq("id", msg["id"]) \
+                .execute()
+            updated += 1
+
+        return {
+            "success": True,
+            "updated": updated,
+            "message": f"Successfully backfilled {updated} old reminder message(s)."
+        }
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/reminder-subscribers")
+async def get_reminder_subscribers(
+    current_user: dict = Depends(get_current_user),
+    supabase: Client = Depends(get_supabase_client)
+):
+    """
+    Returns active subscribed users who haven't sent any WhatsApp message
+    since their subscription start date (i.e. they haven't 'logged in' / engaged
+    via WhatsApp since subscribing).
+    These are surfaced in the inbox as reminder entries.
+    """
+    try:
+        # 1. Fetch all active subscriptions with user data and start_date
+        subs_res = supabase.table("subscriptions") \
+            .select("user_id, start_date, created_at, users(id, name, phone)") \
+            .eq("status", "active") \
+            .order("created_at", desc=True) \
+            .execute()
+        subs = subs_res.data or []
+
+        if not subs:
+            return {"data": []}
+
+        # Build a map of user_id -> subscription info (keep earliest start_date per user)
+        user_sub_map: Dict[str, dict] = {}
+        for sub in subs:
+            uid = sub.get("user_id")
+            if not uid:
+                continue
+            # Use subscription start_date (or created_at as fallback) as threshold
+            threshold = sub.get("start_date") or sub.get("created_at", "")[:10]
+            if uid not in user_sub_map or threshold < user_sub_map[uid]["threshold"]:
+                user_sub_map[uid] = {
+                    "user_id": uid,
+                    "threshold": threshold,
+                    "user": sub.get("users") or {},
+                }
+
+        if not user_sub_map:
+            return {"data": []}
+
+        user_ids = list(user_sub_map.keys())
+
+        # 2. For each subscribed user, find their latest WhatsApp message sent BY THEM
+        #    (sender_type = 'lead' or 'user') since their subscription start date.
+        #    Also fetch the latest reminder message (sender_type = 'bot') for preview.
+        msgs_res = supabase.table("whatsapp_messages") \
+            .select("user_id, message_body, sender_type, created_at, metadata") \
+            .in_("user_id", user_ids) \
+            .order("created_at", desc=True) \
+            .limit(2000) \
+            .execute()
+        messages = msgs_res.data or []
+
+        # Group by user_id: track latest user-sent message and latest bot/reminder message
+        user_latest_user_msg: Dict[str, str] = {}   # user_id -> latest date they messaged
+        user_latest_reminder: Dict[str, dict] = {}   # user_id -> latest reminder message row
+
+        for msg in messages:
+            uid = msg.get("user_id")
+            if not uid or uid not in user_sub_map:
+                continue
+            sender = msg.get("sender_type", "")
+            msg_date = (msg.get("created_at") or "")[:10]
+
+            if sender in ("lead", "user"):
+                if uid not in user_latest_user_msg:
+                    user_latest_user_msg[uid] = msg_date
+            elif sender in ("bot", "admin", "system"):
+                if uid not in user_latest_reminder:
+                    user_latest_reminder[uid] = msg
+
+        # 3. Build the result: users whose latest user-message date is BEFORE their
+        #    subscription threshold (or who have never messaged at all).
+        result = []
+        for uid, info in user_sub_map.items():
+            threshold = info["threshold"]
+            latest_user_msg_date = user_latest_user_msg.get(uid)
+
+            # User has NOT engaged via WhatsApp since subscribing
+            has_engaged = latest_user_msg_date and latest_user_msg_date >= threshold
+            if has_engaged:
+                continue
+
+            user = info["user"]
+            reminder_msg = user_latest_reminder.get(uid)
+
+            # Calculate days since subscription started
+            try:
+                from datetime import date as _date
+                sub_date = _date.fromisoformat(threshold)
+                days_inactive = (datetime.now(timezone.utc).date() - sub_date).days
+            except Exception:
+                days_inactive = 0
+
+            result.append({
+                "id": uid,
+                "is_user": True,
+                "is_reminder_subscriber": True,
+                "name": user.get("name") or "Unknown User",
+                "phone": user.get("phone"),
+                "subscription_start_date": threshold,
+                "days_inactive": days_inactive,
+                "last_message": reminder_msg["message_body"] if reminder_msg else "No messages yet",
+                "last_message_time": reminder_msg["created_at"] if reminder_msg else info.get("threshold") + "T00:00:00Z",
+                "sender_type": "bot" if reminder_msg else None,
+                "bot_paused": False,
+            })
+
+        # Sort by days_inactive descending (most inactive first)
+        result.sort(key=lambda x: x["days_inactive"], reverse=True)
+
+        return {"data": result}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/{lead_id}")
 async def get_whatsapp_chat(
     lead_id: str,
     current_user: dict = Depends(get_current_user),
+
     supabase: Client = Depends(get_supabase_client)
 ):
     """Get the full chat history for a lead/user, plus abuse-block status."""

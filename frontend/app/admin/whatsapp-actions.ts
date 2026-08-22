@@ -162,3 +162,31 @@ export async function updateSubscriberEngagementSettings(settings: {
   revalidatePath('/admin/whatsapp')
   return response.data
 }
+
+export async function getInactiveSubscriberConversations() {
+  try {
+    const response = await fetchAPI('/api/admin/whatsapp/chat/reminder-subscribers', {
+      headers: { 'Cookie': (await cookies()).toString() },
+      next: { revalidate: 30 }
+    })
+    return response.data || []
+  } catch (error) {
+    console.error('Failed to get inactive subscriber conversations:', error)
+    return []
+  }
+}
+
+export async function backfillEngagementMessages() {
+  try {
+    const response = await fetchAPI('/api/admin/whatsapp/chat/backfill-engagement-messages', {
+      method: 'POST',
+      headers: { 'Cookie': (await cookies()).toString() },
+    })
+    return response
+  } catch (error: any) {
+    console.error('Failed to backfill engagement messages:', error)
+    throw new Error(error.message || 'Backfill failed')
+  }
+}
+
+

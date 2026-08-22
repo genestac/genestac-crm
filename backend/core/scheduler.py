@@ -735,7 +735,7 @@ def sweep_subscriber_engagement():
         template_names = {}
         template_ids_needed = [tid for tid in [reminder_template_id, motivation_template_id] if tid]
         if template_ids_needed:
-            t_res = supabase.table("whatsapp_templates").select("id, name, language, default_components").in_("id", template_ids_needed).execute()
+            t_res = supabase.table("whatsapp_templates").select("id, name, language, default_components, content").in_("id", template_ids_needed).execute()
             for t in (t_res.data or []):
                 template_names[t["id"]] = t
 
@@ -893,12 +893,39 @@ def sweep_subscriber_engagement():
                         "status": "SENT",
                         "campaign_id": None
                     }).execute()
-                    # Optionally log to chat inbox
+                    # Build a human-readable body by filling subscriber_vars into the template content
+                    raw_content = template_info.get("content") or ""
+                    try:
+                        # Replace {{1}}, {{2}} ... with actual values using variable_mappings
+                        import re as _re
+                        readable_body = raw_content
+                        sorted_slots_for_body = sorted(
+                            mappings_for_type.keys(),
+                            key=lambda x: int(x) if x.isdigit() else 99
+                        ) if mappings_for_type else []
+                        for slot in sorted_slots_for_body:
+                            field_key = mappings_for_type[slot]
+                            value = subscriber_vars.get(field_key, field_key)
+                            readable_body = _re.sub(
+                                rf"\{{\{{{slot}\}}\}}",
+                                lambda m, v=value: v,
+                                readable_body
+                            )
+                        if not readable_body.strip():
+                            readable_body = f"[Reminder: {template_name}]"
+                    except Exception:
+                        readable_body = f"[Reminder: {template_name}]"
+                    # Save real message body to inbox so it appears in WhatsApp Inbox
                     try:
                         supabase.table("whatsapp_messages").insert({
                             "user_id": user_id,
-                            "message_body": f"[Engagement: {template_name}]",
-                            "sender_type": "bot"
+                            "message_body": readable_body,
+                            "sender_type": "bot",
+                            "metadata": {
+                                "engagement_type": send_reason,
+                                "template_name": template_name,
+                                "is_reminder": True
+                            }
                         }).execute()
                     except Exception:
                         pass
