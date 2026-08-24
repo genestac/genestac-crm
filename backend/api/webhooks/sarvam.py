@@ -1144,7 +1144,27 @@ Rules:
             print(f"[Sarvam/post-call] GPT/scoring FAILED: {score_err}")
             print(traceback.format_exc())
 
-    # ── Save call log ──────────────────────────────────────────────────────
+    # ── Mobile Health Plan Generation (active mobile subscribers only) ─────────
+    # Fire-and-forget: generates diet+exercise plan, saves to ai_doctor_sessions,
+    # sends Expo push notification. Runs asynchronously so it never blocks this task.
+    if has_user_turn:
+        try:
+            from api.mobile.post_call_health import generate_and_save_health_plan
+            asyncio.ensure_future(generate_and_save_health_plan(
+                user_id=lead_id,
+                transcript=transcript,
+                extracted_data={
+                    "lead_name": lead_name,
+                    "weight_goal": locals().get("weight_goal"),
+                    "current_weight": locals().get("current_weight"),
+                    "health_concerns": locals().get("health_concerns"),
+                },
+            ))
+            print(f"[Sarvam/post-call] Mobile health plan generation queued for user {lead_id}")
+        except Exception as hp_err:
+            print(f"[Sarvam/post-call] Health plan hook failed (non-fatal): {hp_err}")
+
+
     log_payload: dict[str, Any] = {
         "transcript": transcript,
         "summary":    summary,

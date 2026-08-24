@@ -26,7 +26,9 @@ import {
   ListOrdered,
   ChevronDown,
   ChevronRight,
-  Star
+  Star,
+  Megaphone,
+  Bell
 } from 'lucide-react'
 import { logout } from '@/app/auth/actions'
 
@@ -59,6 +61,7 @@ const modules: { title: string; routes: RouteItem[] }[] = [
     routes: [
       { name: 'WhatsApp Campaigns', path: '/admin/whatsapp', icon: MessageCircle },
       { name: 'WhatsApp Inbox', path: '/admin/whatsapp-inbox', icon: MessageCircle },
+      { name: 'Push Notifications', path: '/admin/push-notifications', icon: Megaphone },
     ]
   },
   {

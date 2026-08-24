@@ -1021,6 +1021,212 @@ def geocode_missing_cities():
     except Exception as e:
         print(f"[Geocode] Error in background task: {e}")
 
+
+
+def sweep_ai_health_coach_nudges():
+    """
+    Runs every minute, fires at 9:00 AM IST once per day.
+
+    For each user with an ACTIVE mobile subscription:
+      1. Fetch their recent daily_logs and ai_doctor_sessions context
+      2. Generate a personalised AI health coach check-in via GPT-4o
+      3. Append the message to ai_doctor_sessions (appears in app chat)
+      4. Send an Expo push notification
+
+    Skips users who were already nudged today.
+    """
+    import pytz
+    ist = pytz.timezone("Asia/Kolkata")
+    now_ist = datetime.datetime.now(ist)
+    current_time_str = now_ist.strftime("%H:%M")
+
+    # Only fire at 09:00 IST
+    NUDGE_HOUR = "09:00"
+    if current_time_str != NUDGE_HOUR:
+        return
+
+    try:
+        supabase = get_supabase_client()
+        import asyncio, json, os
+        import openai as _openai
+
+        # ── Fetch all active mobile subscriptions ─────────────────────────────
+        subs_res = supabase.table("subscriptions") \
+            .select("user_id, end_date, users(name, metadata)") \
+            .eq("status", "active") \
+            .execute()
+
+        mobile_subs = [
+            s for s in (subs_res.data or [])
+            if (s.get("plan_type") or "").lower() in ("mobile", "app", "digital", "online")
+        ]
+
+        # Fallback: if plan_type column missing, include all active subs
+        if not mobile_subs:
+            mobile_subs = subs_res.data or []
+
+        if not mobile_subs:
+            return
+
+        print(f"[AI Coach Nudge] Checking {len(mobile_subs)} active subscribers...")
+        today_str = now_ist.date().isoformat()
+
+        async def _nudge_user(sub: dict):
+            user_id = sub.get("user_id")
+            user_info = sub.get("users") or {}
+            name = user_info.get("name") or "there"
+            meta = user_info.get("metadata") or {}
+            push_token = meta.get("expo_push_token")
+
+            if not user_id:
+                return
+
+            # ── Check if already nudged today ─────────────────────────────────
+            session_res = supabase.table("ai_doctor_sessions") \
+                .select("messages, updated_at") \
+                .eq("user_id", user_id) \
+                .maybeSingle() \
+                .execute()
+
+            if session_res.data:
+                updated_at = (session_res.data.get("updated_at") or "")[:10]
+                if updated_at == today_str:
+                    return  # Already sent a message today
+
+            # ── Fetch last 3 messages for context ─────────────────────────────
+            existing_msgs = (session_res.data or {}).get("messages") or [] if session_res.data else []
+            last_3 = existing_msgs[-3:] if len(existing_msgs) >= 3 else existing_msgs
+            chat_context = "\n".join([
+                f"{m.get('role','?').capitalize()}: {m.get('content','')[:200]}"
+                for m in last_3
+            ])
+
+            # ── Fetch recent daily logs ───────────────────────────────────────
+            logs_res = supabase.table("daily_logs") \
+                .select("date, weight, mood, notes") \
+                .eq("user_id", user_id) \
+                .order("date", desc=True) \
+                .limit(3) \
+                .execute()
+            logs = logs_res.data or []
+            logged_yesterday = any(
+                (l.get("date") or "")[:10] == (now_ist.date() - datetime.timedelta(days=1)).isoformat()
+                for l in logs
+            )
+
+            # ── Fetch user plan for context ───────────────────────────────────
+            plan_ctx = ""
+            try:
+                plan_res = supabase.table("user_plans") \
+                    .select("diet_plan, exercise_plan") \
+                    .eq("user_id", user_id) \
+                    .maybeSingle() \
+                    .execute()
+                if plan_res.data:
+                    diet = plan_res.data.get("diet_plan") or {}
+                    plan_ctx = f"User has a diet plan targeting {diet.get('daily_calories', '')} calories/day."
+            except Exception:
+                pass
+
+            # ── Build prompt ──────────────────────────────────────────────────
+            day_of_week = now_ist.strftime("%A")
+            is_monday = day_of_week == "Monday"
+
+            prompt = f"""You are the Genestac AI Health Coach sending a daily check-in message to {name}.
+
+Context:
+- Today: {day_of_week}, {today_str}
+- {plan_ctx}
+- User logged activity yesterday: {logged_yesterday}
+- Recent chat:
+{chat_context or '(no previous conversation)'}
+- Recent logs: {json.dumps(logs[:2], default=str) if logs else 'None'}
+
+Task: Write a SHORT (2-4 sentences) personalised daily check-in message.
+Rules:
+- If logged yesterday → celebrate + motivate for today
+- If NOT logged yesterday → gentle reminder, not preachy
+- On Monday → ask a brief weekly check-in question about their weekend
+- Always specific to their plan and name
+- End with one actionable tip for the day
+- Warm, friendly tone — like a health-savvy friend
+- Use a relevant emoji at the start
+- Respond ONLY with the message text. No JSON, no labels."""
+
+            try:
+                oai = _openai.AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+                resp = await oai.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=150,
+                    temperature=0.8,
+                )
+                nudge_text = resp.choices[0].message.content.strip()
+            except Exception as e:
+                print(f"[AI Coach Nudge] GPT error for user {user_id}: {e}")
+                return
+
+            # ── Save message to ai_doctor_sessions ────────────────────────────
+            try:
+                import time
+                new_msg = {
+                    "id": f"nudge_{int(time.time())}",
+                    "role": "assistant",
+                    "content": nudge_text,
+                    "timestamp": int(time.time() * 1000),
+                }
+                if session_res.data:
+                    updated_msgs = list(existing_msgs) + [new_msg]
+                    supabase.table("ai_doctor_sessions").update({
+                        "messages": updated_msgs,
+                        "updated_at": datetime.datetime.now(pytz.timezone("UTC")).isoformat(),
+                    }).eq("user_id", user_id).execute()
+                else:
+                    supabase.table("ai_doctor_sessions").insert({
+                        "user_id": user_id,
+                        "messages": [new_msg],
+                    }).execute()
+                print(f"[AI Coach Nudge] ✅ Message saved for user {user_id}")
+            except Exception as e:
+                print(f"[AI Coach Nudge] Session update failed for user {user_id}: {e}")
+                return
+
+            # ── Send Expo push notification ───────────────────────────────────
+            if push_token and push_token.startswith("Exponent"):
+                try:
+                    import httpx as _httpx
+                    async with _httpx.AsyncClient(timeout=10) as client:
+                        await client.post(
+                            "https://exp.host/--/api/v2/push/send",
+                            json={
+                                "to": push_token,
+                                "title": "💬 Message from your Health Coach",
+                                "body": nudge_text[:100] + ("..." if len(nudge_text) > 100 else ""),
+                                "sound": "default",
+                                "data": {"screen": "ai-doctor-chat"},
+                            },
+                            headers={"Content-Type": "application/json"},
+                        )
+                    print(f"[AI Coach Nudge] Push sent to user {user_id}")
+                except Exception as e:
+                    print(f"[AI Coach Nudge] Push failed for user {user_id}: {e}")
+
+        # Run all nudges concurrently
+        async def _run_all():
+            tasks = [_nudge_user(s) for s in mobile_subs]
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+        asyncio.run(_run_all())
+        print(f"[AI Coach Nudge] ✅ Daily nudge sweep complete for {len(mobile_subs)} subscribers")
+
+    except _NETWORK_ERRORS as e:
+        print(f"[AI Coach Nudge] ⚠️ Network error: {type(e).__name__}")
+    except Exception as e:
+        import traceback
+        print(f"[AI Coach Nudge] ❌ Error: {e}")
+        traceback.print_exc()
+
+
 def start_scheduler():
     if not scheduler.running:
         # Sweep for auto-calls and pending callbacks every 5 minutes
@@ -1037,5 +1243,8 @@ def start_scheduler():
         scheduler.add_job(sweep_subscriber_engagement, 'interval', minutes=1, id="subscriber_engagement_sweep", replace_existing=True)
         # Background task to geocode lead cities for the heatmap
         scheduler.add_job(geocode_missing_cities, 'interval', hours=1, id="geocode_cities_sweep", replace_existing=True)
+        # AI Health Coach daily nudges — sends personalised check-in messages to mobile subscribers
+        scheduler.add_job(sweep_ai_health_coach_nudges, 'interval', minutes=1, id="ai_health_coach_nudges", replace_existing=True)
         scheduler.start()
         print("Started Background Scheduler for AI Voice Calling and WhatsApp.")
+

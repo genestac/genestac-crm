@@ -97,6 +97,19 @@ app.include_router(invoice_settings_routes.router, prefix="/api/v2/admin/invoice
 from api.mobile import health_chat as mobile_health_chat
 app.include_router(mobile_health_chat.router, prefix="/api/mobile/health-chat", tags=["mobile-health-chat"])
 
+# ── Mobile App — Expo Push Token Registration ──────────────────────────────────
+from api.mobile import push_tokens as mobile_push_tokens
+app.include_router(mobile_push_tokens.router, prefix="/api/mobile/register-push-token", tags=["mobile-push-tokens"])
+
+# ── Mobile App — Push Notification Test (DEV ONLY) ────────────────────
+from api.mobile import test_push as mobile_test_push
+app.include_router(mobile_test_push.router, prefix="/api/mobile/test-push", tags=["mobile-test-push"])
+
+
+# ── Admin — Push Notifications ────────────────────────────────────────────────
+from api.admin import push_notifications as admin_push_notifications
+app.include_router(admin_push_notifications.router, prefix="/api/admin/push-notifications", tags=["admin-push-notifications"])
+
 # Production deployment health check endpoint
 @app.get("/")
 def read_root():
