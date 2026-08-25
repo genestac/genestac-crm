@@ -12,8 +12,9 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 
-// API_URL: uses env var if set (production), falls back to local backend
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://127.0.0.1:8000'
+// All API calls go through the Next.js proxy so they work in production
+// without needing NEXT_PUBLIC_API_URL set in the browser.
+const PROXY = '/api/proxy/push-notifications'
 
 type NotifType = 'general' | 'offer' | 'health_tip' | 'system_update' | 'reminder'
 type TargetType = 'all' | 'subscribers' | 'specific'
@@ -72,7 +73,13 @@ export default function PushNotificationsPage() {
   const [loadingAnalytics, setLoadingAnalytics] = useState(false)
 
   const apiFetch = useCallback(async (path: string, opts?: RequestInit) => {
-    const res = await fetch(`${API_URL}${path}`, opts)
+    // Map backend paths to proxy endpoints
+    // GET  /api/admin/push-notifications/stats    → GET  /api/proxy/push-notifications?endpoint=stats
+    // POST /api/admin/push-notifications/send     → POST /api/proxy/push-notifications?endpoint=send
+    const endpoint = path.split('/').pop() ?? 'stats'
+    const method = opts?.method ?? 'GET'
+    const url = `${PROXY}?endpoint=${endpoint}`
+    const res = await fetch(url, opts ? { ...opts, method } : { method })
     if (!res.ok) throw new Error(`API ${path} returned ${res.status}`)
     return res.json()
   }, [])
