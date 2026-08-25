@@ -79,9 +79,9 @@ def _build_user_context(user_id: str) -> dict:
         # ── Basic user profile ────────────────────────────────────────────
         u = sb.table("users").select(
             "name, age, gender, phone, status, weight_loss_journey"
-        ).eq("id", user_id).maybeSingle().execute()
+        ).eq("id", user_id).limit(1).execute()
         if u.data:
-            ctx["user"] = u.data
+            ctx["user"] = u.data[0]
 
         # ── Health assessment ─────────────────────────────────────────────
         ha = sb.table("health_assessments").select(

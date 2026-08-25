@@ -1085,16 +1085,17 @@ def sweep_ai_health_coach_nudges():
             session_res = supabase.table("ai_doctor_sessions") \
                 .select("messages, updated_at") \
                 .eq("user_id", user_id) \
-                .maybeSingle() \
+                .limit(1) \
                 .execute()
+            session_row = session_res.data[0] if session_res.data else None
 
-            if session_res.data:
-                updated_at = (session_res.data.get("updated_at") or "")[:10]
+            if session_row:
+                updated_at = (session_row.get("updated_at") or "")[:10]
                 if updated_at == today_str:
                     return  # Already sent a message today
 
             # ── Fetch last 3 messages for context ─────────────────────────────
-            existing_msgs = (session_res.data or {}).get("messages") or [] if session_res.data else []
+            existing_msgs = (session_row or {}).get("messages") or [] if session_row else []
             last_3 = existing_msgs[-3:] if len(existing_msgs) >= 3 else existing_msgs
             chat_context = "\n".join([
                 f"{m.get('role','?').capitalize()}: {m.get('content','')[:200]}"
@@ -1120,10 +1121,11 @@ def sweep_ai_health_coach_nudges():
                 plan_res = supabase.table("user_plans") \
                     .select("diet_plan, exercise_plan") \
                     .eq("user_id", user_id) \
-                    .maybeSingle() \
+                    .limit(1) \
                     .execute()
-                if plan_res.data:
-                    diet = plan_res.data.get("diet_plan") or {}
+                plan_row = plan_res.data[0] if plan_res.data else None
+                if plan_row:
+                    diet = plan_row.get("diet_plan") or {}
                     plan_ctx = f"User has a diet plan targeting {diet.get('daily_calories', '')} calories/day."
             except Exception:
                 pass

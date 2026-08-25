@@ -192,7 +192,7 @@ Return ONLY the JSON object. No extra text."""
 
     # ── 4. Upsert into user_plans ─────────────────────────────────────────────
     try:
-        existing_plan = sb.table("user_plans").select("id").eq("user_id", user_id).maybeSingle().execute()
+        existing_plan = sb.table("user_plans").select("id").eq("user_id", user_id).limit(1).execute()
         if existing_plan.data:
             sb.table("user_plans").update({
                 "diet_plan": diet_plan,
@@ -218,9 +218,9 @@ Return ONLY the JSON object. No extra text."""
             "content": coach_message,
             "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000),
         }
-        existing_session = sb.table("ai_doctor_sessions").select("id, messages").eq("user_id", user_id).maybeSingle().execute()
+        existing_session = sb.table("ai_doctor_sessions").select("id, messages").eq("user_id", user_id).limit(1).execute()
         if existing_session.data:
-            existing_msgs = existing_session.data.get("messages") or []
+            existing_msgs = existing_session.data[0].get("messages") or []
             updated_msgs = [welcome_msg] + existing_msgs  # Prepend so it's the first message
             sb.table("ai_doctor_sessions").update({
                 "messages": updated_msgs,
@@ -237,8 +237,8 @@ Return ONLY the JSON object. No extra text."""
 
     # ── 6. Send Expo push notification ────────────────────────────────────────
     try:
-        user_res = sb.table("users").select("metadata").eq("id", user_id).maybeSingle().execute()
-        push_token = ((user_res.data or {}).get("metadata") or {}).get("expo_push_token")
+        user_res = sb.table("users").select("metadata").eq("id", user_id).limit(1).execute()
+        push_token = (((user_res.data[0] if user_res.data else {}) or {}).get("metadata") or {}).get("expo_push_token")
         if push_token:
             await _send_expo_push(
                 token=push_token,

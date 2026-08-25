@@ -271,8 +271,9 @@ async def track_notification_open(body: TrackOpenRequest, supabase: Client = Dep
             "occurred_at": datetime.now(timezone.utc).isoformat(),
         }).execute()
         # Increment open_count on notification_history
-        existing = supabase.table("notification_history").select("open_count").eq("id", body.notification_id).maybeSingle().execute()
-        current = (existing.data or {}).get("open_count", 0) or 0
+        existing = supabase.table("notification_history").select("open_count").eq("id", body.notification_id).limit(1).execute()
+        existing_row = existing.data[0] if existing.data else {}
+        current = (existing_row or {}).get("open_count", 0) or 0
         supabase.table("notification_history").update({"open_count": current + 1}).eq("id", body.notification_id).execute()
         return {"success": True}
     except Exception as e:
