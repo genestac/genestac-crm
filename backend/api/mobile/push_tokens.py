@@ -69,11 +69,12 @@ async def register_push_token(body: PushTokenRequest, request: Request):
             sb.table("users")
             .select("metadata")
             .eq("id", user_id)
-            .maybeSingle()
+            .limit(1)
             .execute()
         )
+        existing_row = existing_res.data[0] if existing_res.data else None
 
-        if existing_res.data is None:
+        if existing_row is None:
             # Mobile user exists in Supabase Auth but has no row in users table yet.
             # This happens for Google/Apple OAuth sign-ups. Create a minimal row.
             logger.info(f"[PushToken] No users row for {user_id} — creating one from auth profile")
@@ -93,7 +94,7 @@ async def register_push_token(body: PushTokenRequest, request: Request):
             }).execute()
             logger.info(f"[PushToken] ✅ Created users row + saved token for {user_id} ({email})")
         else:
-            existing_meta = existing_res.data.get("metadata") or {}
+            existing_meta = existing_row.get("metadata") or {}
             merged_meta = {**existing_meta, "expo_push_token": body.expo_push_token}
             sb.table("users").update({"metadata": merged_meta}).eq("id", user_id).execute()
             logger.info(f"[PushToken] ✅ Updated token for existing user {user_id}")
