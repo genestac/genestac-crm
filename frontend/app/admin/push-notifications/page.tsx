@@ -1,10 +1,10 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { toast } from 'sonner'
 import {
-  Bell, Send, Users, Crown, User, Image as ImageIcon,
-  Megaphone, Tag, Zap, Heart, RefreshCw, Search,
+  Bell, Send, Users, Crown, User, Image as ImageIcon, Upload,
+  Megaphone, Tag, Zap, Heart, RefreshCw, Search, Loader2,
   Clock, CheckCircle, AlertCircle, BarChart3, TrendingUp,
   Target, Award, Activity, ChevronRight
 } from 'lucide-react'
@@ -69,8 +69,29 @@ export default function PushNotificationsPage() {
   const [history, setHistory]             = useState<HistoryItem[]>([])
   const [analytics, setAnalytics]         = useState<Analytics | null>(null)
   const [sending, setSending]             = useState(false)
+  const [uploadingImage, setUploadingImage] = useState(false)
   const [loadingHistory, setLoadingHistory] = useState(false)
   const [loadingAnalytics, setLoadingAnalytics] = useState(false)
+  const imageInputRef = useRef<HTMLInputElement>(null)
+
+  const uploadImage = useCallback(async (file: File) => {
+    setUploadingImage(true)
+    try {
+      const form = new FormData()
+      form.append('file', file)
+      const res = await fetch('/api/proxy/push-notifications/upload-image', { method: 'POST', body: form })
+      const data = await res.json()
+      if (data.success && data.url) {
+        setImageUrl(data.url)
+      } else {
+        alert('Image upload failed: ' + (data.detail || 'Unknown error'))
+      }
+    } catch (e) {
+      alert('Image upload failed')
+    } finally {
+      setUploadingImage(false)
+    }
+  }, [])
 
   const apiFetch = useCallback(async (path: string, opts?: RequestInit) => {
     // Map backend paths to proxy endpoints
@@ -252,14 +273,24 @@ export default function PushNotificationsPage() {
                   <p className="text-xs text-muted-foreground mt-1 text-right">{body.length}/300</p>
                 </div>
 
-                {/* Image URL */}
+                {/* Image */}
                 <div>
                   <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1">
-                    <ImageIcon className="w-3 h-3" />Image URL <span className="font-normal normal-case">(optional)</span>
+                    <ImageIcon className="w-3 h-3" />Image <span className="font-normal normal-case">(optional)</span>
                   </label>
-                  <input value={imageUrl} onChange={e => setImageUrl(e.target.value)}
-                    placeholder="https://cdn.genestac.com/banners/offer.jpg"
-                    className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-violet-500/30 focus:border-violet-400 transition-all bg-white" />
+                  <div className="flex gap-2">
+                    <input value={imageUrl} onChange={e => setImageUrl(e.target.value)}
+                      placeholder="https://cdn.genestac.com/banners/offer.jpg"
+                      className="flex-1 border border-gray-200 rounded-lg px-3 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-violet-500/30 focus:border-violet-400 transition-all bg-white" />
+                    <button type="button" onClick={() => imageInputRef.current?.click()}
+                      disabled={uploadingImage}
+                      className="flex items-center gap-1.5 px-3 py-2.5 border border-dashed border-violet-400 rounded-lg text-xs font-semibold text-violet-600 hover:bg-violet-50 transition-all disabled:opacity-50 whitespace-nowrap">
+                      {uploadingImage ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+                      {uploadingImage ? 'Uploading…' : 'Upload'}
+                    </button>
+                    <input ref={imageInputRef} type="file" accept="image/*" className="hidden"
+                      onChange={e => { const f = e.target.files?.[0]; if (f) uploadImage(f); e.target.value = '' }} />
+                  </div>
                   {imageUrl && <img src={imageUrl} alt="preview" className="mt-2 rounded-lg h-24 w-full object-cover border border-gray-200" onError={e => (e.currentTarget.style.display = 'none')} />}
                 </div>
 

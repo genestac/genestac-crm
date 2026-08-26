@@ -15,7 +15,7 @@ import logging
 import httpx
 from datetime import datetime, timezone
 from typing import Optional, List
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
 from pydantic import BaseModel
 from supabase import Client
 from db.supabase import get_supabase_client
@@ -80,12 +80,15 @@ def _build_expo_message(token: str, title: str, body: str, image_url: str = None
         "body": body,
         "sound": "default",
         "priority": "high",
+        "channelId": "default",   # Must match channel created in the mobile app
     }
     if image_url:
-        msg["image"] = image_url
+        msg["image"] = image_url   # Works on iOS natively
     data = extra_data or {}
     if screen:
         data["screen"] = screen
+    if image_url:
+        data["image_url"] = image_url  # Android: mobile app reads this to show image
     if data:
         msg["data"] = data
     return msg
@@ -354,3 +357,30 @@ async def get_notification_analytics(supabase: Client = Depends(get_supabase_cli
     except Exception as e:
         logger.error(f"[PushNotif] Analytics failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Image Upload ───────────────────────────────────────────────────────────────
+
+@router.post("/upload-image")
+async def upload_notification_image(file: UploadFile = File(...)):
+    """Upload an image to Cloudinary for use in push notifications."""
+    import cloudinary
+    import cloudinary.uploader
+
+    cloudinary.config(
+        cloud_name=os.environ.get("CLOUDINARY_CLOUD_NAME") or os.environ.get("EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME"),
+        api_key=os.environ.get("CLOUDINARY_API_KEY") or os.environ.get("EXPO_PUBLIC_CLOUDINARY_API_KEY"),
+        api_secret=os.environ.get("CLOUDINARY_API_SECRET") or os.environ.get("EXPO_PUBLIC_CLOUDINARY_API_SECRET"),
+    )
+
+    try:
+        contents = await file.read()
+        result = cloudinary.uploader.upload(
+            contents,
+            folder="push-notifications",
+            resource_type="image",
+        )
+        return {"success": True, "url": result["secure_url"]}
+    except Exception as e:
+        logger.error(f"[PushNotif] Image upload failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Image upload failed: {e}")
