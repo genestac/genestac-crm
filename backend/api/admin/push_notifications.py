@@ -49,6 +49,7 @@ async def _send_expo_batch(messages: list) -> dict:
     async with httpx.AsyncClient(timeout=30) as client:
         for chunk in chunks:
             try:
+                logger.info(f"[PushNotif] Sending {len(chunk)} messages to Expo. Sample: {chunk[0] if chunk else {}}")
                 resp = await client.post(
                     EXPO_PUSH_URL,
                     json=chunk,
@@ -59,15 +60,19 @@ async def _send_expo_batch(messages: list) -> dict:
                     }
                 )
                 result = resp.json()
+                logger.info(f"[PushNotif] Expo response: {result}")
                 for item in result.get("data", []):
                     if item.get("status") == "ok":
                         results["sent"] += 1
                     else:
                         results["failed"] += 1
-                        results["errors"].append(item.get("message", "Unknown error"))
+                        err = item.get("message", "Unknown error")
+                        results["errors"].append(err)
+                        logger.warning(f"[PushNotif] Expo delivery error: {item}")
             except Exception as e:
                 results["failed"] += len(chunk)
                 results["errors"].append(str(e))
+                logger.error(f"[PushNotif] Batch send exception: {e}")
 
     return results
 
@@ -80,18 +85,25 @@ def _build_expo_message(token: str, title: str, body: str, image_url: str = None
         "body": body,
         "sound": "default",
         "priority": "high",
-        "channelId": "default",   # Must match channel created in the mobile app
+        # Use a non-existent channel to suppress Android's default system notification.
+        # This allows the app's Notifee background task to exclusively display the
+        # notification with a full BigPicture image.
+        "channelId": "silent_data_channel",
     }
     if image_url:
-        msg["image"] = image_url   # Works on iOS natively
+        # Top-level 'image' field — sent to FCM notification.image for BigPicture
+        msg["image"] = image_url
+        # richContent — newer Expo SDK 53+ API for images in notifications
+        msg["richContent"] = {"image": image_url}
     data = extra_data or {}
     if screen:
         data["screen"] = screen
     if image_url:
-        data["image_url"] = image_url  # Android: mobile app reads this to show image
+        data["image_url"] = image_url  # Fallback: mobile app can read this from data
     if data:
         msg["data"] = data
     return msg
+
 
 
 # ── Endpoints ──────────────────────────────────────────────────────────────────
