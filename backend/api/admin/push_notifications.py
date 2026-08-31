@@ -163,12 +163,12 @@ async def send_push_notification(
             for t in tokens
         ]
 
-        # ── Send via Expo ────────────────────────────────────────────────────
-        result = await _send_expo_batch(messages)
-
-        # ── Save to notification_history table ───────────────────────────────
+        # ── Save to notification_history FIRST to get the DB-assigned ID ────
+        # We need the ID so we can embed it in the push payload, allowing the
+        # mobile app to call /track-open with the correct notification_id.
+        notification_db_id: str | None = None
         try:
-            supabase.table("notification_history").insert({
+            history_row = supabase.table("notification_history").insert({
                 "title": body.title,
                 "body": body.body,
                 "image_url": body.image_url,
@@ -177,12 +177,36 @@ async def send_push_notification(
                 "target_user_ids": body.user_ids,
                 "screen": body.screen,
                 "recipients_count": len(tokens),
-                "sent_count": result["sent"],
-                "failed_count": result["failed"],
+                "sent_count": 0,          # updated after send
+                "failed_count": 0,
+                "open_count": 0,
                 "sent_at": datetime.now(timezone.utc).isoformat(),
             }).execute()
+            if history_row.data:
+                notification_db_id = history_row.data[0].get("id")
+                logger.info(f"[PushNotif] Created notification history row: {notification_db_id}")
         except Exception as e:
             logger.warning(f"[PushNotif] Failed to save notification history: {e}")
+
+        # ── Embed notification_id into each message's data payload ───────────
+        # This allows the mobile app to call /track-open with the correct ID.
+        if notification_db_id:
+            for msg in messages:
+                msg.setdefault("data", {})
+                msg["data"]["notification_id"] = str(notification_db_id)
+
+        # ── Send via Expo ────────────────────────────────────────────────────
+        result = await _send_expo_batch(messages)
+
+        # ── Update sent/failed counts now that we know the result ────────────
+        if notification_db_id:
+            try:
+                supabase.table("notification_history").update({
+                    "sent_count": result["sent"],
+                    "failed_count": result["failed"],
+                }).eq("id", notification_db_id).execute()
+            except Exception as e:
+                logger.warning(f"[PushNotif] Failed to update sent/failed counts: {e}")
 
         return {
             "success": True,
