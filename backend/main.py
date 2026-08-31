@@ -105,6 +105,10 @@ app.include_router(mobile_push_tokens.router, prefix="/api/mobile/register-push-
 from api.admin import push_notifications as admin_push_notifications
 app.include_router(admin_push_notifications.router, prefix="/api/admin/push-notifications", tags=["admin-push-notifications"])
 
+# ── Admin — Exercises & Yoga ───────────────────────────────────────────────────
+from api.admin import exercises as admin_exercises
+app.include_router(admin_exercises.router, prefix="/api/admin/exercises", tags=["admin-exercises"])
+
 # Production deployment health check endpoint
 @app.get("/")
 def read_root():

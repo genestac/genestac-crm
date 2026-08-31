@@ -28,7 +28,8 @@ import {
   ChevronRight,
   Star,
   Megaphone,
-  Bell
+  Bell,
+  Dumbbell
 } from 'lucide-react'
 import { logout } from '@/app/auth/actions'
 
@@ -74,6 +75,7 @@ const modules: { title: string; routes: RouteItem[] }[] = [
       { name: 'Consultations', path: '/admin/consultations', icon: FileText },
       { name: 'Medical Plans', path: '/admin/plans', icon: CreditCard },
       { name: 'Subscriptions', path: '/admin/subscriptions', icon: FileText },
+      { name: 'Exercises & Yoga', path: '/admin/exercises', icon: Dumbbell },
     ]
   },
   {
