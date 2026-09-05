@@ -101,7 +101,7 @@ def add_inventory_to_cart(
     Returns the inserted cart_items row.
     """
     inv_res = supabase.table("inventory").select(
-        "id, name, price, compare_at_price, \"Dosage/Strength\", gst_percentage"
+        "id, name, price, compare_at_price"
     ).eq("id", inventory_id).execute()
 
     if not inv_res.data:

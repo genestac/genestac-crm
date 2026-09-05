@@ -202,7 +202,7 @@ def _get_inventory_item_by_name(supabase: Client, query: str) -> Optional[dict]:
             if not search_term:
                 continue
             res = supabase.table("inventory").select(
-                "id, name, price, compare_at_price, category, gst_percentage"
+                "id, name, price, compare_at_price, category"
             ).ilike("name", f"%{search_term}%").limit(5).execute()
             items = res.data or []
             if items:
