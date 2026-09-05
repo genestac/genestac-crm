@@ -14,6 +14,7 @@ Key capabilities:
 """
 
 import os
+import re
 import json
 import openai
 import asyncio
@@ -202,7 +203,7 @@ def _get_inventory_item_by_name(supabase: Client, query: str) -> Optional[dict]:
             if not search_term:
                 continue
             res = supabase.table("inventory").select(
-                "id, name, price, compare_at_price, category"
+                "*"
             ).ilike("name", f"%{search_term}%").limit(5).execute()
             items = res.data or []
             if items:
@@ -915,12 +916,18 @@ async def process_whatsapp_message(
         "pay kar", "abhi le",
     ]
     _AFFIRM_KEYWORDS = [
-        "haa", "haan", "ha ", "ha,", " yes", "ok ", "ok,", "theek hai",
-        "bilkul", "proceed", "kar do", "kar dijiye", "bhej do", "send karo",
+        "haa", "haan", "ha ", "ha,", "ha.", " yes", "ok ", "ok,", "ok.", "okay",
+        "theek hai", "theek", "bilkul", "proceed", "kar do", "kardo", "kar dijiye",
+        "bhej do", "bhejdo", "bhejo", "send karo", "send", "pls send", "please send",
+        "chahiye", "dedo", "de do", "done", "yep", "yeah", "fine", "sahi",
     ]
-    _msg_pad = " " + message.lower().strip() + " "
+    _AFFIRM_EXACT = {"ok", "okay", "k", "yes", "haan", "ha", "haa", "theek", "sure", "bilkul", "proceed", "done", "fine", "sahi", "send", "bhejo", "kardo", "bhejdo"}
+    _msg_clean = message.lower().strip()
+    _msg_words = set(re.findall(r'[a-zA-Z]+', _msg_clean))
+    _msg_pad = " " + _msg_clean + " "
     _inj_track = metadata.get("service_type") == "injection"
     _wants_purchase = any(kw in _msg_pad for kw in _PURCHASE_KEYWORDS)
+    _is_affirm = bool(_msg_words & _AFFIRM_EXACT) or any(kw in _msg_pad for kw in _AFFIRM_KEYWORDS)
 
     # ── Payment bypass: skip/override screening if user explicitly asks for payment/invoice ──
     # Fires when screening not yet started OR was wrongly marked as failed (false-positive).
@@ -944,8 +951,7 @@ async def process_whatsapp_message(
         metadata.get("injection_screen_passed")
     )
     if _inj_ready:
-        _is_affirm = any(kw in _msg_pad for kw in _AFFIRM_KEYWORDS)
-        if _wants_purchase or (metadata.get("pending_invoice") and _is_affirm) or _is_affirm:
+        if _wants_purchase or _is_affirm or metadata.get("pending_invoice"):
             metadata["pending_invoice"] = True
 
     # ── Stale conversation_summary guard ──────────────────────────────────────
@@ -983,9 +989,7 @@ async def process_whatsapp_message(
 
 
     # ── Python-driven invoice generation ──────────────────────────────────────
-    # When pending_invoice=True, generate invoice from Python directly.
-    # Always uses create_direct_injection_pi — cart table has FK/NOT NULL constraints
-    # that don't work for WhatsApp leads (lead UUID ≠ users table UUID).
+    # When pending_invoice=True, generate invoice from Python directly and return immediately.
     _RESEND_KEYWORDS = [
         "bheja nhi", "nhi bheja", "nhi aaya", "link nhi", "nhi mila",
         "send nhi", "abhi tak nhi", "kahan hai", "kab milega",
@@ -993,8 +997,9 @@ async def process_whatsapp_message(
         "haven't received", "havnt received", "havent received",
         "check again", "check karo", "dobara bhejo", "phir bhejo",
         "received nhi", "nhi receive", "link nahi", "nahi mila",
-
         "send me now", "send it now", "abhi bhejo", "abhi bhej",
+        "pi ka link", "pi link", "invoice link", "bill link",
+        "kaha bheja", "kahan bheja", "link de do", "link bhejo",
     ]
     _msg_pad_lower = " " + message.lower().strip() + " "
     _is_resend = any(kw in _msg_pad_lower for kw in _RESEND_KEYWORDS)
@@ -1011,27 +1016,68 @@ async def process_whatsapp_message(
         _inv_item = _get_inventory_item_by_name(supabase, _pi_product)
         if _inv_item:
             try:
-                _pi = create_direct_injection_pi(
-                    supabase=supabase,
-                    lead_id=lead_id,
-                    inventory_item=_inv_item,
-                    quantity=1,
-                    discount_pct=10.0,
-                    source="whatsapp_bot",
-                )
+                # 1. Check if a recent pending invoice with a valid razorpay link exists from today for this lead
+                _pi = None
+                try:
+                    _pi_check = (
+                        supabase.table("proforma_invoices")
+                        .select("*")
+                        .eq("user_id", lead_id)
+                        .eq("status", "PENDING")
+                        .order("created_at", desc=True)
+                        .limit(1)
+                        .execute()
+                    )
+                    if _pi_check.data:
+                        _c = _pi_check.data[0]
+                        # If it has a valid razorpay_url and total amount is correct, reuse it
+                        if _c.get("razorpay_url") and float(_c.get("total_amount", 0)) == 11812.5:
+                            _pi = _c
+                            _pi["invoice_id"] = _c["id"]
+                            _pi["items"] = [{
+                                "item_name": f"{_inv_item.get('name', 'Mounjaro (Tirzepatide)')} (2.5mg pen)",
+                                "quantity": 1,
+                                "unit_mrp": 13125.0,
+                                "discounted_unit_price": 11812.5,
+                                "discount_percentage": 10.0,
+                            }]
+                            print(f"[Agent] Reusing existing pending invoice {_pi['invoice_number']} for lead {lead_id}")
+                except Exception as _e_ex:
+                    print(f"[Agent] Error checking existing PI: {_e_ex}")
+
+                if not _pi:
+                    _pi = create_direct_injection_pi(
+                        supabase=supabase,
+                        lead_id=lead_id,
+                        inventory_item=_inv_item,
+                        quantity=1,
+                        discount_pct=10.0,
+                        source="whatsapp_bot",
+                        dosage="2.5mg",
+                    )
+
                 _pi_msg = format_pi_whatsapp_message(_pi)
-                extra_wa_messages.append(_pi_msg)
                 metadata["pending_invoice"] = False
                 try:
                     supabase.table(table).update({"metadata": {**metadata}}).eq("id", lead_id).execute()
                 except Exception:
                     pass
-                print(f"[Agent] Python-driven invoice generated: {_pi['invoice_number']} for lead {lead_id}")
-                _pending_invoice_context = (
-                    f"[SYSTEM] Invoice {_pi['invoice_number']} for ₹{_pi['total_amount']:,.2f} "
-                    f"has been sent to the user. Razorpay link: {_pi.get('razorpay_url') or 'no link'}. "
-                    "Your only job: confirm in 1 short sentence that the payment link was sent."
+                print(f"[Agent] Python-driven invoice ready: {_pi['invoice_number']} for lead {lead_id}")
+
+                # Update conversation summary asynchronously
+                asyncio.create_task(
+                    _update_conversation_summary(
+                        lead_id=lead_id,
+                        table=table,
+                        metadata=metadata,
+                        supabase=supabase,
+                        new_user_message=message,
+                        new_ai_response=_pi_msg,
+                    )
                 )
+                # Immediately return the formatted invoice message as the AI reply!
+                return _pi_msg, False
+
             except Exception as _pie:
                 print(f"[Agent] Python-driven invoice FAILED: {_pie}")
                 import traceback; traceback.print_exc()
@@ -1544,6 +1590,11 @@ async def process_whatsapp_message(
                     if clean_lead_phone:
                         try:
                             await _send_wa(clean_lead_phone, msg)
+                            supabase.table("whatsapp_messages").insert({
+                                lead_col: lead_id,
+                                "message_body": msg,
+                                "sender_type": "bot",
+                            }).execute()
                         except Exception as e:
                             print(f"[Agent] Extra WA message failed: {e}")
 

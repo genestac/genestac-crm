@@ -110,14 +110,14 @@ def add_inventory_to_cart(
     item = inv_res.data[0]
     cost_price = float(item.get("price") or 0)
     mrp = float(item.get("compare_at_price") or item.get("price") or 0)
-    gst_pct = float(item.get("gst_percentage") or 18.0)  # default 18% GST on medicines
+    gst_pct = float(item.get("gst_percentage") or 0.0)  # 0% GST unless explicitly configured
 
     # Apply discount — but never go below cost price
-    raw_discounted = mrp * (1 - discount_pct / 100)
-    discounted_unit = max(raw_discounted, cost_price)
+    raw_discounted = mrp * (1 - discount_pct / 100) if discount_pct > 0 else cost_price
+    discounted_unit = max(raw_discounted, cost_price) if mrp > cost_price else cost_price
     actual_discount_pct = round((1 - discounted_unit / mrp) * 100, 2) if mrp > 0 else 0
 
-    gst_per_unit = round(discounted_unit * gst_pct / 100, 2)
+    gst_per_unit = round(discounted_unit * gst_pct / 100, 2) if gst_pct > 0 else 0.0
     line_total = round((discounted_unit + gst_per_unit) * quantity, 2)
 
     dosage = item.get("Dosage/Strength") or ""
@@ -343,26 +343,43 @@ def format_pi_whatsapp_message(pi: dict) -> str:
     Formats the PI result into a clean WhatsApp text message.
     Sends BOTH the invoice details AND the payment link.
     """
-    lines = ["🧾 *Your Invoice is Ready!*\n"]
-    for item in pi.get("items", []):
-        mrp = float(item.get("unit_mrp", 0))
-        disc = float(item.get("discounted_unit_price", 0))
-        qty = int(item.get("quantity", 1))
-        disc_pct = float(item.get("discount_percentage", 0))
-        lines.append(
-            f"• {item['item_name']} × {qty}\n"
-            f"  MRP: ₹{mrp:,.0f}  →  Your Price: ₹{disc:,.0f} ({disc_pct:.0f}% off)"
-        )
+    lines = ["🧾 *Your Proforma Invoice is Ready!*\n"]
+    items = pi.get("items") or []
+    if items:
+        for item in items:
+            mrp = float(item.get("unit_mrp", 0))
+            disc = float(item.get("discounted_unit_price", 0))
+            qty = int(item.get("quantity", 1))
+            disc_pct = float(item.get("discount_percentage", 0))
+            if mrp > disc and disc_pct > 0:
+                lines.append(
+                    f"• {item['item_name']} × {qty}\n"
+                    f"  MRP: ₹{mrp:,.0f}  →  Your Price: ₹{disc:,.0f} ({disc_pct:.0f}% off)"
+                )
+            else:
+                lines.append(f"• {item['item_name']} × {qty}: ₹{disc:,.0f}")
+    else:
+        tot = float(pi.get("total_amount", 0))
+        lines.append(f"• Injection Purchase: ₹{tot:,.0f}")
 
-    lines.append(f"\nGST: ₹{pi['gst_amount']:,.2f}")
-    lines.append(f"*Total Payable: ₹{pi['total_amount']:,.2f}*")
-    lines.append(f"\nInvoice No: {pi['invoice_number']}")
+    gst_amt = float(pi.get("gst_amount", 0) or 0)
+    if gst_amt > 0:
+        lines.append(f"\nGST: ₹{gst_amt:,.2f}")
+        lines.append(f"*Total Payable: ₹{float(pi['total_amount']):,.2f}*")
+    else:
+        lines.append(f"\n*Total Payable: ₹{float(pi['total_amount']):,.2f}* (Inclusive of all taxes)")
+
+    lines.append(f"Invoice No: {pi.get('invoice_number', 'N/A')}")
+
+    inv_id = pi.get("invoice_id") or pi.get("id") or ""
+    pdf_url = f"{os.getenv('BACKEND_PUBLIC_URL', 'https://api.genestac.com')}/api/sales/invoices/{inv_id}/pdf"
 
     if pi.get("razorpay_url"):
         lines.append(f"\n💳 *Pay Now:* {pi['razorpay_url']}")
-        lines.append(f"\n📄 *View Invoice:* {os.getenv('BACKEND_PUBLIC_URL', 'https://api.genestac.com')}/api/sales/invoices/{pi['invoice_id']}")
+    if inv_id:
+        lines.append(f"📄 *Download Proforma Invoice (PDF):* {pdf_url}")
 
-    lines.append("\nFor any queries, reply to this message. Our team is here to help 🙏")
+    lines.append("\nAap upar diye link se payment kar sakte hain. Payment hone ke baad hamari team turant aapka order dispatch kar degi. Koi sawal ho toh zaroor batayein! 🙏")
     return "\n".join(lines)
 
 
@@ -371,9 +388,10 @@ def create_direct_injection_pi(
     lead_id: str,
     inventory_item: dict,
     quantity: int = 1,
-    discount_pct: float = 10.0,
+    discount_pct: float = 0.0,
     source: str = "whatsapp_bot",
     sales_rep_id: Optional[str] = None,
+    dosage: Optional[str] = None,
 ) -> dict:
     """
     Create a Proforma Invoice for an injection/inventory purchase WITHOUT
@@ -383,36 +401,67 @@ def create_direct_injection_pi(
     inventory_item must be a dict with at least: id, name, price, compare_at_price, gst_percentage
     Returns the same shape as create_pi_from_cart.
     """
-    # ── Compute line item ──────────────────────────────────────────────────────
-    mrp = float(inventory_item.get("compare_at_price") or inventory_item.get("price") or 0)
-    cost = float(inventory_item.get("price") or 0)
-    gst_pct = float(inventory_item.get("gst_percentage") or 18.0)
+    # ── Variant resolution ───────────────────────────────────────────────────
+    variant = None
+    inv_id = inventory_item.get("id")
+    if inv_id:
+        try:
+            var_query = supabase.table("inventory_variants").select("*").eq("inventory_id", inv_id)
+            if dosage:
+                var_res = var_query.ilike("dosage_strength", f"%{dosage}%").limit(1).execute()
+                if var_res.data:
+                    variant = var_res.data[0]
+            if not variant:
+                # Default to starter dose (e.g. 2.5mg for Mounjaro, 0.25mg for Wegovy/Ozempic) or lowest price
+                var_res = supabase.table("inventory_variants").select("*").eq("inventory_id", inv_id).order("price", desc=False).limit(1).execute()
+                if var_res.data:
+                    variant = var_res.data[0]
+        except Exception as _ve:
+            print(f"[CartService] Variant lookup error: {_ve}")
 
-    # Enforce discount floor: discounted price must not go below cost
-    discounted_unit = round(mrp * (1 - discount_pct / 100), 2)
-    if cost > 0 and discounted_unit < cost:
-        discounted_unit = cost
-        actual_discount_pct = round((1 - cost / mrp) * 100, 2) if mrp > 0 else 0
+    if variant:
+        item_label = variant.get("label") or variant.get("dosage_strength") or ""
+        item_name = f"{inventory_item.get('name', 'Injection')}"
+        if item_label and item_label.lower() not in item_name.lower():
+            item_name = f"{item_name} ({item_label})"
+        unit_price = float(variant.get("price") or inventory_item.get("price") or 0)
+        mrp = float(variant.get("compare_at_price") or inventory_item.get("compare_at_price") or unit_price)
     else:
-        actual_discount_pct = discount_pct
+        item_name = inventory_item.get("name", "Injection")
+        unit_price = float(inventory_item.get("price") or 0)
+        mrp = float(inventory_item.get("compare_at_price") or unit_price)
 
-    gst_per_unit = round(discounted_unit * gst_pct / 100, 2)
-    line_total = round((discounted_unit + gst_per_unit) * quantity, 2)
+    # Apply explicit discount_pct if provided (e.g. 10.0 for 10% off MRP)
+    if discount_pct > 0:
+        unit_price = round(mrp * (1 - discount_pct / 100.0), 2)
+
+    # ── GST Calculation ───────────────────────────────────────────────────────
+    # GST is ONLY applied if explicitly configured on the product. NEVER default to 18% when not set!
+    gst_pct = float(inventory_item.get("gst_percentage") or 0.0)
+
+    if gst_pct > 0:
+        gst_per_unit = round(unit_price * gst_pct / 100, 2)
+        gst_amount = round(gst_per_unit * quantity, 2)
+        line_total = round((unit_price + gst_per_unit) * quantity, 2)
+    else:
+        gst_pct = 0.0
+        gst_amount = 0.0
+        line_total = round(unit_price * quantity, 2)
 
     base_price = round(mrp * quantity, 2)
-    discount_amount = round((mrp - discounted_unit) * quantity, 2)
-    gst_amount = round(gst_per_unit * quantity, 2)
+    discount_amount = round(max(0, (mrp - unit_price) * quantity), 2)
+    actual_discount_pct = round((discount_amount / base_price * 100), 1) if base_price > 0 else 0.0
     total_amount = line_total
 
     items = [{
         "item_type": "inventory",
         "inventory_id": inventory_item.get("id"),
-        "item_name": inventory_item.get("name", "Injection"),
-        "item_description": inventory_item.get("name", ""),
+        "item_name": item_name,
+        "item_description": item_name,
         "quantity": quantity,
         "unit_mrp": mrp,
         "discount_percentage": actual_discount_pct,
-        "discounted_unit_price": discounted_unit,
+        "discounted_unit_price": unit_price,
         "gst_percentage": gst_pct,
         "gst_amount": gst_amount,
         "line_total": line_total,

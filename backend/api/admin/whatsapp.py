@@ -591,18 +591,23 @@ async def webhook_handler(payload: dict, background_tasks: BackgroundTasks, supa
                             table = "leads"
                             phone_field = "phone_number"
                             
-                            res_users = supabase.table("users").select("id, name, metadata").ilike("phone", f"%{clean_phone}%").execute()
+                            res_users = supabase.table("users").select("*").ilike("phone", f"%{clean_phone}%").execute()
                             if res_users.data:
                                 existing = res_users.data[0]
                                 table = "users"
                                 phone_field = "phone"
                             else:
-                                res_leads = supabase.table("leads").select("id, name, metadata").ilike("phone_number", f"%{clean_phone}%").execute()
+                                res_leads = supabase.table("leads").select("*").ilike("phone_number", f"%{clean_phone}%").execute()
                                 if res_leads.data:
                                     existing = res_leads.data[0]
                                     table = "leads"
                                     phone_field = "phone_number"
                                     
+                            if existing:
+                                existing[phone_field] = existing.get(phone_field) or clean_phone
+                                existing["phone_number"] = existing.get("phone_number") or clean_phone
+                                existing["phone"] = existing.get("phone") or clean_phone
+
                             metadata = existing.get("metadata", {}) if existing else {}
                             current_step = metadata.get("whatsapp_step")
                             lead_name = existing.get("name") if existing else None
