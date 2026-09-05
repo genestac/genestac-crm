@@ -277,35 +277,32 @@ def _detect_no_call_preference(message: str) -> bool:
     return any(kw in msg_lower for kw in NO_CALL_KEYWORDS)
 
 
-# Answer detection for screening questions (Hindi + English)
+# Answer detection for screening questions — NO ONLY (Python layer)
+# We only auto-detect 'No' answers here. Yes/contraindication detection is left to GPT
+# because false-positive Yes = wrongly flags contraindication permanently.
 SCREENING_NO_KEYWORDS = [
-    "nhi", "nahi", "nahin", "nai", "no ", "no,", "nope",
-    "nhi hai", "nahi hai", "nhi hua", "nahi hua",
+    "nhi", "nahi", "nahin", "nai",
     "kisi ko nhi", "kisi ko nahi", "koi nhi", "koi nahi",
     "koi dikkat", "problem nhi", "history nhi", "history nahi",
     "kabhi nhi", "kabhi nahi", "bilkul nhi", "bilkul nahi",
     "nhi hoti", "nahi hoti", "nhi hota",
     "kisi ko bhi nhi", "family mein nhi",
-]
-SCREENING_YES_KEYWORDS = [
-    "haan", "ha ", "ha,", "yes", "hua hai", "hua tha",
-    "hoti hai", "hota hai", "thi", "tha", "hai",
+    "nope", "no history", "never had",
 ]
 
 
 def _detect_screening_answer(message: str) -> str:
     """
-    Detect if the user answered Yes or No to a screening question.
-    Returns 'no', 'yes', or '' (ambiguous).
-    Always checks No first since most short Hindi negations are unambiguous.
+    Detect only clear 'No' answers to a screening question.
+    Returns 'no' or '' (let GPT decide for everything else).
+    We intentionally skip 'yes' detection to avoid false positives —
+    common Hindi words like 'hai', 'tha', 'thi' appear in every sentence.
     """
-    msg = " " + message.lower().strip() + " "  # pad for word-boundary matching
-    # Check No first (more common, unambiguous short replies like "nhi", "nahi")
+    msg = " " + message.lower().strip() + " "
     if any(kw in msg for kw in SCREENING_NO_KEYWORDS):
         return "no"
-    if any(kw in msg for kw in SCREENING_YES_KEYWORDS):
-        return "yes"
     return ""
+
 
 
 async def _update_conversation_summary(
@@ -383,7 +380,7 @@ def _build_injection_track_prompt(lead: dict, metadata: dict) -> str:
                 "'payment link', 'kar dijiye', 'kar do', 'haan', 'haa', 'ha', 'ok', 'send karo', "
                 "'bhej do', 'proceed', 'theek hai', 'bilkul' — IMMEDIATELY call generate_proforma_invoice "
                 "with product_name='Mounjaro'. Do NOT ask again what they want. Do NOT apologize first.\n"
-                "- Secondary CTA (offer alongside): 'Ya pehle doctor se ek baar baat karein? FREE hai!'"
+
             )
     elif screen_done and not screen_passed:
         phase_instruction = (
@@ -492,10 +489,10 @@ INJECTION PRODUCT KNOWLEDGE:
 - All injections: self-administer OR use local clinic/hospital/pharmacy.
 - Common side effects (if asked): Nausea, diarrhea, vomiting, constipation — mostly temporary.
 
-ABOUT GENESTAC (mention when relevant):
-- FREE weekly doctor consultation included with any injection purchase
-- Personalized diet + exercise plan
+ABOUT GENESTAC (only if user asks):
+- Diet + exercise plan support available
 - Mobile app tracking + dosage guidance
+- Doctor consultation available if user wants it
 
 ABSOLUTE DON'T LIST:
 DO NOT send the GLP-1 intake form.
@@ -504,7 +501,9 @@ DO NOT repeat a screening question that was already asked — the step number in
 DO NOT ask the user's name/age/weight if already listed in Lead Profile.
 DO NOT ask what product they want if they already mentioned Mounjaro or a GLP-1.
 DO NOT apologize or reference previous errors — just move forward.
+DO NOT proactively offer doctor consultation — only mention it if user says 'mujhe doctor se baat karni hai' or seems genuinely confused about the product.
 DO NOT generate invoice for a plan (Starter/Medical/Premium) — only for the injection product."""
+
 
 
 
@@ -920,19 +919,22 @@ async def process_whatsapp_message(
     _inj_track = metadata.get("service_type") == "injection"
     _wants_purchase = any(kw in _msg_pad for kw in _PURCHASE_KEYWORDS)
 
-    # ── Payment bypass: skip screening if user explicitly asks for payment/invoice ──
-    # If someone says "payment link do" or "invoice bhejo" at ANY point in the injection
-    # flow (even mid-screening), skip all remaining questions and generate the invoice.
-    if _inj_track and _wants_purchase and not metadata.get("injection_screen_done"):
+    # ── Payment bypass: skip/override screening if user explicitly asks for payment/invoice ──
+    # Fires when screening not yet started OR was wrongly marked as failed (false-positive).
+    # Explicit purchase intent always overrides screening state.
+    if _inj_track and _wants_purchase and (
+        not metadata.get("injection_screen_done") or not metadata.get("injection_screen_passed")
+    ):
         metadata["injection_screen_done"] = True
         metadata["injection_screen_passed"] = True
         metadata["injection_screen_step"] = 3
         metadata["pending_invoice"] = True
-        print(f"[Agent] Payment bypass: skipping screening for lead {lead_id}")
+        print(f"[Agent] Payment bypass: overriding screening state for lead {lead_id}")
         try:
             supabase.table(table).update({"metadata": {**metadata}}).eq("id", lead_id).execute()
         except Exception as _pe:
             print(f"[Agent] Payment bypass DB save failed (non-fatal): {_pe}")
+
 
     _inj_ready = (
         _inj_track and
