@@ -72,11 +72,14 @@ def get_or_create_active_cart(
     }
     if lead_id:
         payload["lead_id"] = lead_id
-    if user_id:
-        payload["user_id"] = user_id
+    # cart.user_id has a NOT NULL constraint.
+    # For WhatsApp bot carts, lead_id IS the user's UUID (same users table).
+    # Use lead_id as user_id when no explicit user_id is given.
+    payload["user_id"] = user_id or lead_id
 
     cart_res = supabase.table("cart").insert(payload).execute()
     return cart_res.data[0]["id"]
+
 
 
 def clear_cart_items(supabase: Client, cart_id: str):
