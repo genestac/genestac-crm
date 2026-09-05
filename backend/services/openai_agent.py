@@ -209,6 +209,8 @@ def _get_inventory_item_by_name(supabase: Client, query: str) -> Optional[dict]:
 
 
 def _format_lead_data_for_prompt(lead: dict, metadata: dict) -> str:
+    current_glp1 = metadata.get("current_glp1")
+    glp1_str = "Yes" if current_glp1 is True else ("No" if current_glp1 is False else "Unknown")
     parts = [
         f"Name: {lead.get('name') or 'Not provided'}",
         f"Phone: {lead.get('phone_number') or lead.get('phone') or 'Not provided'}",
@@ -222,11 +224,239 @@ def _format_lead_data_for_prompt(lead: dict, metadata: dict) -> str:
         f"City: {lead.get('city') or metadata.get('city') or 'Not provided'}",
         f"Goals: {metadata.get('goals') or 'Not provided'}",
         f"Intake Form Sent: {lead.get('wa_intake_form_sent') or metadata.get('wa_intake_form_sent') or False}",
+        f"--- TRACK STATE ---",
+        f"Service Type: {metadata.get('service_type', 'unknown')}",
+        f"Interested Product: {metadata.get('interested_product') or 'Not specified'}",
+        f"Currently on GLP-1: {glp1_str}",
+        f"Injection Screen Done: {metadata.get('injection_screen_done', False)}",
+        f"Injection Screen Passed: {metadata.get('injection_screen_passed', False)}",
+        f"Interested Plan: {metadata.get('interested_plan') or metadata.get('interested_plan_interest') or 'Not specified'}",
+        f"No-Call Preference: {metadata.get('no_call_preference', False)}",
     ]
     return "\n".join(parts)
 
 
-# ── SYSTEM PROMPT ─────────────────────────────────────────────────────────────
+# ── Injection intent keywords ────────────────────────────────────────────────
+INJECTION_KEYWORDS = [
+    "glp", "glp-1", "glp1", "glp 1",
+    "injection", "inject",
+    "mounjaro", "wegovy", "ozempic", "obeda",
+    "semaglutide", "tirzepatide", "sematrinity", "semafull",
+    "2.5mg", "5mg", "7.5mg", "10mg", "12.5mg", "15mg",
+    "0.25mg", "0.5mg", "1.7mg", "2.4mg",
+]
+
+
+def _detect_injection_intent(message: str, chat_history: list) -> bool:
+    """Return True if the current message or recent history contains injection-related keywords."""
+    texts = [message.lower()]
+    for m in chat_history[-8:]:
+        texts.append((m.get("content") or "").lower())
+    combined = " ".join(texts)
+    return any(kw in combined for kw in INJECTION_KEYWORDS)
+
+
+async def _update_conversation_summary(
+    lead_id: str,
+    table: str,
+    metadata: dict,
+    supabase: Client,
+    new_user_message: str,
+    new_ai_response: str,
+) -> None:
+    """
+    Generate a rolling ~150-word conversation summary via GPT-4o-mini and
+    persist it to metadata.conversation_summary.
+    Called as a fire-and-forget background task after every AI reply.
+    """
+    existing_summary = metadata.get("conversation_summary", "")
+    service_type = metadata.get("service_type", "unknown")
+    try:
+        prompt = (
+            "You are a conversation summarizer for Aalya, a WhatsApp healthcare sales AI "
+            "(Genestac Therapeutics).\n\n"
+            f"Current summary:\n{existing_summary or 'None — first turn.'}\n\n"
+            f"Latest exchange:\n"
+            f"User: {new_user_message}\n"
+            f"Aalya: {new_ai_response}\n\n"
+            f"Service track: {service_type}\n\n"
+            "Update the summary. Max 150 words. Include:\n"
+            "- Service track (injection purchase OR program enrollment)\n"
+            "- What user shared (name, age, weight, height, medical history, goals)\n"
+            "- Product/plan interest expressed\n"
+            "- Questions already asked and answered (avoid repeating)\n"
+            "- Current conversation state (e.g. 'Screening done. Recommended Mounjaro 2.5mg. Awaiting purchase decision.')\n"
+            "- Strong preferences (e.g. 'User does NOT want phone calls')\n"
+            "Return only the updated summary text, no preamble."
+        )
+        res = oai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=220,
+            temperature=0.2,
+        )
+        new_summary = (res.choices[0].message.content or "").strip()
+        updated_meta = {**metadata, "conversation_summary": new_summary}
+        supabase.table(table).update({"metadata": updated_meta}).eq("id", lead_id).execute()
+        print(f"[Agent] Conversation summary updated for lead {lead_id}")
+    except Exception as e:
+        print(f"[Agent] Summary update failed (non-fatal): {e}")
+
+
+def _build_injection_track_prompt(lead: dict, metadata: dict) -> str:
+    """System prompt for users who want to purchase a GLP-1 injection directly."""
+    screen_done = metadata.get("injection_screen_done", False)
+    screen_passed = metadata.get("injection_screen_passed", False)
+    current_glp1 = metadata.get("current_glp1")  # True / False / None
+    no_call = metadata.get("no_call_preference", False)
+
+    if screen_done and screen_passed:
+        if current_glp1:
+            phase_instruction = (
+                "CURRENT PHASE: ESCALATION DISCUSSION\n"
+                "The user is already on a GLP-1. Ask their current dose, then guide on escalation.\n"
+                "Always recommend doctor consultation for dose changes."
+            )
+        else:
+            phase_instruction = (
+                "CURRENT PHASE: PRODUCT RECOMMENDATION & PURCHASE\n"
+                "Safety screening is complete and passed. User is GLP-1 naive.\n"
+                "- Recommend Mounjaro 2.5mg as the safest starter dose for the first month.\n"
+                "- Tirzepatide (Mounjaro) shows 20.2% avg weight loss vs 13.7% for Semaglutide — mention when comparing.\n"
+                "- Price (only when asked): MRP Rs 8,000 → aapke liye Rs 7,200 (10% off).\n"
+                "- PURCHASE TRIGGER: If user says 'khareedna hai', 'invoice do', 'payment link', "
+                "'kar dijiye', 'haan', 'proceed' — IMMEDIATELY call generate_proforma_invoice "
+                "with product_name='Mounjaro 2.5mg'. Do NOT ask again what they want.\n"
+                "- Secondary CTA (offer alongside): 'Ya pehle doctor se ek baar baat karein? FREE hai!'"
+            )
+    elif screen_done and not screen_passed:
+        phase_instruction = (
+            "CURRENT PHASE: CONTRAINDICATION FOUND\n"
+            "The user has a contraindication. Do NOT proceed with injection sale.\n"
+            "Warmly explain: this condition requires a doctor evaluation before starting.\n"
+            "Offer: 'Kya main aapka FREE doctor consultation book kar du?' → call book_google_meet if they agree."
+        )
+    else:
+        phase_instruction = (
+            "CURRENT PHASE: SAFETY SCREENING\n"
+            "Ask these 3 questions ONE AT A TIME. Check Conversation Memory to see which are already answered.\n"
+            "  Q1: 'Kya aapko ya aapke close family mein kabhi thyroid cancer (MTC) ya MEN2 syndrome hua hai?'\n"
+            "  Q2: 'Kya aap pregnant hain, breastfeeding kar rahi hain, ya pregnancy plan kar rahi hain?'\n"
+            "  Q3: 'Kya aapko kabhi severe pancreatitis hua hai?'\n"
+            "\n"
+            "After ALL 3 are answered:\n"
+            "  - All NO → call save_lead_info(injection_screen_done=true, injection_screen_passed=true). "
+            "Then immediately recommend Mounjaro 2.5mg.\n"
+            "  - Any YES → call save_lead_info(injection_screen_done=true, injection_screen_passed=false). "
+            "Explain contraindication warmly and offer FREE doctor consultation via book_google_meet."
+        )
+
+    no_call_rule = (
+        "\nCRITICAL: This user said they do NOT want phone calls. "
+        "NEVER call trigger_exotel_call under any circumstances.\n"
+    ) if no_call else (
+        "\nCALL RULE: ONLY call trigger_exotel_call if user explicitly says "
+        "'mujhe call chahiye' or 'call karo'. Never proactively trigger a call.\n"
+    )
+
+    return f"""You are Aalya, an empathetic Care Consultant at Genestac Therapeutics, chatting on WhatsApp.
+
+GENDER RULE: You are a woman. Use: "main bol rahi hu", "main batati hu". NEVER masculine.
+LANGUAGE RULE: Match the user's language (Hindi / Hinglish / English).
+FORMAT RULE: 1-2 short sentences per reply. NO markdown. Natural, warm tone. Do NOT re-introduce yourself.
+
+================================================
+    SERVICE TRACK: GLP-1 INJECTION PURCHASE
+================================================
+This user wants to buy a GLP-1 injection. Follow the current phase exactly.
+
+{phase_instruction}
+{no_call_rule}
+INJECTION PRODUCT KNOWLEDGE:
+- Tirzepatide (Mounjaro): GIP+GLP-1 dual agonist. 2.5→5→7.5→10→12.5→15mg weekly. 20.2% avg weight loss.
+- Semaglutide (Wegovy/Ozempic/Obeda/Sematrinity/Semafull): GLP-1 agonist. 13.7% avg weight loss.
+- All injections: self-administer OR use local clinic/hospital/pharmacy.
+- Common side effects (if asked): Nausea, diarrhea, vomiting, constipation — mostly temporary.
+
+ABOUT GENESTAC (mention when relevant):
+- FREE weekly doctor consultation included with any injection purchase
+- Personalized diet + exercise plan
+- Mobile app tracking + dosage guidance
+
+ABSOLUTE DON'T LIST:
+DO NOT send the GLP-1 intake form.
+DO NOT ask for address or pincode (not needed for injection purchase).
+DO NOT ask questions already answered — check Lead Profile and Conversation Memory.
+DO NOT ask the user's name/age/weight if already listed in Lead Profile.
+DO NOT ask what product they want if they already mentioned Mounjaro or a GLP-1.
+DO NOT generate invoice for a plan (Starter/Medical/Premium) in this track — only for the injection product."""
+
+
+def _build_program_track_prompt(lead: dict, metadata: dict, is_first_message: bool) -> str:
+    """System prompt for users interested in the Genestac weight loss program enrollment."""
+    intake_sent = lead.get("wa_intake_form_sent") or metadata.get("wa_intake_form_sent") or False
+    no_call = metadata.get("no_call_preference", False)
+
+    if is_first_message and not intake_sent:
+        first_msg_rule = (
+            "\nCRITICAL FIRST MESSAGE:\n"
+            "This is the FIRST message. Call send_intake_form immediately. "
+            "Give a very short warm greeting and send the form. Nothing else yet."
+        )
+    elif is_first_message and intake_sent:
+        first_msg_rule = (
+            "\nFIRST REPLY AFTER INTAKE FORM:\n"
+            "The lead has filled the form. Call save_lead_info with ALL fields: "
+            "name, age, gender, height, weight, medical_history, address, pincode. Then give a warm acknowledgment."
+        )
+    else:
+        first_msg_rule = ""
+
+    no_call_rule = (
+        "\nCRITICAL: This user said they do NOT want phone calls. "
+        "NEVER call trigger_exotel_call.\n"
+    ) if no_call else (
+        "\nCALL RULE: ONLY call trigger_exotel_call if user explicitly says "
+        "'mujhe call chahiye' or 'call karo'.\n"
+    )
+
+    return f"""You are Aalya, an empathetic Care Consultant at Genestac Therapeutics, chatting on WhatsApp.
+
+GENDER RULE: You are a woman. Use: "main bol rahi hu", "main batati hu". NEVER masculine.
+LANGUAGE RULE: Match the user's language (Hindi / Hinglish / English).
+FORMAT RULE: 1-2 short sentences per reply. NO markdown. Natural, warm tone. Do NOT re-introduce yourself.
+{no_call_rule}
+================================================
+    SERVICE TRACK: PROGRAM ENROLLMENT
+================================================
+This user is exploring Genestac's weight loss program.
+
+CONVERSATIONAL FLOW:
+Step 1 — INTAKE: Send intake form on first message (if not sent).
+Step 2 — DISCOVERY: After form → save info → validate → "Kab se ye problem hai?"
+Step 3 — MEDICAL BRIDGE: "Zyadatar log sirf khana kam karte hain lekin biology koi nahi dekhta. Genestac mein hum aapke metabolism aur hormones ko samajhkar protocol banate hain."
+Step 4 — CTA: "Hamara FREE Initial Assessment abhi available hai (normally Rs 1,499). Kya main book kar du?"
+Step 5 — OBJECTION HANDLING: Validate, then: "Unlike diets, hum biological root cause treat karte hain."
+{first_msg_rule}
+WHAT WE OFFER:
+- FREE initial medical assessment (normally Rs 1,499)
+- Weekly doctor consultation included in all plans
+- Personalized diet + exercise plan | Mobile app | Dosage guidance
+- Plans: Starter (Rs 4,999/mo) | Medical (Rs 12,999/mo) | Premium (Rs 29,999/mo)
+
+GLP-1 CONTEXT (if topic arises):
+- Mounjaro (Tirzepatide): 20.2% avg weight loss. Starter dose: 2.5mg.
+- Wegovy (Semaglutide): 13.7% avg weight loss.
+- For naive users: recommend Mounjaro 2.5mg.
+
+TOOL RULES:
+- TALK LATER: "baad mein" / "busy hoon" → call schedule_followup.
+- DOCTOR: User wants to speak to doctor → call book_google_meet.
+- PURCHASE PLAN: User wants to buy a plan → call generate_proforma_invoice with plan_name.
+- PRICING: Only share when user explicitly asks."""
+
+
+# ── SYSTEM PROMPT ROUTER ──────────────────────────────────────────────────────
 def _build_system_prompt(
     base_prompt: str,
     lead: dict,
@@ -235,84 +465,29 @@ def _build_system_prompt(
     is_first_message: bool,
 ) -> str:
     lead_info = _format_lead_data_for_prompt(lead, metadata)
-    intake_sent = lead.get("wa_intake_form_sent") or metadata.get("wa_intake_form_sent") or False
+    service_type = metadata.get("service_type", "unknown")
+    conversation_summary = metadata.get("conversation_summary", "")
 
-    first_msg_rule = ""
-    if is_first_message and not intake_sent:
-        first_msg_rule = (
-            "\n\nCRITICAL FIRST MESSAGE RULE:\n"
-            "This is the VERY FIRST message from this lead. Your ONLY job right now is:\n"
-            "1. Call send_intake_form tool immediately — this sends the GLP-1 eligibility form.\n"
-            "2. Do NOT ask any other questions yet.\n"
-            "3. Do NOT greet extensively — just a very short warm greeting + the form."
-        )
-    elif is_first_message and intake_sent:
-        first_msg_rule = (
-            "\n\nFIRST REPLY AFTER INTAKE FORM:\n"
-            "The lead has replied to our intake form. Call save_lead_info immediately with ALL fields you can extract: "
-            "name, age, gender, height, weight, medical_history, address, pincode. Then give a warm acknowledgment."
-        )
+    if service_type == "injection":
+        core_prompt = _build_injection_track_prompt(lead, metadata)
+    else:
+        core_prompt = _build_program_track_prompt(lead, metadata, is_first_message)
 
-    return f"""You are Aalya, an empathetic, confident, and persuasive Care Consultant for Genestac Therapeutics. You are chatting on WhatsApp.
+    # Only include DB-configured base_prompt if it has meaningful content beyond default
+    admin_note = ""
+    if base_prompt and "helpful, empathetic AI" not in base_prompt:
+        admin_note = f"\nADMIN ADDITIONAL INSTRUCTIONS:\n{base_prompt}\n"
 
-{base_prompt}
-
-CRITICAL — YOU ARE A WOMAN:
-Always use feminine Hindi verb forms: "main bol rahi hu", "main batati hu", "main samjhati hu". NEVER masculine.
-
-LANGUAGE RULE:
-Start in Hindi/Hinglish. After first turn, match the user's language.
-
-RESPONSE FORMAT — STRICT:
-- NO markdown: no *, **, #, bullets, or dashes. WhatsApp shows them raw.
-- Keep replies SHORT — max 3 sentences. Pick the most important thing only.
-- Natural, warm, human tone — like a knowledgeable friend.
-- Do NOT re-introduce yourself every message.
-
-YOUR GOALS (in priority order):
-1. Send intake form on first message (if not already sent)
-2. Save all lead info as soon as they share it
-3. Understand their health situation
-4. Recommend Mounjaro 2.5mg as starter (for GLP-1 naive patients)
-5. Show pricing: MRP with 10% discount applied
-6. Offer FREE Google Meet consultation with our doctor
-7. Generate Proforma Invoice + send payment link when they want to buy
-
-WHAT WE OFFER (mention naturally when relevant):
-- FREE initial medical assessment (normally Rs 1,499)
-- Weekly doctor consultation included in all plans
-- Personalized diet plan and exercise plan
-- Mobile app for tracking
-- Dosage guidance throughout program
-- Plans: Starter (Rs 4,999/mo), Medical (Rs 12,999/mo), Premium (Rs 29,999/mo)
-
-GLP-1 PRODUCT KNOWLEDGE:
-Tirzepatide (Mounjaro): GIP + GLP-1 dual agonist. Doses: 2.5mg, 5mg, 7.5mg, 10mg, 12.5mg, 15mg weekly.
-SURMOUNT-5 trial: 20.2% avg weight loss in 72 weeks. RECOMMEND FOR STARTERS: 2.5mg first month.
-Semaglutide (Wegovy/Ozempic/Obeda/Sematrinity/Semafull): GLP-1 agonist. 13.7% avg weight loss.
-All injections: self-administer or at local clinic/hospital/pharmacy.
-
-PRICING RULE: Show MRP first, then 10% discount. Never reveal cost price.
-Example: "Mounjaro 2.5mg — MRP Rs 8,000, aapke liye Rs 7,200 (10% off)"
-
-CONTRAINDICATIONS (screen when booking):
-- Personal/family history of MTC or MEN2 syndrome → contraindicated
-- Pregnancy/breastfeeding/planning pregnancy → not suitable
-- History of pancreatitis → needs physician assessment
-- Severe gastroparesis → avoid Mounjaro
-
-TALK LATER RULE: If user says "baad mein baat karte hain / call me later / busy hoon", call schedule_followup tool.
-
-APPOINTMENT BOOKING RULE: If user wants to speak to doctor / see doctor / book consultation, call book_google_meet.
-
-INVOICE RULE: If user wants to buy / proceed with purchase, call generate_proforma_invoice. Always send both the invoice details AND the payment link.
-
-Knowledge Base Context:
-{rag_context if rag_context else "No specific context found."}
-
-Lead Information:
+    return f"""{core_prompt}
+{admin_note}
+CURRENT LEAD PROFILE (do NOT re-ask anything already listed here):
 {lead_info}
-{first_msg_rule}"""
+
+CONVERSATION MEMORY (do NOT repeat topics already covered — this is your long-term context):
+{conversation_summary if conversation_summary else "No prior context — conversation just started."}
+
+KNOWLEDGE BASE:
+{rag_context if rag_context else "No specific KB context found."}"""
 
 
 # ── TOOL DEFINITIONS ─────────────────────────────────────────────────────────
@@ -346,6 +521,11 @@ TOOLS = [
                     "goals": {"type": "string", "description": "Health goals (e.g. weight loss, diabetes control)"},
                     "weight_goal": {"type": "string", "description": "Target weight or amount to lose"},
                     "interested_product": {"type": "string", "description": "Product they showed interest in (e.g. Mounjaro 2.5mg)"},
+                    "service_type": {"type": "string", "enum": ["injection", "program"], "description": "Set to 'injection' if user wants to buy a GLP-1 injection directly. Set to 'program' for weight-loss program enrollment."},
+                    "current_glp1": {"type": "boolean", "description": "True if user is already on a GLP-1 medication; False if GLP-1 naive."},
+                    "injection_screen_done": {"type": "boolean", "description": "Set to true once all 3 safety screening questions (thyroid/MEN2, pregnancy, pancreatitis) have been asked and answered."},
+                    "injection_screen_passed": {"type": "boolean", "description": "Set to true if user passed all safety screening with no contraindications. Set to false if any contraindication found."},
+                    "no_call_preference": {"type": "boolean", "description": "Set to true if user explicitly says they do NOT want a phone call."},
                 },
                 "required": [],
             },
@@ -512,7 +692,7 @@ async def process_whatsapp_message(
         .select("sender_type, message_body")
         .eq(lead_col, lead_id)
         .order("created_at", desc=False)
-        .limit(20)
+        .limit(40)  # Fetch more; only last 6 raw turns go to GPT — the rest is in conversation_summary
         .execute()
     )
     chat_history = []
@@ -526,6 +706,18 @@ async def process_whatsapp_message(
     # ── RAG context ──────────────────────────────────────────────────────────
     rag_context = await get_rag_context(message, supabase)
 
+    # ── Injection intent detection (keyword scan on current message + recent history) ──
+    if not metadata.get("service_type"):
+        if _detect_injection_intent(message, chat_history):
+            metadata["service_type"] = "injection"
+            try:
+                supabase.table(table).update(
+                    {"metadata": {**metadata}}
+                ).eq("id", lead_id).execute()
+                print(f"[Agent] Injection intent detected — service_type='injection' set for lead {lead_id}")
+            except Exception as _ie:
+                print(f"[Agent] service_type save failed (non-fatal): {_ie}")
+
     # ── Base prompt from global_settings ────────────────────────────────────
     base_prompt = "You are a helpful, empathetic AI assistant for Genestac Therapeutics."
     settings_res = supabase.table("global_settings").select("settings_value").eq(
@@ -537,10 +729,10 @@ async def process_whatsapp_message(
         if bp:
             base_prompt = bp
 
-    # ── Build messages ───────────────────────────────────────────────────────
+    # ── Build messages (summarization approach: summary in system prompt + last 6 raw turns) ──
     system_prompt = _build_system_prompt(base_prompt, lead, metadata, rag_context, is_first_message)
     messages = [{"role": "system", "content": system_prompt}]
-    messages.extend(chat_history[-10:])
+    messages.extend(chat_history[-6:])  # Only last 6 raw turns; older context lives in conversation_summary
     messages.append({"role": "user", "content": message})
 
     # ── First call to GPT ────────────────────────────────────────────────────
@@ -595,6 +787,9 @@ async def process_whatsapp_message(
                         "age", "gender", "height", "weight", "medical_history",
                         "medical_condition", "address", "pincode", "city", "phone",
                         "goals", "weight_goal", "interested_product", "other_critical_info",
+                        # Track-state fields
+                        "service_type", "current_glp1", "injection_screen_done",
+                        "injection_screen_passed", "no_call_preference",
                     ]
                     for field in meta_fields:
                         if args.get(field):
@@ -983,6 +1178,19 @@ async def process_whatsapp_message(
                             await _send_wa(clean_lead_phone, msg)
                         except Exception as e:
                             print(f"[Agent] Extra WA message failed: {e}")
+
+        # ── Update conversation summary asynchronously (fire-and-forget) ────────
+        if ai_text:
+            asyncio.create_task(
+                _update_conversation_summary(
+                    lead_id=lead_id,
+                    table=table,
+                    metadata=metadata,
+                    supabase=supabase,
+                    new_user_message=message,
+                    new_ai_response=ai_text,
+                )
+            )
 
         return ai_text, should_trigger_call
 

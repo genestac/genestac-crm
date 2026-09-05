@@ -172,14 +172,14 @@ async def tool_fetch_lead(lead_id: str = ""):
     source = "hamare website se"
     lead_status = "new"
 
-    u = supabase.table("users").select("name, source, status").eq("id", lead_id).execute()
+    u = supabase.table("users").select("name, source, status, metadata").eq("id", lead_id).execute()
     if u.data:
         row = u.data[0]
         lead_name = row.get("name") or "ji"
         source = row.get("source") or "hamare website se"
         lead_status = row.get("status") or "new"
     else:
-        l = supabase.table("leads").select("name, source, status").eq("id", lead_id).execute()
+        l = supabase.table("leads").select("name, source, status, metadata").eq("id", lead_id).execute()
         if l.data:
             row = l.data[0]
             lead_name = row.get("name") or "ji"
@@ -202,16 +202,48 @@ async def tool_fetch_lead(lead_id: str = ""):
     except Exception:
         pass
 
+    # Also fetch metadata for richer context
+    lead_metadata = {}
+    try:
+        if u.data:
+            lead_metadata = u.data[0].get("metadata") or {}
+        else:
+            if l.data:
+                lead_metadata = l.data[0].get("metadata") or {}
+    except Exception:
+        pass
+
     logger.warning(
         f"[Sarvam/fetch-lead] lead_id={lead_id!r} name={lead_name!r} "
-        f"status={lead_status!r} memory_len={len(last_call_summary)}"
+        f"status={lead_status!r} memory_len={len(last_call_summary)} "
+        f"service_type={lead_metadata.get('service_type', 'unknown')!r}"
     )
+
+    # Build a cross-channel context hint for the voice agent
+    wa_summary = lead_metadata.get("conversation_summary", "")
+    service_type = lead_metadata.get("service_type", "unknown")
+    wa_context = ""
+    if wa_summary:
+        if service_type == "injection":
+            wa_context = f"This customer was asking about GLP-1 injection purchase on WhatsApp. Summary: {wa_summary[:300]}"
+        elif service_type == "program":
+            wa_context = f"This customer was exploring the weight loss program on WhatsApp. Summary: {wa_summary[:300]}"
+        else:
+            wa_context = f"WhatsApp conversation summary: {wa_summary[:300]}"
 
     return {
         "lead_name": lead_name,
         "source": source,
         "status": lead_status,
         "last_call_summary": last_call_summary,
+        # Enriched cross-channel context
+        "service_type": service_type,
+        "interested_product": lead_metadata.get("interested_product", ""),
+        "current_weight": lead_metadata.get("current_weight") or lead_metadata.get("weight", ""),
+        "weight_goal": lead_metadata.get("weight_goal", ""),
+        "health_concerns": lead_metadata.get("health_concerns") or lead_metadata.get("medical_history", ""),
+        "interested_plan": lead_metadata.get("interested_plan") or lead_metadata.get("interested_plan_interest", ""),
+        "wa_context": wa_context,
     }
 
 
@@ -773,9 +805,9 @@ async def tool_search_knowledge_base(request: Request):
         search_res = supabase.rpc("match_knowledge_base", {
             "query_embedding": query_vector,
             "match_threshold": 0.5,
-            "match_count": 3
+            "match_count": 3,
         }).execute()
-
+        results = search_res.data or []
         if results:
             formatted = "\n\n".join([f"{r['title']}: {r['content']}" for r in results])
             logger.warning(f"[Sarvam/search-kb] Found {len(results)} matches.")
