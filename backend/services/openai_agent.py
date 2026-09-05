@@ -228,6 +228,7 @@ def _format_lead_data_for_prompt(lead: dict, metadata: dict) -> str:
         f"Service Type: {metadata.get('service_type', 'unknown')}",
         f"Interested Product: {metadata.get('interested_product') or 'Not specified'}",
         f"Currently on GLP-1: {glp1_str}",
+        f"Injection Screen Step: {metadata.get('injection_screen_step', 0)} (0=not started, 1=Q1 done, 2=Q2 done, 3=all done)",
         f"Injection Screen Done: {metadata.get('injection_screen_done', False)}",
         f"Injection Screen Passed: {metadata.get('injection_screen_passed', False)}",
         f"Interested Plan: {metadata.get('interested_plan') or metadata.get('interested_plan_interest') or 'Not specified'}",
@@ -246,6 +247,13 @@ INJECTION_KEYWORDS = [
     "0.25mg", "0.5mg", "1.7mg", "2.4mg",
 ]
 
+NO_CALL_KEYWORDS = [
+    "call nhi", "call nahi", "call mat", "call na karo", "call nahi karna",
+    "call nhi karna", "no call", "don't call", "do not call",
+    "call band", "call ki zarurat nahi", "call me later",
+    "mujhe call nhi", "mujhe call nahi",
+]
+
 
 def _detect_injection_intent(message: str, chat_history: list) -> bool:
     """Return True if the current message or recent history contains injection-related keywords."""
@@ -254,6 +262,12 @@ def _detect_injection_intent(message: str, chat_history: list) -> bool:
         texts.append((m.get("content") or "").lower())
     combined = " ".join(texts)
     return any(kw in combined for kw in INJECTION_KEYWORDS)
+
+
+def _detect_no_call_preference(message: str) -> bool:
+    """Return True if user's current message expresses they don't want a call."""
+    msg_lower = message.lower()
+    return any(kw in msg_lower for kw in NO_CALL_KEYWORDS)
 
 
 async def _update_conversation_summary(
@@ -310,6 +324,9 @@ def _build_injection_track_prompt(lead: dict, metadata: dict) -> str:
     current_glp1 = metadata.get("current_glp1")  # True / False / None
     no_call = metadata.get("no_call_preference", False)
 
+    gender = (metadata.get("gender") or lead.get("gender") or "").lower().strip()
+    is_male = gender in ("male", "m", "man", "ladka", "mard", "purush")
+
     if screen_done and screen_passed:
         if current_glp1:
             phase_instruction = (
@@ -337,19 +354,77 @@ def _build_injection_track_prompt(lead: dict, metadata: dict) -> str:
             "Offer: 'Kya main aapka FREE doctor consultation book kar du?' → call book_google_meet if they agree."
         )
     else:
-        phase_instruction = (
-            "CURRENT PHASE: SAFETY SCREENING\n"
-            "Ask these 3 questions ONE AT A TIME. Check Conversation Memory to see which are already answered.\n"
-            "  Q1: 'Kya aapko ya aapke close family mein kabhi thyroid cancer (MTC) ya MEN2 syndrome hua hai?'\n"
-            "  Q2: 'Kya aap pregnant hain, breastfeeding kar rahi hain, ya pregnancy plan kar rahi hain?'\n"
-            "  Q3: 'Kya aapko kabhi severe pancreatitis hua hai?'\n"
-            "\n"
-            "After ALL 3 are answered:\n"
-            "  - All NO → call save_lead_info(injection_screen_done=true, injection_screen_passed=true). "
-            "Then immediately recommend Mounjaro 2.5mg.\n"
-            "  - Any YES → call save_lead_info(injection_screen_done=true, injection_screen_passed=false). "
-            "Explain contraindication warmly and offer FREE doctor consultation via book_google_meet."
-        )
+        step = int(metadata.get("injection_screen_step") or 0)
+
+        if is_male:
+            # Males: skip pregnancy question entirely. Only 2 questions: Q1 (thyroid) + Q3 (pancreatitis).
+            if step == 0:
+                phase_instruction = (
+                    "CURRENT PHASE: SAFETY SCREENING — QUESTION 1 of 2\n"
+                    "Ask this casually and briefly:\n"
+                    "  'Ek quick check — aapke family mein ya aapko kabhi thyroid cancer ki koi history hai?'\n\n"
+                    "When user answers:\n"
+                    "  - If NO → call save_lead_info(injection_screen_step=1). Then immediately ask the next question.\n"
+                    "  - If YES → call save_lead_info(injection_screen_done=true, injection_screen_passed=false). "
+                    "Explain warmly, offer FREE doctor consultation via book_google_meet."
+                )
+            elif step == 1:
+                phase_instruction = (
+                    "CURRENT PHASE: SAFETY SCREENING — QUESTION 2 of 2 (FINAL)\n"
+                    "Q1 (thyroid) already answered: No.\n"
+                    "Ask this only:\n"
+                    "  'Aur ek baat — kabhi severe pancreatitis hua hai aapko?'\n\n"
+                    "When user answers:\n"
+                    "  - If NO → call save_lead_info(injection_screen_step=3, injection_screen_done=true, "
+                    "injection_screen_passed=true). Then IMMEDIATELY recommend Mounjaro 2.5mg.\n"
+                    "  - If YES → call save_lead_info(injection_screen_done=true, injection_screen_passed=false). "
+                    "Explain warmly, offer FREE doctor consultation via book_google_meet."
+                )
+            else:
+                phase_instruction = (
+                    "All screening questions answered. "
+                    "Call save_lead_info(injection_screen_done=true, injection_screen_passed=true) and recommend Mounjaro 2.5mg."
+                )
+        else:
+            # Female / unknown gender: ask all 3 questions
+            if step == 0:
+                phase_instruction = (
+                    "CURRENT PHASE: SAFETY SCREENING — QUESTION 1 of 3\n"
+                    "Ask this casually and briefly:\n"
+                    "  'Ek quick check — aapke family mein ya aapko kabhi thyroid cancer ki koi history hai?'\n\n"
+                    "When user answers:\n"
+                    "  - If NO → call save_lead_info(injection_screen_step=1). Then immediately ask next question.\n"
+                    "  - If YES → call save_lead_info(injection_screen_done=true, injection_screen_passed=false). "
+                    "Explain warmly, offer FREE doctor consultation via book_google_meet."
+                )
+            elif step == 1:
+                phase_instruction = (
+                    "CURRENT PHASE: SAFETY SCREENING — QUESTION 2 of 3\n"
+                    "Q1 already answered: No.\n"
+                    "Ask this only:\n"
+                    "  'Aur ek baat — aap abhi pregnant hain ya pregnancy plan kar rahi hain?'\n\n"
+                    "When user answers:\n"
+                    "  - If NO → call save_lead_info(injection_screen_step=2). Then immediately ask last question.\n"
+                    "  - If YES → call save_lead_info(injection_screen_done=true, injection_screen_passed=false). "
+                    "Explain warmly, offer FREE doctor consultation via book_google_meet."
+                )
+            elif step == 2:
+                phase_instruction = (
+                    "CURRENT PHASE: SAFETY SCREENING — QUESTION 3 of 3 (FINAL)\n"
+                    "Q1 and Q2 already answered: No, No.\n"
+                    "Ask this only:\n"
+                    "  'Last one — kabhi severe pancreatitis hua hai?'\n\n"
+                    "When user answers:\n"
+                    "  - If NO → call save_lead_info(injection_screen_step=3, injection_screen_done=true, "
+                    "injection_screen_passed=true). Then IMMEDIATELY recommend Mounjaro 2.5mg.\n"
+                    "  - If YES → call save_lead_info(injection_screen_done=true, injection_screen_passed=false). "
+                    "Explain warmly, offer FREE doctor consultation via book_google_meet."
+                )
+            else:
+                phase_instruction = (
+                    "All screening questions answered. "
+                    "Call save_lead_info(injection_screen_done=true, injection_screen_passed=true) and recommend Mounjaro 2.5mg."
+                )
 
     no_call_rule = (
         "\nCRITICAL: This user said they do NOT want phone calls. "
@@ -386,10 +461,16 @@ ABOUT GENESTAC (mention when relevant):
 ABSOLUTE DON'T LIST:
 DO NOT send the GLP-1 intake form.
 DO NOT ask for address or pincode (not needed for injection purchase).
-DO NOT ask questions already answered — check Lead Profile and Conversation Memory.
+DO NOT repeat a screening question that was already asked — the step number in Lead Profile is the source of truth.
 DO NOT ask the user's name/age/weight if already listed in Lead Profile.
 DO NOT ask what product they want if they already mentioned Mounjaro or a GLP-1.
-DO NOT generate invoice for a plan (Starter/Medical/Premium) in this track — only for the injection product."""
+DO NOT apologize or reference previous errors — just move forward.
+DO NOT generate invoice for a plan (Starter/Medical/Premium) — only for the injection product."""
+
+
+
+
+
 
 
 def _build_program_track_prompt(lead: dict, metadata: dict, is_first_message: bool) -> str:
@@ -523,8 +604,9 @@ TOOLS = [
                     "interested_product": {"type": "string", "description": "Product they showed interest in (e.g. Mounjaro 2.5mg)"},
                     "service_type": {"type": "string", "enum": ["injection", "program"], "description": "Set to 'injection' if user wants to buy a GLP-1 injection directly. Set to 'program' for weight-loss program enrollment."},
                     "current_glp1": {"type": "boolean", "description": "True if user is already on a GLP-1 medication; False if GLP-1 naive."},
-                    "injection_screen_done": {"type": "boolean", "description": "Set to true once all 3 safety screening questions (thyroid/MEN2, pregnancy, pancreatitis) have been asked and answered."},
-                    "injection_screen_passed": {"type": "boolean", "description": "Set to true if user passed all safety screening with no contraindications. Set to false if any contraindication found."},
+                    "injection_screen_step": {"type": "integer", "description": "Screening progress: call with 1 after Q1 answered No, 2 after Q2 answered No, 3 after Q3 answered No."},
+                    "injection_screen_done": {"type": "boolean", "description": "Set to true once all 3 safety screening questions have been asked and answered."},
+                    "injection_screen_passed": {"type": "boolean", "description": "Set to true if user passed all safety screening. Set to false if any contraindication found."},
                     "no_call_preference": {"type": "boolean", "description": "Set to true if user explicitly says they do NOT want a phone call."},
                 },
                 "required": [],
@@ -718,6 +800,17 @@ async def process_whatsapp_message(
             except Exception as _ie:
                 print(f"[Agent] service_type save failed (non-fatal): {_ie}")
 
+    # ── No-call preference detection (keyword scan on current message) — synchronous ──
+    if not metadata.get("no_call_preference") and _detect_no_call_preference(message):
+        metadata["no_call_preference"] = True
+        try:
+            supabase.table(table).update(
+                {"metadata": {**metadata}}
+            ).eq("id", lead_id).execute()
+            print(f"[Agent] No-call preference detected and saved for lead {lead_id}")
+        except Exception as _nce:
+            print(f"[Agent] no_call_preference save failed (non-fatal): {_nce}")
+
     # ── Base prompt from global_settings ────────────────────────────────────
     base_prompt = "You are a helpful, empathetic AI assistant for Genestac Therapeutics."
     settings_res = supabase.table("global_settings").select("settings_value").eq(
@@ -742,7 +835,8 @@ async def process_whatsapp_message(
             messages=messages,
             tools=TOOLS,
             tool_choice="auto",
-            temperature=0.7,
+            # Lower temperature for injection state machine to avoid Q-loop hallucinations
+            temperature=0.3 if metadata.get("service_type") == "injection" else 0.7,
             max_tokens=300,
         )
 
@@ -787,12 +881,19 @@ async def process_whatsapp_message(
                         "age", "gender", "height", "weight", "medical_history",
                         "medical_condition", "address", "pincode", "city", "phone",
                         "goals", "weight_goal", "interested_product", "other_critical_info",
-                        # Track-state fields
-                        "service_type", "current_glp1", "injection_screen_done",
-                        "injection_screen_passed", "no_call_preference",
+                        # Track-state fields (string / numeric)
+                        "service_type",
+                    ]
+                    # Boolean / integer fields — use `is not None` so False and 0 are saved correctly
+                    bool_int_fields = [
+                        "current_glp1", "injection_screen_done", "injection_screen_passed",
+                        "no_call_preference", "injection_screen_step",
                     ]
                     for field in meta_fields:
                         if args.get(field):
+                            metadata[field] = args[field]
+                    for field in bool_int_fields:
+                        if args.get(field) is not None:
                             metadata[field] = args[field]
                     update_data["metadata"] = metadata
 
