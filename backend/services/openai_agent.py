@@ -519,9 +519,12 @@ def _build_program_track_prompt(lead: dict, metadata: dict, is_first_message: bo
     if is_first_message and not intake_sent:
         first_msg_rule = (
             "\nCRITICAL FIRST MESSAGE:\n"
-            "This is the FIRST message. Call send_intake_form immediately. "
-            "Give a very short warm greeting and send the form. Nothing else yet."
+            "The intake form has ALREADY been sent as a separate WhatsApp message by the system. "
+            "DO NOT call send_intake_form and do NOT say you are sending it — it is already sent. "
+            "Just give a very short warm 1-sentence greeting and ask the user to fill in the form above. "
+            "Example: 'Namaste! Main Aalya bol rahi hu Genestac se — please upar wala form bhar dein! 🙏'"
         )
+
     elif is_first_message and intake_sent:
         first_msg_rule = (
             "\nFIRST REPLY AFTER INTAKE FORM:\n"
@@ -957,6 +960,28 @@ async def process_whatsapp_message(
     # ── Initialize extra_wa_messages EARLY (Python invoice block uses it below) ──
     extra_wa_messages = []  # additional WA messages to send (PI, notifs, etc.)
 
+    # ── Python-driven intake form send ────────────────────────────────────────
+    # GPT hallucinates "form bhej diya" in text without calling the tool.
+    # Solution: send form from Python if not yet sent, then tell GPT it's done.
+    _intake_sent = lead.get("wa_intake_form_sent") or metadata.get("wa_intake_form_sent") or False
+    _is_program_track = metadata.get("service_type") != "injection"
+    _should_send_form = is_first_message and not _intake_sent and _is_program_track
+
+    if _should_send_form:
+        extra_wa_messages.append(INTAKE_FORM_TEXT)
+        # Mark as sent in DB
+        try:
+            _meta_upd = {**metadata, "wa_intake_form_sent": True}
+            try:
+                supabase.table(table).update({"wa_intake_form_sent": True, "metadata": _meta_upd}).eq("id", lead_id).execute()
+            except Exception:
+                supabase.table(table).update({"metadata": _meta_upd}).eq("id", lead_id).execute()
+            metadata["wa_intake_form_sent"] = True
+            print(f"[Agent] Python-driven intake form sent for lead {lead_id}")
+        except Exception as _ife:
+            print(f"[Agent] Intake form DB update failed (non-fatal): {_ife}")
+
+
     # ── Python-driven invoice generation ──────────────────────────────────────
     # When pending_invoice=True, generate invoice from Python directly.
     # Always uses create_direct_injection_pi — cart table has FK/NOT NULL constraints
@@ -965,6 +990,10 @@ async def process_whatsapp_message(
         "bheja nhi", "nhi bheja", "nhi aaya", "link nhi", "nhi mila",
         "send nhi", "abhi tak nhi", "kahan hai", "kab milega",
         "didn't send", "not received", "where is", "still waiting",
+        "haven't received", "havnt received", "havent received",
+        "check again", "check karo", "dobara bhejo", "phir bhejo",
+        "received nhi", "nhi receive", "link nahi", "nahi mila",
+
         "send me now", "send it now", "abhi bhejo", "abhi bhej",
     ]
     _msg_pad_lower = " " + message.lower().strip() + " "
