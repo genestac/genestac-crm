@@ -367,21 +367,22 @@ def _build_injection_track_prompt(lead: dict, metadata: dict) -> str:
         if current_glp1:
             phase_instruction = (
                 "CURRENT PHASE: ESCALATION DISCUSSION\n"
-                "The user is already on a GLP-1. Ask their current dose, then guide on escalation.\n"
-                "Always recommend doctor consultation for dose changes."
+                "The user is already on a GLP-1. Ask their current dose, then recommend appropriate next dose.\n"
+                "Always note that dose changes should be guided by a doctor.\n"
+                "After understanding their current dose, ask: 'Kya aap continue karna chahte hain same product ke saath ya switch karna chahenge?'\n"
+                "Then generate invoice for whatever they confirm."
             )
         else:
             phase_instruction = (
-                "CURRENT PHASE: PRODUCT RECOMMENDATION & PURCHASE\n"
-                "Safety screening is complete and passed. User is GLP-1 naive.\n"
-                "- Recommend Mounjaro 2.5mg as the safest starter dose for the first month.\n"
-                "- Tirzepatide (Mounjaro) shows 20.2% avg weight loss vs 13.7% for Semaglutide — mention when comparing.\n"
-                "- Price (only when asked): MRP Rs 8,000 → aapke liye Rs 7,200 (10% off).\n"
-                "- PURCHASE TRIGGER: When user says any of these — 'khareedna hai', 'invoice do', "
-                "'payment link', 'kar dijiye', 'kar do', 'haan', 'haa', 'ha', 'ok', 'send karo', "
-                "'bhej do', 'proceed', 'theek hai', 'bilkul' — IMMEDIATELY call generate_proforma_invoice "
-                "with product_name='Mounjaro'. Do NOT ask again what they want. Do NOT apologize first.\n"
-
+                "CURRENT PHASE: PRODUCT SELECTION & PURCHASE\n"
+                "Safety screening is complete and passed.\n"
+                "Ask the user: 'Mounjaro 2.5mg se shuru karein? Ya aapki koi aur preference hai — "
+                "jaise Wegovy (Semaglutide)?'\n"
+                "- If they confirm Mounjaro or say 'haan'/'ok'/'theek hai'/'yes'/'bilkul': call generate_proforma_invoice(product_name='Mounjaro', discount_percentage=10).\n"
+                "- If they mention Wegovy/Ozempic/Semaglutide: call generate_proforma_invoice(product_name='Wegovy', discount_percentage=10).\n"
+                "- If they ask about price first: Mounjaro 2.5mg MRP ₹13,125 → aapke liye ₹11,812 (10% off). Wegovy pricing: share when asked.\n"
+                "- Do NOT generate invoice without their explicit confirmation.\n"
+                "- Once they confirm: IMMEDIATELY call generate_proforma_invoice. Do NOT ask again."
             )
     elif screen_done and not screen_passed:
         phase_instruction = (
@@ -391,77 +392,22 @@ def _build_injection_track_prompt(lead: dict, metadata: dict) -> str:
             "Offer: 'Kya main aapka FREE doctor consultation book kar du?' → call book_google_meet if they agree."
         )
     else:
-        step = int(metadata.get("injection_screen_step") or 0)
-
-        if is_male:
-            # Males: skip pregnancy question entirely. Only 2 questions: Q1 (thyroid) + Q3 (pancreatitis).
-            if step == 0:
-                phase_instruction = (
-                    "CURRENT PHASE: SAFETY SCREENING — QUESTION 1 of 2\n"
-                    "Ask this casually and briefly:\n"
-                    "  'Ek quick check — aapke family mein ya aapko kabhi thyroid cancer ki koi history hai?'\n\n"
-                    "When user answers:\n"
-                    "  - If NO → call save_lead_info(injection_screen_step=1). Then immediately ask the next question.\n"
-                    "  - If YES → call save_lead_info(injection_screen_done=true, injection_screen_passed=false). "
-                    "Explain warmly, offer FREE doctor consultation via book_google_meet."
-                )
-            elif step == 1:
-                phase_instruction = (
-                    "CURRENT PHASE: SAFETY SCREENING — QUESTION 2 of 2 (FINAL)\n"
-                    "Q1 (thyroid) already answered: No.\n"
-                    "Ask this only:\n"
-                    "  'Aur ek baat — kabhi severe pancreatitis hua hai aapko?'\n\n"
-                    "When user answers:\n"
-                    "  - If NO → call save_lead_info(injection_screen_step=3, injection_screen_done=true, "
-                    "injection_screen_passed=true). Then IMMEDIATELY recommend Mounjaro 2.5mg.\n"
-                    "  - If YES → call save_lead_info(injection_screen_done=true, injection_screen_passed=false). "
-                    "Explain warmly, offer FREE doctor consultation via book_google_meet."
-                )
-            else:
-                phase_instruction = (
-                    "All screening questions answered. "
-                    "Call save_lead_info(injection_screen_done=true, injection_screen_passed=true) and recommend Mounjaro 2.5mg."
-                )
-        else:
-            # Female / unknown gender: ask all 3 questions
-            if step == 0:
-                phase_instruction = (
-                    "CURRENT PHASE: SAFETY SCREENING — QUESTION 1 of 3\n"
-                    "Ask this casually and briefly:\n"
-                    "  'Ek quick check — aapke family mein ya aapko kabhi thyroid cancer ki koi history hai?'\n\n"
-                    "When user answers:\n"
-                    "  - If NO → call save_lead_info(injection_screen_step=1). Then immediately ask next question.\n"
-                    "  - If YES → call save_lead_info(injection_screen_done=true, injection_screen_passed=false). "
-                    "Explain warmly, offer FREE doctor consultation via book_google_meet."
-                )
-            elif step == 1:
-                phase_instruction = (
-                    "CURRENT PHASE: SAFETY SCREENING — QUESTION 2 of 3\n"
-                    "Q1 already answered: No.\n"
-                    "Ask this only:\n"
-                    "  'Aur ek baat — aap abhi pregnant hain ya pregnancy plan kar rahi hain?'\n\n"
-                    "When user answers:\n"
-                    "  - If NO → call save_lead_info(injection_screen_step=2). Then immediately ask last question.\n"
-                    "  - If YES → call save_lead_info(injection_screen_done=true, injection_screen_passed=false). "
-                    "Explain warmly, offer FREE doctor consultation via book_google_meet."
-                )
-            elif step == 2:
-                phase_instruction = (
-                    "CURRENT PHASE: SAFETY SCREENING — QUESTION 3 of 3 (FINAL)\n"
-                    "Q1 and Q2 already answered: No, No.\n"
-                    "Ask this only:\n"
-                    "  'Last one — kabhi severe pancreatitis hua hai?'\n\n"
-                    "When user answers:\n"
-                    "  - If NO → call save_lead_info(injection_screen_step=3, injection_screen_done=true, "
-                    "injection_screen_passed=true). Then IMMEDIATELY recommend Mounjaro 2.5mg.\n"
-                    "  - If YES → call save_lead_info(injection_screen_done=true, injection_screen_passed=false). "
-                    "Explain warmly, offer FREE doctor consultation via book_google_meet."
-                )
-            else:
-                phase_instruction = (
-                    "All screening questions answered. "
-                    "Call save_lead_info(injection_screen_done=true, injection_screen_passed=true) and recommend Mounjaro 2.5mg."
-                )
+        # ── COMBINED SCREENING — ask ALL questions in ONE message ──────────────
+        # Do not step-by-step interrogate. Ask all relevant safety questions naturally in a single message.
+        # The user's reply may answer all at once — parse intelligently.
+        pregnancy_q = "" if is_male else " Kya aap pregnant hain ya pregnancy plan kar rahi hain?"
+        phase_instruction = (
+            "CURRENT PHASE: QUICK SAFETY CHECK\n"
+            "Before recommending a product, do a quick safety screen — ask ALL questions in ONE message, naturally:\n"
+            f"  Example: 'Ek quick safety check — kya aapke family mein ya aapko thyroid cancer ki history hai?{pregnancy_q} Aur kabhi pancreatitis hua hai?'\n\n"
+            "Rules for evaluating the reply:\n"
+            "  - If user answers NO to all → call save_lead_info(injection_screen_step=3, injection_screen_done=true, injection_screen_passed=true). "
+            "Then ask: 'Mounjaro 2.5mg se shuru karein? Ya koi aur preference hai?'\n"
+            "  - If any answer is YES → call save_lead_info(injection_screen_done=true, injection_screen_passed=false). "
+            "Explain warmly, offer FREE doctor consultation via book_google_meet.\n"
+            "  - If answer is ambiguous for any question → follow up ONLY on the unclear one in your next message.\n"
+            "DO NOT ask questions one by one. Combine them in a single natural message."
+        )
 
     no_call_rule = (
         "\nCRITICAL: This user said they do NOT want phone calls. "
@@ -498,11 +444,12 @@ ABOUT GENESTAC (only if user asks):
 ABSOLUTE DON'T LIST:
 DO NOT send the GLP-1 intake form.
 DO NOT ask for address or pincode (not needed for injection purchase).
-DO NOT repeat a screening question that was already asked — the step number in Lead Profile is the source of truth.
+DO NOT ask screening questions one by one — combine them all in a SINGLE message.
 DO NOT ask the user's name/age/weight if already listed in Lead Profile.
-DO NOT ask what product they want if they already mentioned Mounjaro or a GLP-1.
+DO NOT assume product — always ask preference after screening passes.
+DO NOT generate an invoice without the user explicitly confirming.
 DO NOT apologize or reference previous errors — just move forward.
-DO NOT proactively offer doctor consultation — only mention it if user says 'mujhe doctor se baat karni hai' or seems genuinely confused about the product.
+DO NOT proactively offer doctor consultation — only if user asks.
 DO NOT generate invoice for a plan (Starter/Medical/Premium) — only for the injection product."""
 
 
@@ -867,43 +814,30 @@ async def process_whatsapp_message(
         except Exception as _nce:
             print(f"[Agent] no_call_preference save failed (non-fatal): {_nce}")
 
-    # ── Injection screening auto-advance (Python-driven, NOT GPT tool-driven) ────────────
-    # GPT is unreliable at calling save_lead_info for short Hindi answers like "Nhi".
-    # We detect the answer here and advance the state BEFORE building the system prompt,
-    # so GPT always sees the already-updated step and just writes the next question.
+    # ── Injection screening auto-advance (Python-driven) ────────────────────────────
+    # Since screening is now asked in ONE combined message, we parse the single reply for any YES/NO.
+    # If all answers are NO → mark as passed. If any YES → mark as failed.
     if metadata.get("service_type") == "injection" and not metadata.get("injection_screen_done"):
-        _step = int(metadata.get("injection_screen_step") or 0)
-        _gender = (metadata.get("gender") or lead.get("gender") or "").lower().strip()
-        _is_male = _gender in ("male", "m", "man", "ladka", "mard", "purush")
-        _max_steps = 2 if _is_male else 3
+        _answer = _detect_screening_answer(message)
+        if _answer == "no":
+            metadata["injection_screen_step"] = 3
+            metadata["injection_screen_done"] = True
+            metadata["injection_screen_passed"] = True
+            print(f"[Agent] Injection screening PASSED (combined reply) for lead {lead_id}")
+            try:
+                supabase.table(table).update({"metadata": {**metadata}}).eq("id", lead_id).execute()
+            except Exception as _se:
+                print(f"[Agent] Screening pass DB update failed (non-fatal): {_se}")
+        elif _answer == "yes":
+            metadata["injection_screen_done"] = True
+            metadata["injection_screen_passed"] = False
+            print(f"[Agent] Contraindication found (combined reply) for lead {lead_id}")
+            try:
+                supabase.table(table).update({"metadata": {**metadata}}).eq("id", lead_id).execute()
+            except Exception as _se:
+                print(f"[Agent] Contraindication DB update failed (non-fatal): {_se}")
+        # else: ambiguous — GPT will ask a follow-up on the unclear question only
 
-        if _step < _max_steps:
-            _answer = _detect_screening_answer(message)
-            if _answer == "no":
-                _new_step = _step + 1
-                if _new_step >= _max_steps:
-                    # All screening questions answered No — passed
-                    metadata["injection_screen_step"] = _max_steps
-                    metadata["injection_screen_done"] = True
-                    metadata["injection_screen_passed"] = True
-                    print(f"[Agent] Injection screening PASSED for lead {lead_id} (step {_step} → done)")
-                else:
-                    metadata["injection_screen_step"] = _new_step
-                    print(f"[Agent] Injection screening step {_step} → {_new_step} for lead {lead_id}")
-                try:
-                    supabase.table(table).update({"metadata": {**metadata}}).eq("id", lead_id).execute()
-                except Exception as _se:
-                    print(f"[Agent] Screening step DB update failed (non-fatal): {_se}")
-            elif _answer == "yes":
-                # Contraindication found
-                metadata["injection_screen_done"] = True
-                metadata["injection_screen_passed"] = False
-                print(f"[Agent] Contraindication found at step {_step} for lead {lead_id}")
-                try:
-                    supabase.table(table).update({"metadata": {**metadata}}).eq("id", lead_id).execute()
-                except Exception as _se:
-                    print(f"[Agent] Contraindication DB update failed (non-fatal): {_se}")
-            # else: ambiguous answer — GPT handles it, step stays the same
 
 
     # ── Injection purchase intent detection (Python-driven) ───────────────────────────────
@@ -916,12 +850,10 @@ async def process_whatsapp_message(
         "pay kar", "abhi le",
     ]
     _AFFIRM_KEYWORDS = [
-        "haa", "haan", "ha ", "ha,", "ha.", " yes", "ok ", "ok,", "ok.", "okay",
-        "theek hai", "theek", "bilkul", "proceed", "kar do", "kardo", "kar dijiye",
-        "bhej do", "bhejdo", "bhejo", "send karo", "send", "pls send", "please send",
-        "chahiye", "dedo", "de do", "done", "yep", "yeah", "fine", "sahi",
+        "theek hai", "kar do", "kar dijiye", "bhej do", "send karo",
+        "pls send", "please send", "de do", "kardo", "bhejdo"
     ]
-    _AFFIRM_EXACT = {"ok", "okay", "k", "yes", "haan", "ha", "haa", "theek", "sure", "bilkul", "proceed", "done", "fine", "sahi", "send", "bhejo", "kardo", "bhejdo"}
+    _AFFIRM_EXACT = {"ok", "okay", "k", "yes", "haan", "ha", "haa", "theek", "sure", "bilkul", "proceed", "done", "fine", "sahi", "send", "bhejo", "chahiye", "dedo", "yep", "yeah"}
     _msg_clean = message.lower().strip()
     _msg_words = set(re.findall(r'[a-zA-Z]+', _msg_clean))
     _msg_pad = " " + _msg_clean + " "
@@ -951,8 +883,11 @@ async def process_whatsapp_message(
         metadata.get("injection_screen_passed")
     )
     if _inj_ready:
-        if _wants_purchase or _is_affirm or metadata.get("pending_invoice"):
+        _mentions_other_product = any(p in _msg_clean for p in ["wegovy", "semaglutide", "ozempic", "rybelsus"])
+        if (_wants_purchase or _is_affirm or metadata.get("pending_invoice")) and not _mentions_other_product:
             metadata["pending_invoice"] = True
+        elif _mentions_other_product:
+            metadata["pending_invoice"] = False
 
     # ── Stale conversation_summary guard ──────────────────────────────────────
     _lead_name = (lead.get("name") or "").strip().lower()
@@ -1326,6 +1261,7 @@ async def process_whatsapp_message(
                             # Requires: ALTER TABLE cart ALTER COLUMN plan_id DROP NOT NULL;
                             inv_item = _get_inventory_item_by_name(supabase, product_name)
                             if inv_item:
+                                metadata["recommended_product"] = product_name
                                 try:
                                     cart_id = get_or_create_active_cart(
                                         supabase=supabase,
