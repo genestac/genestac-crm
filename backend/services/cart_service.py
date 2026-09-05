@@ -364,3 +364,141 @@ def format_pi_whatsapp_message(pi: dict) -> str:
 
     lines.append("\nFor any queries, reply to this message. Our team is here to help 🙏")
     return "\n".join(lines)
+
+
+def create_direct_injection_pi(
+    supabase: Client,
+    lead_id: str,
+    inventory_item: dict,
+    quantity: int = 1,
+    discount_pct: float = 10.0,
+    source: str = "whatsapp_bot",
+    sales_rep_id: Optional[str] = None,
+) -> dict:
+    """
+    Create a Proforma Invoice for an injection/inventory purchase WITHOUT
+    going through the cart table (which has NOT NULL constraints on plan_id
+    that don't apply to injection purchases).
+
+    inventory_item must be a dict with at least: id, name, price, compare_at_price, gst_percentage
+    Returns the same shape as create_pi_from_cart.
+    """
+    # ── Compute line item ──────────────────────────────────────────────────────
+    mrp = float(inventory_item.get("compare_at_price") or inventory_item.get("price") or 0)
+    cost = float(inventory_item.get("price") or 0)
+    gst_pct = float(inventory_item.get("gst_percentage") or 18.0)
+
+    # Enforce discount floor: discounted price must not go below cost
+    discounted_unit = round(mrp * (1 - discount_pct / 100), 2)
+    if cost > 0 and discounted_unit < cost:
+        discounted_unit = cost
+        actual_discount_pct = round((1 - cost / mrp) * 100, 2) if mrp > 0 else 0
+    else:
+        actual_discount_pct = discount_pct
+
+    gst_per_unit = round(discounted_unit * gst_pct / 100, 2)
+    line_total = round((discounted_unit + gst_per_unit) * quantity, 2)
+
+    base_price = round(mrp * quantity, 2)
+    discount_amount = round((mrp - discounted_unit) * quantity, 2)
+    gst_amount = round(gst_per_unit * quantity, 2)
+    total_amount = line_total
+
+    items = [{
+        "item_type": "inventory",
+        "inventory_id": inventory_item.get("id"),
+        "item_name": inventory_item.get("name", "Injection"),
+        "item_description": inventory_item.get("name", ""),
+        "quantity": quantity,
+        "unit_mrp": mrp,
+        "discount_percentage": actual_discount_pct,
+        "discounted_unit_price": discounted_unit,
+        "gst_percentage": gst_pct,
+        "gst_amount": gst_amount,
+        "line_total": line_total,
+    }]
+
+    # ── Fetch lead contact info for Razorpay ───────────────────────────────────
+    name, phone, email = "Customer", None, None
+    lead_res = supabase.table("leads").select("name, phone_number, email").eq("id", lead_id).execute()
+    if lead_res.data:
+        r = lead_res.data[0]
+        name = r.get("name") or "Customer"
+        phone = r.get("phone_number")
+        email = r.get("email")
+    else:
+        user_res = supabase.table("users").select("name, phone, email").eq("id", lead_id).execute()
+        if user_res.data:
+            r = user_res.data[0]
+            name = r.get("name") or "Customer"
+            phone = r.get("phone")
+            email = r.get("email")
+
+    # ── Generate invoice number & ID ───────────────────────────────────────────
+    invoice_number = _next_invoice_number(supabase)
+    invoice_id = str(uuid.uuid4())
+
+    # ── Create Razorpay payment link ───────────────────────────────────────────
+    key_id = os.environ.get("RAZORPAY_KEY_ID")
+    key_secret = os.environ.get("RAZORPAY_KEY_SECRET")
+    razorpay_link_id = None
+    razorpay_url = None
+
+    if key_id and key_secret:
+        try:
+            client = razorpay.Client(auth=(key_id, key_secret))
+            amount_paise = int(total_amount * 100)
+            pl_data = {
+                "amount": amount_paise,
+                "currency": "INR",
+                "accept_partial": False,
+                "description": f"Payment for {inventory_item.get('name', 'Injection')} – {invoice_number}",
+                "reference_id": invoice_id,
+                "reminder_enable": True,
+                "customer": {"name": name},
+            }
+            if email:
+                pl_data["customer"]["email"] = email
+            if phone:
+                pl_data["customer"]["contact"] = _clean_phone(phone)
+
+            pl = client.payment_link.create(pl_data)
+            razorpay_link_id = pl.get("id")
+            razorpay_url = pl.get("short_url")
+        except Exception as e:
+            print(f"[CartService] Razorpay error (direct PI): {e}")
+
+    # ── Insert proforma_invoice row (no cart_id needed) ────────────────────────
+    overall_discount_pct = round(
+        (discount_amount / base_price * 100) if base_price > 0 else 0, 2
+    )
+    inv_row = {
+        "id": invoice_id,
+        "user_id": lead_id,
+        "sales_rep_id": sales_rep_id,
+        "base_price": base_price,
+        "discount_percentage": overall_discount_pct,
+        "gst_percentage": 0,
+        "gst_amount": gst_amount,
+        "total_amount": total_amount,
+        "razorpay_link_id": razorpay_link_id,
+        "razorpay_url": razorpay_url,
+        "status": "PENDING",
+        "invoice_number": invoice_number,
+        "invoice_date": date.today().isoformat(),
+        "source": source,
+        # cart_id intentionally omitted — no cart row created for injection purchases
+    }
+    supabase.table("proforma_invoices").insert(inv_row).execute()
+
+    return {
+        "invoice_id": invoice_id,
+        "invoice_number": invoice_number,
+        "razorpay_url": razorpay_url,
+        "total_amount": total_amount,
+        "base_price": base_price,
+        "discount_amount": discount_amount,
+        "gst_amount": gst_amount,
+        "items": items,
+    }
+

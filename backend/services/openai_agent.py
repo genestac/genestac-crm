@@ -1173,6 +1173,7 @@ async def process_whatsapp_message(
                         add_inventory_to_cart,
                         add_plan_to_cart,
                         create_pi_from_cart,
+                        create_direct_injection_pi,
                         format_pi_whatsapp_message,
                         clear_cart_items,
                     )
@@ -1183,25 +1184,42 @@ async def process_whatsapp_message(
                     discount_pct = float(args.get("discount_percentage") or 10.0)
 
                     try:
-                        cart_id = get_or_create_active_cart(
-                            supabase=supabase,
-                            lead_id=lead_id,
-                            source="whatsapp_bot",
-                        )
-                        # Clear old items if re-generating
-                        clear_cart_items(supabase, cart_id)
-
                         if product_name:
-                            # Search inventory
+                            # ── Injection purchase: use cart flow (supports multi-product & quantity) ──
+                            # Requires: ALTER TABLE cart ALTER COLUMN plan_id DROP NOT NULL;
                             inv_item = _get_inventory_item_by_name(supabase, product_name)
                             if inv_item:
-                                add_inventory_to_cart(
-                                    supabase=supabase,
-                                    cart_id=cart_id,
-                                    inventory_id=inv_item["id"],
-                                    quantity=quantity,
-                                    discount_pct=discount_pct,
-                                )
+                                try:
+                                    cart_id = get_or_create_active_cart(
+                                        supabase=supabase,
+                                        lead_id=lead_id,
+                                        source="whatsapp_bot",
+                                    )
+                                    clear_cart_items(supabase, cart_id)
+                                    add_inventory_to_cart(
+                                        supabase=supabase,
+                                        cart_id=cart_id,
+                                        inventory_id=inv_item["id"],
+                                        quantity=quantity,
+                                        discount_pct=discount_pct,
+                                    )
+                                    pi = create_pi_from_cart(
+                                        supabase=supabase,
+                                        cart_id=cart_id,
+                                        lead_id=lead_id,
+                                        source="whatsapp_bot",
+                                    )
+                                except Exception as _cart_err:
+                                    # Fallback: direct PI if cart still has NOT NULL constraints
+                                    print(f"[Agent] Cart flow failed ({_cart_err}), falling back to direct PI")
+                                    pi = create_direct_injection_pi(
+                                        supabase=supabase,
+                                        lead_id=lead_id,
+                                        inventory_item=inv_item,
+                                        quantity=quantity,
+                                        discount_pct=discount_pct,
+                                        source="whatsapp_bot",
+                                    )
                             else:
                                 tool_result_str = f"PI_ERROR|Product '{product_name}' not found in inventory"
                                 tool_results_for_ai.append(
@@ -1212,16 +1230,28 @@ async def process_whatsapp_message(
                                 continue
 
                         elif plan_name:
-                            # Search plans
+                            # ── Plan purchase: use cart flow (plan_id is set) ──
                             plan_res = supabase.table("plans").select("id, name").ilike(
                                 "name", f"%{plan_name}%"
                             ).limit(1).execute()
                             if plan_res.data:
+                                cart_id = get_or_create_active_cart(
+                                    supabase=supabase,
+                                    lead_id=lead_id,
+                                    source="whatsapp_bot",
+                                )
+                                clear_cart_items(supabase, cart_id)
                                 add_plan_to_cart(
                                     supabase=supabase,
                                     cart_id=cart_id,
                                     plan_id=plan_res.data[0]["id"],
-                                    discount_pct=0,  # Plans don't get discount by default
+                                    discount_pct=0,
+                                )
+                                pi = create_pi_from_cart(
+                                    supabase=supabase,
+                                    cart_id=cart_id,
+                                    lead_id=lead_id,
+                                    source="whatsapp_bot",
                                 )
                             else:
                                 tool_result_str = f"PI_ERROR|Plan '{plan_name}' not found"
@@ -1235,14 +1265,6 @@ async def process_whatsapp_message(
                             tool_results_for_ai.append("Cannot generate invoice — no product or plan specified. Ask user what they want to purchase.")
                             messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": tool_result_str})
                             continue
-
-                        # Create PI + Razorpay link
-                        pi = create_pi_from_cart(
-                            supabase=supabase,
-                            cart_id=cart_id,
-                            lead_id=lead_id,
-                            source="whatsapp_bot",
-                        )
 
                         # Format and queue the WhatsApp message
                         pi_message = format_pi_whatsapp_message(pi)
