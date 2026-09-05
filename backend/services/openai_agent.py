@@ -935,7 +935,6 @@ async def process_whatsapp_message(
         except Exception as _pe:
             print(f"[Agent] Payment bypass DB save failed (non-fatal): {_pe}")
 
-
     _inj_ready = (
         _inj_track and
         metadata.get("injection_screen_done") and
@@ -946,8 +945,7 @@ async def process_whatsapp_message(
         if _wants_purchase or (metadata.get("pending_invoice") and _is_affirm) or _is_affirm:
             metadata["pending_invoice"] = True
 
-    # ── Stale conversation_summary guard ───────────────────────────────────────────────
-    # If summary contains names completely unrelated to lead name, clear it to avoid hallucination.
+    # ── Stale conversation_summary guard ──────────────────────────────────────
     _lead_name = (lead.get("name") or "").strip().lower()
     _summary = metadata.get("conversation_summary", "")
     if _summary and _lead_name and len(_lead_name) > 2:
@@ -956,62 +954,55 @@ async def process_whatsapp_message(
             metadata["conversation_summary"] = ""
             print(f"[Agent] Cleared stale conversation_summary for lead {lead_id} (name mismatch)")
 
-    # ── Python-driven invoice generation ─────────────────────────────────────────────
-    # When pending_invoice=True, generate the invoice from Python — no GPT tool call needed.
-    # This fires even when user says "Bheja nhi apne" / "nhi aaya" / "Ok" because those
-    # don't change purchase intent but GPT won't reliably call the tool for them.
-    # Also catches complaint phrases by treating them as re-triggers.
+    # ── Initialize extra_wa_messages EARLY (Python invoice block uses it below) ──
+    extra_wa_messages = []  # additional WA messages to send (PI, notifs, etc.)
+
+    # ── Python-driven invoice generation ──────────────────────────────────────
+    # When pending_invoice=True, generate invoice from Python directly.
+    # Always uses create_direct_injection_pi — cart table has FK/NOT NULL constraints
+    # that don't work for WhatsApp leads (lead UUID ≠ users table UUID).
     _RESEND_KEYWORDS = [
         "bheja nhi", "nhi bheja", "nhi aaya", "link nhi", "nhi mila",
         "send nhi", "abhi tak nhi", "kahan hai", "kab milega",
         "didn't send", "not received", "where is", "still waiting",
+        "send me now", "send it now", "abhi bhejo", "abhi bhej",
     ]
     _msg_pad_lower = " " + message.lower().strip() + " "
     _is_resend = any(kw in _msg_pad_lower for kw in _RESEND_KEYWORDS)
 
     if _is_resend and _inj_ready:
-        # User is complaining the link wasn't sent — treat as purchase trigger
         metadata["pending_invoice"] = True
 
     if metadata.get("pending_invoice") and metadata.get("injection_screen_passed"):
         from services.cart_service import (
-            get_or_create_active_cart, add_inventory_to_cart,
-            create_pi_from_cart, create_direct_injection_pi,
-            format_pi_whatsapp_message, clear_cart_items,
+            create_direct_injection_pi,
+            format_pi_whatsapp_message,
         )
         _pi_product = metadata.get("recommended_product") or "Mounjaro"
         _inv_item = _get_inventory_item_by_name(supabase, _pi_product)
         if _inv_item:
             try:
-                try:
-                    _cart_id = get_or_create_active_cart(supabase=supabase, lead_id=lead_id, source="whatsapp_bot")
-                    clear_cart_items(supabase, _cart_id)
-                    add_inventory_to_cart(supabase=supabase, cart_id=_cart_id, inventory_id=_inv_item["id"], quantity=1, discount_pct=10.0)
-                    _pi = create_pi_from_cart(supabase=supabase, cart_id=_cart_id, lead_id=lead_id, source="whatsapp_bot")
-                except Exception as _ce:
-                    print(f"[Agent] Python-invoice cart error ({_ce}), using direct PI")
-                    _pi = create_direct_injection_pi(supabase=supabase, lead_id=lead_id, inventory_item=_inv_item, quantity=1, discount_pct=10.0, source="whatsapp_bot")
-
-                # Send invoice message directly on WhatsApp (don't wait for GPT)
+                _pi = create_direct_injection_pi(
+                    supabase=supabase,
+                    lead_id=lead_id,
+                    inventory_item=_inv_item,
+                    quantity=1,
+                    discount_pct=10.0,
+                    source="whatsapp_bot",
+                )
                 _pi_msg = format_pi_whatsapp_message(_pi)
                 extra_wa_messages.append(_pi_msg)
-
-                # Clear flag + tell GPT to just confirm briefly
                 metadata["pending_invoice"] = False
                 try:
                     supabase.table(table).update({"metadata": {**metadata}}).eq("id", lead_id).execute()
                 except Exception:
                     pass
                 print(f"[Agent] Python-driven invoice generated: {_pi['invoice_number']} for lead {lead_id}")
-
-                # Inject as a system context so GPT confirms in 1 sentence
-                _invoice_context = (
+                _pending_invoice_context = (
                     f"[SYSTEM] Invoice {_pi['invoice_number']} for ₹{_pi['total_amount']:,.2f} "
                     f"has been sent to the user. Razorpay link: {_pi.get('razorpay_url') or 'no link'}. "
                     "Your only job: confirm in 1 short sentence that the payment link was sent."
                 )
-                # We'll inject this after building messages below
-                _pending_invoice_context = _invoice_context
             except Exception as _pie:
                 print(f"[Agent] Python-driven invoice FAILED: {_pie}")
                 import traceback; traceback.print_exc()
@@ -1021,6 +1012,7 @@ async def process_whatsapp_message(
             _pending_invoice_context = None
     else:
         _pending_invoice_context = None
+
 
     base_prompt = "You are a helpful, empathetic AI assistant for Genestac Therapeutics."
 
@@ -1059,7 +1051,8 @@ async def process_whatsapp_message(
         ai_text = response_message.content or ""
         should_trigger_call = False
         tool_results_for_ai = []  # human-readable results for second pass
-        extra_wa_messages = []    # additional WA messages to send (doctor notif, PI, etc.)
+        # Note: extra_wa_messages is initialized early in the function (before invoice block)
+
 
         # ── Tool execution ────────────────────────────────────────────────────
         if response_message.tool_calls:
