@@ -189,20 +189,27 @@ def _get_doctor_whatsapp_number(doctor_id: str, supabase: Client) -> Optional[st
 
 
 def _get_inventory_item_by_name(supabase: Client, query: str) -> Optional[dict]:
-    """Fuzzy search inventory by name, returns best match."""
+    """Fuzzy search inventory by brand/product name, returns best match.
+    
+    Strips common dose/variant suffixes so 'Mounjaro 2.5mg' finds 'Mounjaro (Tirzepatide)'.
+    """
+    import re
     try:
-        res = supabase.table("inventory").select(
-            "id, name, price, compare_at_price, \"Dosage/Strength\", category, gst_percentage"
-        ).ilike("name", f"%{query}%").eq("stock_quantity", None).limit(1).execute()
-        # stock_quantity eq None trick doesn't work — just fetch by name
-        res = supabase.table("inventory").select(
-            "id, name, price, compare_at_price, \"Dosage/Strength\", category, gst_percentage"
-        ).ilike("name", f"%{query}%").limit(5).execute()
-
-        items = res.data or []
-        # Prefer items with compare_at_price set
-        with_mrp = [i for i in items if i.get("compare_at_price")]
-        return (with_mrp or items)[0] if (with_mrp or items) else None
+        # Strip dose info to get brand name: "Mounjaro 2.5mg" -> "Mounjaro"
+        brand_query = re.split(r'\s+\d', query)[0].strip()  # everything before first digit
+        # Try brand name first, then full query as fallback
+        for search_term in [brand_query, query]:
+            if not search_term:
+                continue
+            res = supabase.table("inventory").select(
+                "id, name, price, compare_at_price, category, gst_percentage"
+            ).ilike("name", f"%{search_term}%").limit(5).execute()
+            items = res.data or []
+            if items:
+                # Prefer items with compare_at_price (MRP) set
+                with_mrp = [i for i in items if i.get("compare_at_price")]
+                return (with_mrp or items)[0]
+        return None
     except Exception as e:
         print(f"[Agent] Inventory search error: {e}")
         return None
@@ -268,6 +275,37 @@ def _detect_no_call_preference(message: str) -> bool:
     """Return True if user's current message expresses they don't want a call."""
     msg_lower = message.lower()
     return any(kw in msg_lower for kw in NO_CALL_KEYWORDS)
+
+
+# Answer detection for screening questions (Hindi + English)
+SCREENING_NO_KEYWORDS = [
+    "nhi", "nahi", "nahin", "nai", "no ", "no,", "nope",
+    "nhi hai", "nahi hai", "nhi hua", "nahi hua",
+    "kisi ko nhi", "kisi ko nahi", "koi nhi", "koi nahi",
+    "koi dikkat", "problem nhi", "history nhi", "history nahi",
+    "kabhi nhi", "kabhi nahi", "bilkul nhi", "bilkul nahi",
+    "nhi hoti", "nahi hoti", "nhi hota",
+    "kisi ko bhi nhi", "family mein nhi",
+]
+SCREENING_YES_KEYWORDS = [
+    "haan", "ha ", "ha,", "yes", "hua hai", "hua tha",
+    "hoti hai", "hota hai", "thi", "tha", "hai",
+]
+
+
+def _detect_screening_answer(message: str) -> str:
+    """
+    Detect if the user answered Yes or No to a screening question.
+    Returns 'no', 'yes', or '' (ambiguous).
+    Always checks No first since most short Hindi negations are unambiguous.
+    """
+    msg = " " + message.lower().strip() + " "  # pad for word-boundary matching
+    # Check No first (more common, unambiguous short replies like "nhi", "nahi")
+    if any(kw in msg for kw in SCREENING_NO_KEYWORDS):
+        return "no"
+    if any(kw in msg for kw in SCREENING_YES_KEYWORDS):
+        return "yes"
+    return ""
 
 
 async def _update_conversation_summary(
@@ -341,9 +379,10 @@ def _build_injection_track_prompt(lead: dict, metadata: dict) -> str:
                 "- Recommend Mounjaro 2.5mg as the safest starter dose for the first month.\n"
                 "- Tirzepatide (Mounjaro) shows 20.2% avg weight loss vs 13.7% for Semaglutide — mention when comparing.\n"
                 "- Price (only when asked): MRP Rs 8,000 → aapke liye Rs 7,200 (10% off).\n"
-                "- PURCHASE TRIGGER: If user says 'khareedna hai', 'invoice do', 'payment link', "
-                "'kar dijiye', 'haan', 'proceed' — IMMEDIATELY call generate_proforma_invoice "
-                "with product_name='Mounjaro 2.5mg'. Do NOT ask again what they want.\n"
+                "- PURCHASE TRIGGER: When user says any of these — 'khareedna hai', 'invoice do', "
+                "'payment link', 'kar dijiye', 'kar do', 'haan', 'haa', 'ha', 'ok', 'send karo', "
+                "'bhej do', 'proceed', 'theek hai', 'bilkul' — IMMEDIATELY call generate_proforma_invoice "
+                "with product_name='Mounjaro'. Do NOT ask again what they want. Do NOT apologize first.\n"
                 "- Secondary CTA (offer alongside): 'Ya pehle doctor se ek baar baat karein? FREE hai!'"
             )
     elif screen_done and not screen_passed:
@@ -548,6 +587,7 @@ def _build_system_prompt(
     lead_info = _format_lead_data_for_prompt(lead, metadata)
     service_type = metadata.get("service_type", "unknown")
     conversation_summary = metadata.get("conversation_summary", "")
+    lead_name = lead.get("name") or "ji"
 
     if service_type == "injection":
         core_prompt = _build_injection_track_prompt(lead, metadata)
@@ -559,8 +599,21 @@ def _build_system_prompt(
     if base_prompt and "helpful, empathetic AI" not in base_prompt:
         admin_note = f"\nADMIN ADDITIONAL INSTRUCTIONS:\n{base_prompt}\n"
 
+    # Pending invoice override — GPT MUST call the tool, not generate text
+    pending_override = ""
+    if metadata.get("pending_invoice") and metadata.get("injection_screen_passed"):
+        pending_override = (
+            "\n⚠️ IMMEDIATE ACTION REQUIRED ⚠️\n"
+            "The user has confirmed they want to purchase Mounjaro. "
+            "Your ONLY job this turn is to call generate_proforma_invoice(product_name='Mounjaro'). "
+            "Do NOT generate any text response before calling the tool. "
+            "After the tool returns, give a brief confirmation (1 sentence max).\n"
+        )
+
     return f"""{core_prompt}
-{admin_note}
+{admin_note}{pending_override}
+NAME ANCHOR: You are speaking to {lead_name}. NEVER reference any other name in your response.
+
 CURRENT LEAD PROFILE (do NOT re-ask anything already listed here):
 {lead_info}
 
@@ -811,7 +864,98 @@ async def process_whatsapp_message(
         except Exception as _nce:
             print(f"[Agent] no_call_preference save failed (non-fatal): {_nce}")
 
-    # ── Base prompt from global_settings ────────────────────────────────────
+    # ── Injection screening auto-advance (Python-driven, NOT GPT tool-driven) ────────────
+    # GPT is unreliable at calling save_lead_info for short Hindi answers like "Nhi".
+    # We detect the answer here and advance the state BEFORE building the system prompt,
+    # so GPT always sees the already-updated step and just writes the next question.
+    if metadata.get("service_type") == "injection" and not metadata.get("injection_screen_done"):
+        _step = int(metadata.get("injection_screen_step") or 0)
+        _gender = (metadata.get("gender") or lead.get("gender") or "").lower().strip()
+        _is_male = _gender in ("male", "m", "man", "ladka", "mard", "purush")
+        _max_steps = 2 if _is_male else 3
+
+        if _step < _max_steps:
+            _answer = _detect_screening_answer(message)
+            if _answer == "no":
+                _new_step = _step + 1
+                if _new_step >= _max_steps:
+                    # All screening questions answered No — passed
+                    metadata["injection_screen_step"] = _max_steps
+                    metadata["injection_screen_done"] = True
+                    metadata["injection_screen_passed"] = True
+                    print(f"[Agent] Injection screening PASSED for lead {lead_id} (step {_step} → done)")
+                else:
+                    metadata["injection_screen_step"] = _new_step
+                    print(f"[Agent] Injection screening step {_step} → {_new_step} for lead {lead_id}")
+                try:
+                    supabase.table(table).update({"metadata": {**metadata}}).eq("id", lead_id).execute()
+                except Exception as _se:
+                    print(f"[Agent] Screening step DB update failed (non-fatal): {_se}")
+            elif _answer == "yes":
+                # Contraindication found
+                metadata["injection_screen_done"] = True
+                metadata["injection_screen_passed"] = False
+                print(f"[Agent] Contraindication found at step {_step} for lead {lead_id}")
+                try:
+                    supabase.table(table).update({"metadata": {**metadata}}).eq("id", lead_id).execute()
+                except Exception as _se:
+                    print(f"[Agent] Contraindication DB update failed (non-fatal): {_se}")
+            # else: ambiguous answer — GPT handles it, step stays the same
+
+
+    # ── Injection purchase intent detection (Python-driven) ───────────────────────────────
+    # When screening is done and user expresses purchase intent, set pending_invoice=True.
+    # The system prompt then gives GPT an OVERRIDE instruction to call generate_proforma_invoice NOW.
+    _PURCHASE_KEYWORDS = [
+        "payment link", "link bhej", "link send", "link share", "link do",
+        "invoice", "bill send", "proforma",
+        "khareed", "buy ", "purchase",
+        "pay kar", "abhi le",
+    ]
+    _AFFIRM_KEYWORDS = [
+        "haa", "haan", "ha ", "ha,", " yes", "ok ", "ok,", "theek hai",
+        "bilkul", "proceed", "kar do", "kar dijiye", "bhej do", "send karo",
+    ]
+    _msg_pad = " " + message.lower().strip() + " "
+    _inj_track = metadata.get("service_type") == "injection"
+    _wants_purchase = any(kw in _msg_pad for kw in _PURCHASE_KEYWORDS)
+
+    # ── Payment bypass: skip screening if user explicitly asks for payment/invoice ──
+    # If someone says "payment link do" or "invoice bhejo" at ANY point in the injection
+    # flow (even mid-screening), skip all remaining questions and generate the invoice.
+    if _inj_track and _wants_purchase and not metadata.get("injection_screen_done"):
+        metadata["injection_screen_done"] = True
+        metadata["injection_screen_passed"] = True
+        metadata["injection_screen_step"] = 3
+        metadata["pending_invoice"] = True
+        print(f"[Agent] Payment bypass: skipping screening for lead {lead_id}")
+        try:
+            supabase.table(table).update({"metadata": {**metadata}}).eq("id", lead_id).execute()
+        except Exception as _pe:
+            print(f"[Agent] Payment bypass DB save failed (non-fatal): {_pe}")
+
+    _inj_ready = (
+        _inj_track and
+        metadata.get("injection_screen_done") and
+        metadata.get("injection_screen_passed")
+    )
+    if _inj_ready:
+        _is_affirm = any(kw in _msg_pad for kw in _AFFIRM_KEYWORDS)
+        if _wants_purchase or (metadata.get("pending_invoice") and _is_affirm) or _is_affirm:
+            metadata["pending_invoice"] = True
+
+    # ── Stale conversation_summary guard ───────────────────────────────────────────────
+    # If summary contains names completely unrelated to lead name, clear it to avoid hallucination.
+    _lead_name = (lead.get("name") or "").strip().lower()
+    _summary = metadata.get("conversation_summary", "")
+    if _summary and _lead_name and len(_lead_name) > 2:
+        # If the summary is very long and doesn't mention the lead's name at all,
+        # it's likely stale data from another lead — wipe it.
+        _summary_lower = _summary.lower()
+        if _lead_name not in _summary_lower and len(_summary) > 100:
+            metadata["conversation_summary"] = ""
+            print(f"[Agent] Cleared stale conversation_summary for lead {lead_id} (name mismatch)")
+
     base_prompt = "You are a helpful, empathetic AI assistant for Genestac Therapeutics."
     settings_res = supabase.table("global_settings").select("settings_value").eq(
         "settings_key", "ai_call_settings"
@@ -1108,8 +1252,14 @@ async def process_whatsapp_message(
                         )
                         tool_results_for_ai.append(
                             f"Proforma Invoice {pi['invoice_number']} created for ₹{pi['total_amount']:,.2f}. "
-                            f"Payment link and invoice already sent. Give a brief positive acknowledgment only."
+                            f"Payment link and invoice already sent. Give a brief positive confirmation (1 sentence max)."
                         )
+                        # Clear pending_invoice flag so it doesn't re-trigger
+                        metadata["pending_invoice"] = False
+                        try:
+                            supabase.table(table).update({"metadata": {**metadata}}).eq("id", lead_id).execute()
+                        except Exception:
+                            pass
 
                     except Exception as e:
                         print(f"[Agent] generate_proforma_invoice error: {e}")
@@ -1117,8 +1267,10 @@ async def process_whatsapp_message(
                         traceback.print_exc()
                         tool_result_str = f"PI_ERROR|{str(e)}"
                         tool_results_for_ai.append(
-                            "Invoice generation failed. Apologize briefly and say team will follow up."
+                            "Invoice generation failed. Tell user: 'Ek second — main aapka payment link abhi bhejti hu.' "
+                            "Do NOT say team will follow up."
                         )
+
 
                 # ── 7. book_appointment (fallback) ────────────────────────────
                 elif func_name == "book_appointment":
