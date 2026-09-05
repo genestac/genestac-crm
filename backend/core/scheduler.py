@@ -1229,6 +1229,217 @@ Rules:
         traceback.print_exc()
 
 
+# ── WhatsApp Follow-up Sweeps ─────────────────────────────────────────────────
+
+def sweep_whatsapp_followups():
+    """
+    Sweeps leads with a scheduled WhatsApp follow-up time that has passed.
+    Sends a re-engagement message and clears the followup timestamp.
+    Runs every minute.
+    """
+    import asyncio
+    try:
+        supabase: Client = get_supabase_client()
+        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+        res = supabase.table("leads").select(
+            "id, name, phone_number, metadata, status"
+        ).lte("whatsapp_followup_at", now_iso).not_.is_(
+            "whatsapp_followup_at", "null"
+        ).eq("whatsapp_opt_out", False).limit(20).execute()
+
+        leads = res.data or []
+        if not leads:
+            return
+
+        print(f"[WA Followup] Found {len(leads)} leads to follow up")
+
+        async def _send_followup(lead):
+            try:
+                from services.whatsapp_service import send_whatsapp_text
+                phone = lead.get("phone_number", "")
+                if not phone:
+                    return
+
+                name = lead.get("name") or "aap"
+                followup_msg = (
+                    f"Namaste {name}! 👋\n\n"
+                    "Main Aalya bol rahi hu, Genestac se. Pehle baat hui thi hamare GLP-1 "
+                    "Weight Management Program ke baare mein.\n\n"
+                    "Kya aap abhi baat kar sakte hain? Hamara FREE initial assessment offer "
+                    "abhi bhi available hai. 🩺"
+                )
+                await send_whatsapp_text(phone, followup_msg)
+
+                # Clear followup time + update status
+                supabase.table("leads").update({
+                    "whatsapp_followup_at": None,
+                    "status": "FOLLOWUP_SENT",
+                }).eq("id", lead["id"]).execute()
+
+                print(f"[WA Followup] ✅ Follow-up sent to {lead['id']} ({phone})")
+            except Exception as e:
+                print(f"[WA Followup] ❌ Error for lead {lead.get('id')}: {e}")
+
+        async def _run():
+            await asyncio.gather(*[_send_followup(l) for l in leads], return_exceptions=True)
+
+        asyncio.run(_run())
+
+    except _NETWORK_ERRORS as e:
+        print(f"[WA Followup] ⚠️ Network error: {type(e).__name__}")
+    except Exception as e:
+        import traceback
+        print(f"[WA Followup] ❌ Error: {e}")
+        traceback.print_exc()
+
+
+def sweep_meet_reminders():
+    """
+    Sends a WhatsApp reminder 10 minutes before a Google Meet appointment.
+    Marks reminder_sent=True to avoid duplicates.
+    Runs every minute.
+    """
+    import asyncio
+    try:
+        supabase: Client = get_supabase_client()
+        now = datetime.datetime.now(datetime.timezone.utc)
+        window_start = (now + datetime.timedelta(minutes=8)).isoformat()
+        window_end = (now + datetime.timedelta(minutes=12)).isoformat()
+
+        res = supabase.table("appointments").select(
+            "id, patient_id, scheduled_at, meeting_link, doctor_id, "
+            "staffs!appointments_doctor_id_fkey(full_name)"
+        ).gte("scheduled_at", window_start).lte(
+            "scheduled_at", window_end
+        ).eq("status", "confirmed").eq("reminder_sent", False).not_.is_(
+            "meeting_link", "null"
+        ).execute()
+
+        appts = res.data or []
+        if not appts:
+            return
+
+        print(f"[Meet Reminder] Sending {len(appts)} 10-min reminders")
+
+        async def _remind(appt):
+            try:
+                from services.whatsapp_service import send_whatsapp_text
+                patient_id = appt.get("patient_id")
+                meet_link = appt.get("meeting_link")
+                doctor_name = (appt.get("staffs") or {}).get("full_name", "Doctor")
+
+                if not patient_id or not meet_link:
+                    return
+
+                # Get patient phone
+                phone = None
+                lead_res = supabase.table("leads").select("phone_number").eq("id", patient_id).execute()
+                if lead_res.data:
+                    phone = lead_res.data[0].get("phone_number")
+                if not phone:
+                    user_res = supabase.table("users").select("phone").eq("id", patient_id).execute()
+                    if user_res.data:
+                        phone = user_res.data[0].get("phone")
+
+                if not phone:
+                    return
+
+                reminder_msg = (
+                    f"⏰ *Reminder: Consultation in 10 minutes!*\n\n"
+                    f"Doctor: Dr. {doctor_name}\n"
+                    f"Google Meet Link: {meet_link}\n\n"
+                    f"Link par click karein aur ready rahein. 🩺"
+                )
+                await send_whatsapp_text(phone, reminder_msg)
+
+                # Mark reminder sent
+                supabase.table("appointments").update({"reminder_sent": True}).eq("id", appt["id"]).execute()
+                print(f"[Meet Reminder] ✅ Reminder sent for appointment {appt['id']}")
+            except Exception as e:
+                print(f"[Meet Reminder] ❌ Error for appt {appt.get('id')}: {e}")
+
+        async def _run():
+            await asyncio.gather(*[_remind(a) for a in appts], return_exceptions=True)
+
+        asyncio.run(_run())
+
+    except _NETWORK_ERRORS as e:
+        print(f"[Meet Reminder] ⚠️ Network error: {type(e).__name__}")
+    except Exception as e:
+        import traceback
+        print(f"[Meet Reminder] ❌ Error: {e}")
+        traceback.print_exc()
+
+
+def sweep_undecided_lead_nudges():
+    """
+    Sends a 24-hour check-in nudge to NEW/FOLLOWUP_SENT leads
+    who haven't had a WhatsApp message in the last 24 hours.
+    Runs once per day at 10:00 AM IST.
+    """
+    import asyncio
+    try:
+        supabase: Client = get_supabase_client()
+        now = datetime.datetime.now(datetime.timezone.utc)
+        cutoff = (now - datetime.timedelta(hours=24)).isoformat()
+
+        res = supabase.table("leads").select(
+            "id, name, phone_number, metadata"
+        ).in_("status", ["NEW", "FOLLOWUP_SENT"]).eq(
+            "whatsapp_opt_out", False
+        ).is_("whatsapp_followup_at", "null").limit(50).execute()
+
+        leads = res.data or []
+        if not leads:
+            return
+
+        # Filter to only leads whose last WA message was > 24h ago
+        lead_ids = [l["id"] for l in leads]
+        recent_msg_res = supabase.table("whatsapp_messages").select(
+            "lead_id, created_at"
+        ).in_("lead_id", lead_ids).gte("created_at", cutoff).execute()
+
+        recently_active_ids = {m["lead_id"] for m in (recent_msg_res.data or [])}
+        stale_leads = [l for l in leads if l["id"] not in recently_active_ids]
+
+        if not stale_leads:
+            return
+
+        print(f"[WA 24h Nudge] Sending nudges to {len(stale_leads)} stale leads")
+
+        async def _nudge(lead):
+            try:
+                from services.whatsapp_service import send_whatsapp_text
+                phone = lead.get("phone_number", "")
+                if not phone:
+                    return
+                name = lead.get("name") or "aap"
+                msg = (
+                    f"Namaste {name}! 🙏\n\n"
+                    "Genestac Therapeutics se Aalya bol rahi hu.\n\n"
+                    "Kya aapke koi sawaal hain hamare GLP-1 program ke baare mein? "
+                    "Ya kya aap ek FREE doctor consultation book karna chahenge? 🩺\n\n"
+                    "Bas reply karein — main yahan hu!"
+                )
+                await send_whatsapp_text(phone, msg)
+                print(f"[WA 24h Nudge] ✅ Nudge sent to {lead['id']}")
+            except Exception as e:
+                print(f"[WA 24h Nudge] ❌ Error for lead {lead.get('id')}: {e}")
+
+        async def _run():
+            await asyncio.gather(*[_nudge(l) for l in stale_leads], return_exceptions=True)
+
+        asyncio.run(_run())
+
+    except _NETWORK_ERRORS as e:
+        print(f"[WA 24h Nudge] ⚠️ Network error: {type(e).__name__}")
+    except Exception as e:
+        import traceback
+        print(f"[WA 24h Nudge] ❌ Error: {e}")
+        traceback.print_exc()
+
+
 def start_scheduler():
     if not scheduler.running:
         # Sweep for auto-calls and pending callbacks every 5 minutes
@@ -1247,6 +1458,18 @@ def start_scheduler():
         scheduler.add_job(geocode_missing_cities, 'interval', hours=1, id="geocode_cities_sweep", replace_existing=True)
         # AI Health Coach daily nudges — sends personalised check-in messages to mobile subscribers
         scheduler.add_job(sweep_ai_health_coach_nudges, 'interval', minutes=1, id="ai_health_coach_nudges", replace_existing=True)
+        # ── NEW: WhatsApp Follow-up & Meet Reminder Sweeps ─────────────────────
+        # Send follow-up WhatsApp to leads who said "talk later" (checks every minute)
+        scheduler.add_job(sweep_whatsapp_followups, 'interval', minutes=1, id="wa_followup_sweep", replace_existing=True)
+        # Send Google Meet 10-min reminders (checks every minute)
+        scheduler.add_job(sweep_meet_reminders, 'interval', minutes=1, id="meet_reminder_sweep", replace_existing=True)
+        # 24-hour nudge for undecided NEW leads (runs daily at 10:00 AM IST)
+        scheduler.add_job(
+            sweep_undecided_lead_nudges, 'cron',
+            hour=4, minute=30,  # 10:00 AM IST = 04:30 UTC
+            id="undecided_lead_nudge",
+            replace_existing=True,
+        )
         scheduler.start()
-        print("Started Background Scheduler for AI Voice Calling and WhatsApp.")
+        print("Started Background Scheduler for AI Voice Calling, WhatsApp Follow-ups, and Meet Reminders.")
 

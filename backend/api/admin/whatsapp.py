@@ -665,8 +665,13 @@ async def webhook_handler(payload: dict, background_tasks: BackgroundTasks, supa
                                 .execute()
                             # We just inserted the current message so count > 1 means prior messages exist
                             prior_count = len(prior_msg_res.data or [])
-                            is_first_message = (prior_count <= 1)
-                            print(f"[WhatsApp Webhook] is_first_message={is_first_message} (prior_count={prior_count}) for {clean_phone}")
+                            # Also check if intake form was already sent (from leads.wa_intake_form_sent or metadata)
+                            _meta = existing.get("metadata") or {}
+                            _intake_sent = existing.get("wa_intake_form_sent") or _meta.get("wa_intake_form_sent") or False
+                            # is_first_message = True only when no prior messages AND intake form not yet sent
+                            is_first_message = (prior_count <= 1) and not _intake_sent
+                            print(f"[WhatsApp Webhook] is_first_message={is_first_message} (prior_count={prior_count}, intake_sent={_intake_sent}) for {clean_phone}")
+
                             
                             print(f"[WhatsApp Webhook] Processing message with OpenAI Agent for {clean_phone}")
                             

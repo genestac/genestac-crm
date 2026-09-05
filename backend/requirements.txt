@@ -18,3 +18,7 @@ openai
 google-genai
 deepgram-sdk
 numpy==1.26.4
+
+# Google Calendar API — for Google Meet appointment booking
+google-auth>=2.0.0
+google-api-python-client>=2.0.0

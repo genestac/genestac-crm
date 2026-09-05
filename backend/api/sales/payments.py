@@ -27,87 +27,171 @@ def is_admin(user: dict, supabase: Client) -> bool:
     return role_name in ('superadmin', 'master_admin', 'admin')
 
 @router.post('/leads/{lead_id}/generate-payment')
-async def generate_payment_link(lead_id: str, plan_id: Optional[str]=Form(None), discount: float=Form(0), invoice_id: Optional[str]=Form(None), current_user: dict=Depends(get_current_user), supabase: Client=Depends(get_supabase_client)):
+async def generate_payment_link(
+    lead_id: str,
+    # ── New cart-based params ─────────────────────────────────────────────────
+    cart_id: Optional[str] = Form(None),          # use existing active cart
+    inventory_id: Optional[str] = Form(None),     # quick: single inventory item
+    inventory_quantity: int = Form(1),
+    # ── Legacy plan-based params (backward-compatible) ────────────────────────
+    plan_id: Optional[str] = Form(None),
+    discount: float = Form(0),
+    invoice_id: Optional[str] = Form(None),
+    # ─────────────────────────────────────────────────────────────────────────
+    current_user: dict = Depends(get_current_user),
+    supabase: Client = Depends(get_supabase_client),
+):
     try:
+        from services.cart_service import (
+            get_or_create_active_cart,
+            add_inventory_to_cart,
+            add_plan_to_cart,
+            create_pi_from_cart,
+            clear_cart_items,
+        )
+
+        # ── Path 1: Re-generate Razorpay link for existing invoice ────────────
         if invoice_id:
             inv_res = supabase.table('proforma_invoices').select('*').eq('id', invoice_id).execute()
             if not inv_res.data:
                 raise HTTPException(status_code=404, detail='Invoice not found')
             existing_inv = inv_res.data[0]
-            plan_id = existing_inv['plan_id']
-            base_price = existing_inv['base_price']
-            discount = existing_inv['discount_percentage']
             total_amount = existing_inv['total_amount']
-            plan_res = supabase.table('plans').select('*').eq('id', plan_id).execute()
-            plan = plan_res.data[0] if plan_res.data else {'name': 'Subscription'}
-        else:
-            if not plan_id:
-                raise HTTPException(status_code=400, detail='plan_id is required for new invoices')
-            variant_id = None
-            if '|' in plan_id:
-                plan_id, variant_id = plan_id.split('|')
-            plan_res = supabase.table('plans').select('*').eq('id', plan_id).execute()
-            if not plan_res.data:
-                raise HTTPException(status_code=404, detail='Plan not found')
-            plan = plan_res.data[0]
-            base_price = float(plan['price'])
-            gst_percentage = float(plan.get('gst_percentage') or 0)
-            if variant_id:
-                var_res = supabase.table('plan_variants').select('*').eq('id', variant_id).execute()
-                if var_res.data:
-                    variant = var_res.data[0]
-                    base_price = float(variant.get('discounted_price') or variant.get('base_price') or plan['price'])
-                    plan['name'] = f"{plan['name']} - {variant.get('duration_label', '')}"
-            discount_amount = base_price * (discount / 100.0)
-            discounted_base = base_price - discount_amount
-            gst_amount = discounted_base * (gst_percentage / 100.0)
-            total_amount = discounted_base + gst_amount
-        key_id = os.environ.get('RAZORPAY_KEY_ID')
-        key_secret = os.environ.get('RAZORPAY_KEY_SECRET')
-        if not key_id or not key_secret:
-            raise HTTPException(status_code=500, detail='Razorpay keys not configured on server')
-        client = razorpay.Client(auth=(key_id, key_secret))
-        amount_in_paise = int(total_amount * 100)
-        reference_id = invoice_id if invoice_id else str(uuid.uuid4())
-        payment_link_data = {'amount': amount_in_paise, 'currency': 'INR', 'accept_partial': False, 'description': f"Payment for {plan['name']} (Proforma Invoice)", 'reference_id': reference_id + ('_ref' if invoice_id else ''), 'reminder_enable': True}
-        user_res = supabase.table('users').select('name, email, phone').eq('id', lead_id).execute()
-        if user_res.data:
-            user = user_res.data[0]
-            payment_link_data['customer'] = {'name': user.get('name') or 'Customer'}
-            if user.get('email'):
-                payment_link_data['customer']['email'] = user.get('email')
-            if user.get('phone'):
-                import re
-                phone_clean = re.sub('[^\\d+]', '', user.get('phone'))
-                if phone_clean:
-                    payment_link_data['customer']['contact'] = phone_clean
-        payment_link = client.payment_link.create(payment_link_data)
-        if invoice_id:
-            supabase.table('proforma_invoices').update({'razorpay_link_id': payment_link['id'], 'razorpay_url': payment_link['short_url']}).eq('id', invoice_id).execute()
-            return {'success': True, 'invoice_id': invoice_id, 'payment_url': payment_link['short_url']}
-        else:
-            settings = get_global_settings_from_db(supabase)
-            inv_settings = settings.get('invoice_settings', {})
-            prefix = inv_settings.get('prefix', 'Gen/26-27/')
-            seq = inv_settings.get('current_sequence', 1)
-            invoice_number = f'{prefix}{str(seq).zfill(3)}'
-            inv_settings['current_sequence'] = seq + 1
-            settings['invoice_settings'] = inv_settings
-            try:
-                supabase.table('global_settings').upsert({'settings_key': 'invoice_settings', 'settings_value': inv_settings}, on_conflict='settings_key').execute()
-            except Exception as e:
-                print(f'Failed to save sequence to DB: {e}')
-            invoice_data = {'id': reference_id, 'user_id': lead_id, 'sales_rep_id': current_user['id'], 'plan_id': plan_id, 'base_price': base_price, 'discount_percentage': discount, 'gst_percentage': gst_percentage, 'gst_amount': gst_amount, 'total_amount': total_amount, 'razorpay_link_id': payment_link['id'], 'razorpay_url': payment_link['short_url'], 'status': 'PENDING', 'invoice_number': invoice_number, 'invoice_date': datetime.now().strftime('%Y-%m-%d')}
-            try:
-                supabase.table('proforma_invoices').insert(invoice_data).execute()
-            except Exception as db_err:
-                print(f'Failed to insert proforma_invoices: {db_err}')
-                raise HTTPException(status_code=500, detail=f"Database insert failed: {str(db_err)}. Please run the SQL script if you haven't.")
-            return {'success': True, 'invoice_id': reference_id, 'payment_url': payment_link['short_url'], 'amount': total_amount, 'base_price': base_price, 'discount_percentage': discount, 'plan_name': plan['name'], 'invoice_number': invoice_number}
+
+            # Get item description
+            item_name = 'Subscription'
+            if existing_inv.get('cart_id'):
+                items_res = supabase.table('cart_items').select('item_name').eq(
+                    'cart_id', existing_inv['cart_id']
+                ).limit(1).execute()
+                if items_res.data:
+                    item_name = items_res.data[0]['item_name']
+            elif existing_inv.get('plan_id'):
+                plan_res = supabase.table('plans').select('name').eq('id', existing_inv['plan_id']).execute()
+                item_name = plan_res.data[0]['name'] if plan_res.data else 'Subscription'
+
+            key_id = os.environ.get('RAZORPAY_KEY_ID')
+            key_secret = os.environ.get('RAZORPAY_KEY_SECRET')
+            if not key_id or not key_secret:
+                raise HTTPException(status_code=500, detail='Razorpay keys not configured')
+            client = razorpay.Client(auth=(key_id, key_secret))
+            amount_in_paise = int(total_amount * 100)
+            payment_link_data = {
+                'amount': amount_in_paise, 'currency': 'INR',
+                'accept_partial': False,
+                'description': f'Payment for {item_name} (PI {existing_inv.get("invoice_number", "")})',
+                'reference_id': invoice_id + '_ref',
+                'reminder_enable': True,
+            }
+            user_res = supabase.table('leads').select('name, email, phone_number').eq('id', lead_id).execute()
+            if not user_res.data:
+                user_res = supabase.table('users').select('name, email, phone').eq('id', lead_id).execute()
+            if user_res.data:
+                u = user_res.data[0]
+                payment_link_data['customer'] = {'name': u.get('name') or 'Customer'}
+                if u.get('email'):
+                    payment_link_data['customer']['email'] = u['email']
+                phone_key = 'phone_number' if 'phone_number' in u else 'phone'
+                if u.get(phone_key):
+                    import re
+                    payment_link_data['customer']['contact'] = re.sub(r'[^\d+]', '', u[phone_key])
+            payment_link = client.payment_link.create(payment_link_data)
+            supabase.table('proforma_invoices').update({
+                'razorpay_link_id': payment_link['id'],
+                'razorpay_url': payment_link['short_url'],
+            }).eq('id', invoice_id).execute()
+            return {
+                'success': True, 'invoice_id': invoice_id,
+                'payment_url': payment_link['short_url'],
+            }
+
+        # ── Path 2: Cart-based PI (new preferred flow) ────────────────────────
+        if cart_id or inventory_id:
+            # Get or create cart
+            active_cart_id = cart_id
+            if not active_cart_id:
+                active_cart_id = get_or_create_active_cart(
+                    supabase=supabase, lead_id=lead_id, source='sales_rep'
+                )
+
+            if inventory_id:
+                # Clear existing items and add the new one
+                clear_cart_items(supabase, active_cart_id)
+                add_inventory_to_cart(
+                    supabase=supabase,
+                    cart_id=active_cart_id,
+                    inventory_id=inventory_id,
+                    quantity=inventory_quantity,
+                    discount_pct=discount if discount else 10.0,
+                )
+
+            pi = create_pi_from_cart(
+                supabase=supabase,
+                cart_id=active_cart_id,
+                lead_id=lead_id,
+                source='sales_rep',
+                sales_rep_id=current_user['id'],
+            )
+            return {
+                'success': True,
+                'invoice_id': pi['invoice_id'],
+                'invoice_number': pi['invoice_number'],
+                'payment_url': pi.get('razorpay_url'),
+                'total_amount': pi['total_amount'],
+                'base_price': pi['base_price'],
+                'discount_amount': pi['discount_amount'],
+                'gst_amount': pi['gst_amount'],
+                'items': pi['items'],
+            }
+
+        # ── Path 3: Legacy plan_id flow (backward-compatible) ─────────────────
+        if not plan_id:
+            raise HTTPException(
+                status_code=400,
+                detail='Provide cart_id, inventory_id, or plan_id'
+            )
+
+        variant_id = None
+        if '|' in plan_id:
+            plan_id, variant_id = plan_id.split('|')
+
+        # Create a cart and add the plan
+        active_cart_id = get_or_create_active_cart(
+            supabase=supabase, lead_id=lead_id, source='sales_rep'
+        )
+        clear_cart_items(supabase, active_cart_id)
+        add_plan_to_cart(
+            supabase=supabase,
+            cart_id=active_cart_id,
+            plan_id=plan_id,
+            variant_id=variant_id,
+            discount_pct=discount,
+        )
+        pi = create_pi_from_cart(
+            supabase=supabase,
+            cart_id=active_cart_id,
+            lead_id=lead_id,
+            source='sales_rep',
+            sales_rep_id=current_user['id'],
+        )
+        return {
+            'success': True,
+            'invoice_id': pi['invoice_id'],
+            'invoice_number': pi['invoice_number'],
+            'payment_url': pi.get('razorpay_url'),
+            'amount': pi['total_amount'],
+            'base_price': pi['base_price'],
+            'discount_percentage': discount,
+            'plan_name': pi['items'][0]['item_name'] if pi['items'] else '',
+        }
+
+    except HTTPException:
+        raise
     except Exception as e:
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
 @router.get('/leads/{lead_id}/invoices')
 async def get_proforma_invoices(lead_id: str, current_user: dict=Depends(get_current_user), supabase: Client=Depends(get_supabase_client)):
     try:

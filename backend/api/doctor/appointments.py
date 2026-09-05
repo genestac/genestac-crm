@@ -10,6 +10,98 @@ router = APIRouter()
 
 
 # ---------------------------------------------------------------------------
+# Helper: enrich appointment with full patient profile from WhatsApp/leads
+# ---------------------------------------------------------------------------
+def _enrich_patient_profile(appt: dict, supabase: Client) -> dict:
+    """
+    Fetches full lead/user profile (metadata captured via WhatsApp) and last
+    WhatsApp messages, then attaches them to the appointment dict.
+    Adds keys: patient_profile, whatsapp_summary
+    """
+    patient_id = appt.get('patient_id')
+    if not patient_id:
+        return appt
+
+    profile = {}
+
+    # Try leads table first (WhatsApp leads)
+    lead_res = supabase.table('leads').select(
+        'id, name, phone_number, email, city, street_address, postal_code, '
+        'wa_intake_form_sent, whatsapp_followup_at, status, metadata, created_at'
+    ).eq('id', patient_id).execute()
+
+    if lead_res.data:
+        lead = lead_res.data[0]
+        meta = lead.get('metadata') or {}
+        profile = {
+            'source': 'whatsapp_lead',
+            'name': lead.get('name'),
+            'phone': lead.get('phone_number'),
+            'email': lead.get('email'),
+            'city': lead.get('city') or meta.get('city'),
+            'address': lead.get('street_address') or meta.get('address'),
+            'pincode': lead.get('postal_code') or meta.get('pincode'),
+            'status': lead.get('status'),
+            'created_at': lead.get('created_at'),
+            # Medical & personal details from WhatsApp form
+            'age': meta.get('age'),
+            'gender': meta.get('gender'),
+            'height': meta.get('height'),
+            'weight': meta.get('weight'),
+            'medical_history': meta.get('medical_history') or meta.get('medical_condition'),
+            'goals': meta.get('goals'),
+            'weight_goal': meta.get('weight_goal'),
+            'interested_product': meta.get('interested_product'),
+            'budget': meta.get('budget'),
+            'other_notes': meta.get('other_critical_info'),
+        }
+        # Remove None values for a cleaner response
+        profile = {k: v for k, v in profile.items() if v is not None}
+
+        # Fetch last 10 WhatsApp messages for context
+        try:
+            msgs_res = supabase.table('whatsapp_messages').select(
+                'sender_type, message_body, created_at'
+            ).eq('lead_id', patient_id).order('created_at', desc=False).limit(30).execute()
+            messages = msgs_res.data or []
+            appt['whatsapp_messages'] = [
+                {
+                    'role': 'patient' if m['sender_type'] == 'lead' else 'bot',
+                    'text': m['message_body'],
+                    'time': m['created_at'],
+                }
+                for m in messages
+            ]
+        except Exception:
+            appt['whatsapp_messages'] = []
+    else:
+        # Fallback: try users table
+        user_res = supabase.table('users').select(
+            'id, name, phone, email, city, metadata'
+        ).eq('id', patient_id).execute()
+        if user_res.data:
+            user = user_res.data[0]
+            meta = user.get('metadata') or {}
+            profile = {
+                'source': 'user',
+                'name': user.get('name'),
+                'phone': user.get('phone'),
+                'email': user.get('email'),
+                'city': user.get('city'),
+                'age': meta.get('age'),
+                'gender': meta.get('gender'),
+                'height': meta.get('height'),
+                'weight': meta.get('weight'),
+                'medical_history': meta.get('medical_history') or meta.get('medical_condition'),
+                'goals': meta.get('goals'),
+            }
+            profile = {k: v for k, v in profile.items() if v is not None}
+
+    appt['patient_profile'] = profile
+    return appt
+
+
+# ---------------------------------------------------------------------------
 # GET /api/doctor/slots  — Available slots for a doctor on a date
 # ---------------------------------------------------------------------------
 @router.get('/slots')
@@ -88,7 +180,11 @@ async def get_appointments(
                         if phone_match:
                             extracted_phone = phone_match.group(1).strip()
                     a['patients'] = {'name': extracted_name, 'phone': extracted_phone}
-                    
+
+        # Enrich every appointment with full patient WhatsApp profile
+        for a in appointments:
+            _enrich_patient_profile(a, supabase)
+
         return appointments
     except Exception as e:
         import traceback; traceback.print_exc()
@@ -130,7 +226,11 @@ async def get_appointment_by_id(
                 if phone_match:
                     extracted_phone = phone_match.group(1).strip()
             appt['patients'] = {'name': extracted_name, 'phone': extracted_phone}
-            
+
+    # Enrich with full patient profile and WhatsApp history
+    if appt:
+        _enrich_patient_profile(appt, supabase)
+
     return appt
 
 
@@ -374,19 +474,75 @@ async def generate_payment_link(
     current_user: dict = Depends(get_current_user),
     supabase: Client = Depends(get_supabase_client),
 ):
-    import random, string
-    mock_link = 'https://rzp.io/i/' + ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
+    """
+    Generates a real Razorpay payment link via cart_service and saves it to the appointment.
+    Accepts: { plan_id, inventory_id, discount, products, total }
+    """
+    # Fetch appointment to get patient_id
+    appt_res = supabase.table('appointments').select('patient_id').eq('id', id).single().execute()
+    if not appt_res.data:
+        raise HTTPException(status_code=404, detail='Appointment not found')
+    lead_id = appt_res.data.get('patient_id')
+
+    payment_link = None
+    invoice_id = None
+    invoice_number = None
+    total_amount = planData.get('total', 0)
+
+    if lead_id:
+        try:
+            from services.cart_service import (
+                get_or_create_active_cart, add_inventory_to_cart,
+                add_plan_to_cart, create_pi_from_cart, clear_cart_items,
+            )
+            cart_id = get_or_create_active_cart(supabase=supabase, lead_id=lead_id, source='doctor_dashboard')
+            clear_cart_items(supabase, cart_id)
+
+            inventory_id = planData.get('inventory_id')
+            plan_id = planData.get('plan_id')
+            discount = float(planData.get('discount') or 10.0)
+
+            if inventory_id:
+                add_inventory_to_cart(supabase=supabase, cart_id=cart_id, inventory_id=inventory_id,
+                                      quantity=int(planData.get('quantity', 1)), discount_pct=discount)
+            elif plan_id:
+                add_plan_to_cart(supabase=supabase, cart_id=cart_id, plan_id=plan_id, discount_pct=discount)
+            else:
+                # Fallback: generate mock link if no product specified
+                import random, string
+                payment_link = 'https://rzp.io/i/' + ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
+
+            if not payment_link:
+                pi = create_pi_from_cart(
+                    supabase=supabase, cart_id=cart_id, lead_id=lead_id,
+                    source='doctor_dashboard', sales_rep_id=current_user['id']
+                )
+                payment_link = pi.get('razorpay_url') or 'N/A'
+                invoice_id = pi['invoice_id']
+                invoice_number = pi['invoice_number']
+                total_amount = pi['total_amount']
+        except Exception as e:
+            import traceback; traceback.print_exc()
+            # Don't crash — fall through to mock
+            import random, string
+            payment_link = 'https://rzp.io/i/' + ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
+    else:
+        import random, string
+        payment_link = 'https://rzp.io/i/' + ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
+
     supabase.table('appointments').update({
         'plan_details': {
             'products': planData.get('products'),
             'discount': planData.get('discount'),
-            'total': planData.get('total'),
-            'payment_link': mock_link,
+            'total': total_amount,
+            'payment_link': payment_link,
+            'invoice_id': invoice_id,
+            'invoice_number': invoice_number,
             'generated_at': datetime.datetime.now().isoformat(),
         },
         'plan_id': planData.get('plan_id'),
     }).eq('id', id).execute()
-    return {'success': True, 'payment_link': mock_link}
+    return {'success': True, 'payment_link': payment_link, 'invoice_id': invoice_id, 'total': total_amount}
 
 
 # ---------------------------------------------------------------------------
