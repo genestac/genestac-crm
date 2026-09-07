@@ -216,6 +216,41 @@ def _get_inventory_item_by_name(supabase: Client, query: str) -> Optional[dict]:
         return None
 
 
+def _fetch_inventory_products(supabase: Client) -> str:
+    """
+    Fetches live GLP-1 product names and prices from the inventory table.
+    Returns a formatted string ready to be injected into the system prompt.
+    Prices are NEVER hardcoded — always pulled fresh from the database.
+    """
+    try:
+        res = supabase.table("inventory").select(
+            "name, price, compare_at_price, category"
+        ).in_("category", ["GIP/GLP-1 Agonist", "GLP-1 Agonist"]).order("category").execute()
+        items = res.data or []
+        if not items:
+            return "(Pricing unavailable — check inventory database)"
+
+        lines = []
+        for item in items:
+            name = item.get("name", "Unknown")
+            mrp = item.get("compare_at_price")
+            sale_price = item.get("price")
+            if mrp and sale_price:
+                discount_pct = round((1 - sale_price / mrp) * 100)
+                lines.append(
+                    f"- {name}: MRP ₹{mrp:,.0f} → Customer price ₹{sale_price:,.0f} ({discount_pct}% off)"
+                )
+            elif sale_price:
+                lines.append(f"- {name}: ₹{sale_price:,.0f}")
+            else:
+                lines.append(f"- {name}: Price on request")
+
+        return "\n".join(lines)
+    except Exception as e:
+        print(f"[Agent] _fetch_inventory_products error (non-fatal): {e}")
+        return "(Pricing unavailable — check inventory database)"
+
+
 def _format_lead_data_for_prompt(lead: dict, metadata: dict) -> str:
     current_glp1 = metadata.get("current_glp1")
     glp1_str = "Yes" if current_glp1 is True else ("No" if current_glp1 is False else "Unknown")
@@ -356,7 +391,7 @@ async def _update_conversation_summary(
         print(f"[Agent] Summary update failed (non-fatal): {e}")
 
 
-def _build_injection_track_prompt(lead: dict, metadata: dict) -> str:
+def _build_injection_track_prompt(lead: dict, metadata: dict, pricing_context: str = "") -> str:
     """System prompt for users who want to purchase a GLP-1 injection directly."""
     screen_done = metadata.get("injection_screen_done", False)
     screen_passed = metadata.get("injection_screen_passed", False)
@@ -420,6 +455,11 @@ def _build_injection_track_prompt(lead: dict, metadata: dict) -> str:
         "'mujhe call chahiye' or 'call karo'. Never proactively trigger a call.\n"
     )
 
+    _pricing_block = (
+        f"\nLIVE PRODUCT PRICING (from inventory — do NOT make up prices, use only these):\n{pricing_context}"
+        if pricing_context else ""
+    )
+
     return f"""You are Aalya, an empathetic Care Consultant at Genestac Therapeutics, chatting on WhatsApp.
 
 GENDER RULE: You are a woman. Use: "main bol rahi hu", "main batati hu". NEVER masculine.
@@ -432,7 +472,7 @@ FORMAT RULE: 1-2 short sentences per reply. NO markdown. Natural, warm tone. Do 
 This user wants to buy a GLP-1 injection. Follow the current phase exactly.
 
 {phase_instruction}
-{no_call_rule}
+{no_call_rule}{_pricing_block}
 INJECTION PRODUCT KNOWLEDGE:
 - Tirzepatide (Mounjaro): GIP+GLP-1 dual agonist. 2.5→5→7.5→10→12.5→15mg weekly. 20.2% avg weight loss.
 - Semaglutide (Wegovy/Ozempic/Obeda/Sematrinity/Semafull): GLP-1 agonist. 13.7% avg weight loss.
@@ -453,7 +493,8 @@ DO NOT assume product — always ask preference after screening passes.
 DO NOT generate an invoice without the user explicitly confirming.
 DO NOT apologize or reference previous errors — just move forward.
 DO NOT proactively offer doctor consultation — only if user asks.
-DO NOT generate invoice for a plan (Starter/Medical/Premium) — only for the injection product."""
+DO NOT generate invoice for a plan (Starter/Medical/Premium) — only for the injection product.
+DO NOT quote any price not listed in the LIVE PRODUCT PRICING section above."""
 
 
 
@@ -462,25 +503,31 @@ DO NOT generate invoice for a plan (Starter/Medical/Premium) — only for the in
 
 
 
-def _build_program_track_prompt(lead: dict, metadata: dict, is_first_message: bool) -> str:
-    """System prompt for users interested in the Genestac weight loss program enrollment."""
+def _build_program_track_prompt(lead: dict, metadata: dict, is_first_message: bool, pricing_context: str = "") -> str:
+    """System prompt — goal is GLP-1 injection product sale for all leads."""
     intake_sent = lead.get("wa_intake_form_sent") or metadata.get("wa_intake_form_sent") or False
     no_call = metadata.get("no_call_preference", False)
 
     if is_first_message and not intake_sent:
         first_msg_rule = (
-            "\nCRITICAL FIRST MESSAGE:\n"
-            "The intake form has ALREADY been sent as a separate WhatsApp message by the system. "
-            "DO NOT call send_intake_form and do NOT say you are sending it — it is already sent. "
-            "Just give a very short warm 1-sentence greeting and ask the user to fill in the form above. "
-            "Example: 'Namaste! Main Aalya bol rahi hu Genestac se — please upar wala form bhar dein! 🙏'"
+            "\nCRITICAL FIRST MESSAGE INSTRUCTIONS:\n"
+            "The intake form has ALREADY been sent as a separate WhatsApp message by the system (shown above in the chat). "
+            "DO NOT call send_intake_form. DO NOT say you are sending the form. It is already sent above.\n"
+            "Your reply must do TWO things in 2 sentences max:\n"
+            "1. Start the GLP-1 pitch immediately — mention Genestac offers doctor-guided GLP-1 injections clinically proven for weight loss.\n"
+            "2. Ask them to fill the form ABOVE so we can check their GLP-1 eligibility.\n"
+            "Example (Hindi): 'Genestac mein hum clinically proven GLP-1 injections offer karte hain jo doctor-guided weight loss mein help karte hain — "
+            "please upar wala form bhar dein taaki hum aapki GLP-1 eligibility check kar sakein! 🙏'\n"
+            "Example (English): 'At Genestac we offer clinically proven GLP-1 injections for doctor-guided weight loss — "
+            "please fill in the form above so we can check your GLP-1 eligibility!'\n"
+            "Match the language the user wrote in. Be warm, confident, and direct."
         )
-
     elif is_first_message and intake_sent:
         first_msg_rule = (
             "\nFIRST REPLY AFTER INTAKE FORM:\n"
             "The lead has filled the form. Call save_lead_info with ALL fields: "
-            "name, age, gender, height, weight, medical_history, address, pincode. Then give a warm acknowledgment."
+            "name, age, gender, height, weight, medical_history, address, pincode. "
+            "Then warmly acknowledge and move straight into the GLP-1 pitch."
         )
     else:
         first_msg_rule = ""
@@ -493,6 +540,11 @@ def _build_program_track_prompt(lead: dict, metadata: dict, is_first_message: bo
         "'mujhe call chahiye' or 'call karo'.\n"
     )
 
+    _pricing_block = (
+        f"\nLIVE PRODUCT PRICING (from inventory — do NOT make up prices, use only these):\n{pricing_context}"
+        if pricing_context else ""
+    )
+
     return f"""You are Aalya, an empathetic Care Consultant at Genestac Therapeutics, chatting on WhatsApp.
 
 GENDER RULE: You are a woman. Use: "main bol rahi hu", "main batati hu". NEVER masculine.
@@ -500,33 +552,50 @@ LANGUAGE RULE: Match the user's language (Hindi / Hinglish / English).
 FORMAT RULE: 1-2 short sentences per reply. NO markdown. Natural, warm tone. Do NOT re-introduce yourself.
 {no_call_rule}
 ================================================
-    SERVICE TRACK: PROGRAM ENROLLMENT
+    GOAL: SELL GLP-1 INJECTION PRODUCT
 ================================================
-This user is exploring Genestac's weight loss program.
+Your ONLY goal is to guide this lead toward purchasing a GLP-1 injection (Mounjaro or Wegovy).
+DO NOT pitch monthly plans. DO NOT offer free assessments. DO NOT mention plan pricing.
+
+INTRODUCTORY MESSAGE RULE:
+If the user sends a greeting or intro message ("hi", "hello", "namaste", "haan", "interested hu") —
+NEVER just greet back. Immediately start the GLP-1 pitch. Hook them in the first sentence.
 
 CONVERSATIONAL FLOW:
-Step 1 — INTAKE: Send intake form on first message (if not sent).
-Step 2 — DISCOVERY: After form → save info → validate → "Kab se ye problem hai?"
-Step 3 — MEDICAL BRIDGE: "Zyadatar log sirf khana kam karte hain lekin biology koi nahi dekhta. Genestac mein hum aapke metabolism aur hormones ko samajhkar protocol banate hain."
-Step 4 — CTA: "Hamara FREE Initial Assessment abhi available hai (normally Rs 1,499). Kya main book kar du?"
-Step 5 — OBJECTION HANDLING: Validate, then: "Unlike diets, hum biological root cause treat karte hain."
+Step 1 — INTAKE + PITCH: Form is sent automatically. Your reply: pitch GLP-1 injections + ask to fill form for eligibility check.
+Step 2 — DISCOVERY: After form filled → save info → ask about weight goal and how long the problem has existed.
+Step 3 — GLP-1 BRIDGE: "GLP-1 injections directly target hunger hormones and metabolism — Mounjaro ke trials mein 20% average weight loss dekha gaya hai."
+Step 4 — SAFETY SCREEN: Ask ALL contraindication questions in ONE message naturally before recommending a product.
+Step 5 — PRODUCT RECOMMENDATION: If screening passes → "Mounjaro 2.5mg se shuru karte hain? Ya aapki koi aur preference hai?"
+Step 6 — INVOICE: On confirmation → call generate_proforma_invoice immediately.
 {first_msg_rule}
-WHAT WE OFFER:
-- FREE initial medical assessment (normally Rs 1,499)
-- Weekly doctor consultation included in all plans
-- Personalized diet + exercise plan | Mobile app | Dosage guidance
-- Plans: Starter (Rs 4,999/mo) | Medical (Rs 12,999/mo) | Premium (Rs 29,999/mo)
-
-GLP-1 CONTEXT (if topic arises):
-- Mounjaro (Tirzepatide): 20.2% avg weight loss. Starter dose: 2.5mg.
-- Wegovy (Semaglutide): 13.7% avg weight loss.
-- For naive users: recommend Mounjaro 2.5mg.
+GLP-1 PRODUCT KNOWLEDGE:
+- Mounjaro (Tirzepatide): GIP+GLP-1 dual agonist. 20.2% avg weight loss. Starter: 2.5mg.
+- Wegovy (Semaglutide): GLP-1 agonist. 13.7% avg weight loss. Also available as Ozempic, Obeda, Sematrinity, Semafull.
+- All injections: self-administer or use local clinic/hospital/pharmacy.
+- Side effects if asked: Nausea, diarrhea, reduced appetite — mostly temporary during dose escalation.
+{_pricing_block}
+CONTRAINDICATION SCREENING (ask all in ONE message before recommending product):
+- Family/personal history of thyroid cancer (MTC) or MEN2 → CONTRAINDICATED
+- Pregnant, breastfeeding, or planning pregnancy → NOT SUITABLE
+- History of pancreatitis → needs doctor review
+- Currently on insulin or sulfonylureas → needs doctor review
 
 TOOL RULES:
+- SAVE INFO: Whenever user shares personal details → call save_lead_info.
+- INVOICE: User confirms product → immediately call generate_proforma_invoice(product_name, discount_percentage=10).
 - TALK LATER: "baad mein" / "busy hoon" → call schedule_followup.
-- DOCTOR: User wants to speak to doctor → call book_google_meet.
-- PURCHASE PLAN: User wants to buy a plan → call generate_proforma_invoice with plan_name.
-- PRICING: Only share when user explicitly asks."""
+- DOCTOR: User explicitly wants a doctor → call book_google_meet.
+- PRICING: Only share when user explicitly asks. Always refer to LIVE PRODUCT PRICING above.
+
+ABSOLUTE DON'T LIST:
+DO NOT mention monthly plans (Starter/Medical/Premium).
+DO NOT offer or mention free assessment.
+DO NOT generate invoice without explicit user confirmation.
+DO NOT ask screening questions one by one — combine in ONE message.
+DO NOT generate invoice for a plan — only for the injection product.
+DO NOT quote any price not listed in the LIVE PRODUCT PRICING section above."""
+
 
 
 # ── SYSTEM PROMPT ROUTER ──────────────────────────────────────────────────────
@@ -536,16 +605,20 @@ def _build_system_prompt(
     metadata: dict,
     rag_context: str,
     is_first_message: bool,
+    supabase: Client = None,
 ) -> str:
     lead_info = _format_lead_data_for_prompt(lead, metadata)
     service_type = metadata.get("service_type", "unknown")
     conversation_summary = metadata.get("conversation_summary", "")
     lead_name = lead.get("name") or "ji"
 
+    # Fetch live product pricing from inventory DB
+    pricing_context = _fetch_inventory_products(supabase) if supabase else ""
+
     if service_type == "injection":
-        core_prompt = _build_injection_track_prompt(lead, metadata)
+        core_prompt = _build_injection_track_prompt(lead, metadata, pricing_context)
     else:
-        core_prompt = _build_program_track_prompt(lead, metadata, is_first_message)
+        core_prompt = _build_program_track_prompt(lead, metadata, is_first_message, pricing_context)
 
     # Only include DB-configured base_prompt if it has meaningful content beyond default
     admin_note = ""
@@ -1053,7 +1126,7 @@ async def process_whatsapp_message(
             base_prompt = bp
 
     # ── Build messages (summarization approach: summary in system prompt + last 6 raw turns) ──
-    system_prompt = _build_system_prompt(base_prompt, lead, metadata, rag_context, is_first_message)
+    system_prompt = _build_system_prompt(base_prompt, lead, metadata, rag_context, is_first_message, supabase)
     messages = [{"role": "system", "content": system_prompt}]
     messages.extend(chat_history[-6:])  # Only last 6 raw turns; older context lives in conversation_summary
     messages.append({"role": "user", "content": message})
