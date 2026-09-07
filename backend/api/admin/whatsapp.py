@@ -571,7 +571,9 @@ async def webhook_handler(payload: dict, background_tasks: BackgroundTasks, supa
                                 continue
 
                             # Check for START / re-subscribe intent
-                            if text_body.lower() in ["start", "subscribe", "yes"]:
+                            # NOTE: Only match actual WhatsApp opt-in keywords.
+                            # "yes" is a normal conversational reply — DO NOT include it here.
+                            if text_body.lower().strip() in ["start", "subscribe"]:
                                 # Re-enable leads
                                 supabase.table("leads").update({"whatsapp_opt_out": False}).ilike("phone_number", f"%{clean_phone}%").execute()
                                 # Re-enable subscribed users
@@ -580,7 +582,7 @@ async def webhook_handler(payload: dict, background_tasks: BackgroundTasks, supa
                                     meta = u_row.get("metadata") or {}
                                     meta["engagement_opted_out"] = False
                                     supabase.table("users").update({"metadata": meta}).eq("id", u_row["id"]).execute()
-                                await send_whatsapp_text(f"{clean_phone}", "Welcome back! \U0001f44b You are now re-subscribed to daily health reminders from Genestac. Keep logging to stay on track! \U0001f4aa")
+                                await send_whatsapp_text(f"{clean_phone}", "Welcome back! \U0001f44b You are now re-subscribed to Genestac health updates. \U0001f64f")
                                 print(f"[WhatsApp Webhook] Re-subscribed phone: {clean_phone}")
                                 continue
                                 

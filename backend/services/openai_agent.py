@@ -190,65 +190,149 @@ def _get_doctor_whatsapp_number(doctor_id: str, supabase: Client) -> Optional[st
 
 
 def _get_inventory_item_by_name(supabase: Client, query: str) -> Optional[dict]:
-    """Fuzzy search inventory by brand/product name, returns best match.
-    
-    Strips common dose/variant suffixes so 'Mounjaro 2.5mg' finds 'Mounjaro (Tirzepatide)'.
+    """
+    Search for an inventory item by product name + optional dose.
+    ALWAYS checks inventory_variants first for dose-specific pricing.
+    Falls back to the parent inventory item only if no variant found.
+
+    Examples:
+        'Mounjaro 5mg'   -> inventory_variants row for 5mg pen (₹13,800)
+        'Mounjaro 2.5mg' -> inventory_variants row for 2.5mg pen (₹11,000)
+        'Mounjaro'       -> inventory_variants row for 2.5mg (default starter)
     """
     import re
     try:
-        # Strip dose info to get brand name: "Mounjaro 2.5mg" -> "Mounjaro"
-        brand_query = re.split(r'\s+\d', query)[0].strip()  # everything before first digit
-        # Try brand name first, then full query as fallback
+        # Extract dose if present: "Mounjaro 5mg" -> brand="Mounjaro", dose="5"
+        dose_match = re.search(r'(\d+\.?\d*)\s*mg', query, re.IGNORECASE)
+        dose_str = dose_match.group(1) if dose_match else None
+        brand_query = re.split(r'\s+\d', query)[0].strip() or query.strip()
+
+        # ── Step 1: Try inventory_variants with brand + dose ──────────────────
+        variants_res = supabase.table("inventory_variants").select(
+            "*, inventory:inventory_id(id, name, category, description)"
+        ).execute()
+        all_variants = variants_res.data or []
+
+        # Filter to variants whose parent product matches the brand
+        matching = [
+            v for v in all_variants
+            if brand_query.lower() in (v.get("inventory") or {}).get("name", "").lower()
+        ]
+
+        if matching:
+            if dose_str:
+                # Match by exact float value to avoid "5" matching "2.5mg"
+                try:
+                    requested_dose = float(dose_str)
+                except ValueError:
+                    requested_dose = None
+
+                if requested_dose is not None:
+                    dose_match_variants = []
+                    for v in matching:
+                        ds = v.get("dosage_strength") or v.get("label") or ""
+                        # Extract numeric part from dosage string, e.g. "5mg" -> 5.0, "2.5mg pen" -> 2.5
+                        dm2 = re.search(r'(\d+\.?\d*)', ds)
+                        if dm2:
+                            try:
+                                if float(dm2.group(1)) == requested_dose:
+                                    dose_match_variants.append(v)
+                            except ValueError:
+                                pass
+                    if dose_match_variants:
+                        return _merge_variant_with_inventory(dose_match_variants[0])
+            # No dose specified or dose not found — return first variant (lowest dose = safest default)
+            return _merge_variant_with_inventory(matching[0])
+
+        # ── Step 2: Fallback — search parent inventory table ──────────────────
         for search_term in [brand_query, query]:
             if not search_term:
                 continue
-            res = supabase.table("inventory").select(
-                "*"
-            ).ilike("name", f"%{search_term}%").limit(5).execute()
+            res = supabase.table("inventory").select("*").ilike("name", f"%{search_term}%").limit(5).execute()
             items = res.data or []
             if items:
-                # Prefer items with compare_at_price (MRP) set
                 with_mrp = [i for i in items if i.get("compare_at_price")]
                 return (with_mrp or items)[0]
+
         return None
     except Exception as e:
         print(f"[Agent] Inventory search error: {e}")
         return None
 
 
+def _merge_variant_with_inventory(variant: dict) -> dict:
+    """
+    Merges an inventory_variant row with its parent inventory data
+    so the result has the same shape callers expect (id, name, price, compare_at_price, etc.)
+    """
+    inv = variant.get("inventory") or {}
+    return {
+        "id": inv.get("id"),
+        "variant_id": variant.get("id"),
+        "name": inv.get("name", ""),
+        "label": variant.get("label", ""),
+        "dosage_strength": variant.get("dosage_strength", ""),
+        "price": variant.get("price"),
+        "compare_at_price": variant.get("compare_at_price"),
+        "sku": variant.get("sku"),
+        "category": inv.get("category", ""),
+        "description": inv.get("description", ""),
+        # Keep full variant data too
+        **{k: v for k, v in variant.items() if k != "inventory"},
+    }
+
+
 def _fetch_inventory_products(supabase: Client) -> str:
     """
-    Fetches live GLP-1 product names and prices from the inventory table.
-    Returns a formatted string ready to be injected into the system prompt.
+    Fetches live GLP-1 product variant prices from inventory_variants (joined with inventory).
+    Returns a formatted string injected into the system prompt.
     Prices are NEVER hardcoded — always pulled fresh from the database.
     """
     try:
-        res = supabase.table("inventory").select(
-            "name, price, compare_at_price, category"
-        ).in_("category", ["GIP/GLP-1 Agonist", "GLP-1 Agonist"]).order("category").execute()
-        items = res.data or []
-        if not items:
-            return "(Pricing unavailable — check inventory database)"
+        res = supabase.table("inventory_variants").select(
+            "label, dosage_strength, price, compare_at_price, inventory:inventory_id(name, category)"
+        ).execute()
+        variants = res.data or []
+
+        # Filter to GLP-1 categories only
+        glp1_cats = {"GIP/GLP-1 Agonist", "GLP-1 Agonist"}
+        glp1_variants = [
+            v for v in variants
+            if (v.get("inventory") or {}).get("category") in glp1_cats
+        ]
+
+        if not glp1_variants:
+            return "(Pricing unavailable — check inventory_variants database)"
+
+        # Group by product name
+        from collections import defaultdict
+        by_product: dict = defaultdict(list)
+        for v in glp1_variants:
+            prod_name = (v.get("inventory") or {}).get("name", "Unknown")
+            by_product[prod_name].append(v)
 
         lines = []
-        for item in items:
-            name = item.get("name", "Unknown")
-            mrp = item.get("compare_at_price")
-            sale_price = item.get("price")
-            if mrp and sale_price:
-                discount_pct = round((1 - sale_price / mrp) * 100)
-                lines.append(
-                    f"- {name}: MRP ₹{mrp:,.0f} → Customer price ₹{sale_price:,.0f} ({discount_pct}% off)"
-                )
-            elif sale_price:
-                lines.append(f"- {name}: ₹{sale_price:,.0f}")
-            else:
-                lines.append(f"- {name}: Price on request")
+        for prod_name, pvariants in by_product.items():
+            lines.append(f"{prod_name}:")
+            for v in pvariants:
+                label = v.get("label") or v.get("dosage_strength") or "?"
+                mrp = v.get("compare_at_price")
+                sale_price = v.get("price")
+                if mrp and sale_price:
+                    discount_pct = round((1 - sale_price / mrp) * 100)
+                    lines.append(
+                        f"  - {label}: MRP \u20b9{mrp:,.0f} \u2192 Customer price \u20b9{sale_price:,.0f} ({discount_pct}% off)"
+                    )
+                elif sale_price:
+                    lines.append(f"  - {label}: \u20b9{sale_price:,.0f}")
+                else:
+                    lines.append(f"  - {label}: Price on request")
 
         return "\n".join(lines)
     except Exception as e:
         print(f"[Agent] _fetch_inventory_products error (non-fatal): {e}")
-        return "(Pricing unavailable — check inventory database)"
+        return "(Pricing unavailable — check inventory_variants database)"
+
 
 
 def _format_lead_data_for_prompt(lead: dict, metadata: dict) -> str:
@@ -455,6 +539,32 @@ def _build_injection_track_prompt(lead: dict, metadata: dict, pricing_context: s
         "'mujhe call chahiye' or 'call karo'. Never proactively trigger a call.\n"
     )
 
+    _WEIGHT_LOSS_CALC = (
+        "\nWEIGHT LOSS CALCULATOR GUIDE:\n"
+        "When user asks weight-related questions (\"kitna weight lose hoga?\", \"1 month mein kitna?\", "
+        "\"30kg lose karne mein kitna time?\"), calculate dynamically using their weight from Lead Profile.\n"
+        "Formula based on Mounjaro SURMOUNT-5 trial: avg 20.2% body weight loss over 72 weeks (~17 months).\n\n"
+        "Monthly breakdown:\n"
+        "  Month 1-3:   ~1.5-2% of body weight per month  (fastest phase)\n"
+        "  Month 4-6:   ~1.2-1.5% per month\n"
+        "  Month 7-12:  ~0.8-1% per month\n"
+        "  Month 13-17: ~0.5-0.7% per month\n"
+        "  Full 72 weeks: ~20% of starting body weight\n\n"
+        "For 'X mahine mein kitna lose hoga?' questions:\n"
+        "  Use monthly breakdown to estimate range. e.g. for 90kg person: 1 month ~1.5-2kg, 3 months ~4-5kg.\n\n"
+        "For 'mujhe X kg lose karne mein kitna time lagega?' questions:\n"
+        "  Step 1: Expected total = 20% of their weight. e.g. 90kg -> ~18kg total.\n"
+        "  Step 2: If X <= expected total: Time = (X / expected_total) * 17 months. Give as range.\n"
+        "  Step 3: If X > expected total: 'Clinical trials mein average ~Y kg loss hai aapke weight ke liye. "
+        "Kuch log isse zyada bhi achieve karte hain continued use se.'\n\n"
+        "RULES:\n"
+        "- Use user's weight from Lead Profile. If unknown, ask first: 'Aapka current weight approximately kitna hai?'\n"
+        "- Always give a range, not a fixed number.\n"
+        "- Always add: 'Ye clinical average hai, individual results vary karte hain.'\n"
+        "- After answering, steer back: 'Shuru karte hain? Mounjaro 2.5mg best starting dose hai.'\n"
+        "- NEVER promise guaranteed results.\n"
+    )
+
     _pricing_block = (
         f"\nLIVE PRODUCT PRICING (from inventory — do NOT make up prices, use only these):\n{pricing_context}"
         if pricing_context else ""
@@ -472,10 +582,10 @@ FORMAT RULE: 1-2 short sentences per reply. NO markdown. Natural, warm tone. Do 
 This user wants to buy a GLP-1 injection. Follow the current phase exactly.
 
 {phase_instruction}
-{no_call_rule}{_pricing_block}
+{no_call_rule}{_pricing_block}{_WEIGHT_LOSS_CALC}
 INJECTION PRODUCT KNOWLEDGE:
-- Tirzepatide (Mounjaro): GIP+GLP-1 dual agonist. 2.5→5→7.5→10→12.5→15mg weekly. 20.2% avg weight loss.
-- Semaglutide (Wegovy/Ozempic/Obeda/Sematrinity/Semafull): GLP-1 agonist. 13.7% avg weight loss.
+- Tirzepatide (Mounjaro): GIP+GLP-1 dual agonist. 2.5→5→7.5→10→12.5→15mg weekly. Avg 20.2% body weight loss over 72 weeks (~17 months).
+- Semaglutide (Wegovy/Ozempic/Obeda/Sematrinity/Semafull): GLP-1 agonist. Avg 13.7% body weight loss over 72 weeks.
 - All injections: self-administer OR use local clinic/hospital/pharmacy.
 - Common side effects (if asked): Nausea, diarrhea, vomiting, constipation — mostly temporary.
 
@@ -570,11 +680,11 @@ Step 5 — PRODUCT RECOMMENDATION: If screening passes → "Mounjaro 2.5mg se sh
 Step 6 — INVOICE: On confirmation → call generate_proforma_invoice immediately.
 {first_msg_rule}
 GLP-1 PRODUCT KNOWLEDGE:
-- Mounjaro (Tirzepatide): GIP+GLP-1 dual agonist. 20.2% avg weight loss. Starter: 2.5mg.
-- Wegovy (Semaglutide): GLP-1 agonist. 13.7% avg weight loss. Also available as Ozempic, Obeda, Sematrinity, Semafull.
+- Mounjaro (Tirzepatide): GIP+GLP-1 dual agonist. Avg 20.2% body weight loss over 72 weeks (~17 months). Starter: 2.5mg.
+- Wegovy (Semaglutide): GLP-1 agonist. Avg 13.7% body weight loss over 72 weeks. Also available as Ozempic, Obeda, Sematrinity, Semafull.
 - All injections: self-administer or use local clinic/hospital/pharmacy.
 - Side effects if asked: Nausea, diarrhea, reduced appetite — mostly temporary during dose escalation.
-{_pricing_block}
+{_pricing_block}{_WEIGHT_LOSS_CALC}
 CONTRAINDICATION SCREENING (ask all in ONE message before recommending product):
 - Family/personal history of thyroid cancer (MTC) or MEN2 → CONTRAINDICATED
 - Pregnant, breastfeeding, or planning pregnancy → NOT SUITABLE
