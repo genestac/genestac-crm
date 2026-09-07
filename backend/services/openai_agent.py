@@ -689,11 +689,11 @@ GLP-1 PRODUCT KNOWLEDGE:
 - All injections: self-administer or use local clinic/hospital/pharmacy.
 - Side effects if asked: Nausea, diarrhea, reduced appetite — mostly temporary during dose escalation.
 {_pricing_block}{_WEIGHT_LOSS_CALC}
-CONTRAINDICATION SCREENING (ask all in ONE message before recommending product):
+CONTRAINDICATION SCREENING (ask all relevant questions in ONE message before recommending product):
 - Family/personal history of thyroid cancer (MTC) or MEN2 → CONTRAINDICATED
-- Pregnant, breastfeeding, or planning pregnancy → NOT SUITABLE
 - History of pancreatitis → needs doctor review
 - Currently on insulin or sulfonylureas → needs doctor review
+- GENDER RULE: Ask pregnancy/breastfeeding questions ONLY if user is female or gender is unknown. NEVER ask a male user about pregnancy.
 
 TOOL RULES:
 - SAVE INFO: Whenever user shares personal details → call save_lead_info.
@@ -1064,7 +1064,6 @@ async def process_whatsapp_message(
     _should_send_form = is_first_message and not _intake_sent and _is_program_track
 
     if _should_send_form:
-        extra_wa_messages.append(INTAKE_FORM_TEXT)
         # Mark as sent in DB
         try:
             _meta_upd = {**metadata, "wa_intake_form_sent": True}
@@ -1073,9 +1072,29 @@ async def process_whatsapp_message(
             except Exception:
                 supabase.table(table).update({"metadata": _meta_upd}).eq("id", lead_id).execute()
             metadata["wa_intake_form_sent"] = True
-            print(f"[Agent] Python-driven intake form sent for lead {lead_id}")
+            print(f"[Agent] Intake form marked as sent for lead {lead_id}")
         except Exception as _ife:
             print(f"[Agent] Intake form DB update failed (non-fatal): {_ife}")
+
+        # Send form directly to WA before returning so no extra AI reply is added
+        try:
+            from services.whatsapp_service import send_whatsapp_text as _send_wa_form
+            _clean_phone = "".join(filter(str.isdigit, lead_phone))
+            await _send_wa_form(_clean_phone, INTAKE_FORM_TEXT)
+            supabase.table("whatsapp_messages").insert({
+                lead_col: lead_id,
+                "message_body": INTAKE_FORM_TEXT,
+                "sender_type": "bot",
+            }).execute()
+            print(f"[Agent] Intake form dispatched to {_clean_phone}")
+        except Exception as _fe:
+            print(f"[Agent] Intake form dispatch failed: {_fe}")
+
+        # ── Suppress AI reply when we're only sending the form ─────────────────────────
+        # Don't let GPT send a second message on the same turn as the form.
+        # The form itself IS the reply. GPT will respond on the next user turn.
+        print(f"[Agent] Intake form sent — suppressing AI reply to avoid double message for lead {lead_id}")
+        return None, False
 
 
     base_prompt = "You are a helpful, empathetic AI assistant for Genestac Therapeutics."
