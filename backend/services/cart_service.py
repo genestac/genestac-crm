@@ -93,6 +93,7 @@ def add_inventory_to_cart(
     inventory_id: str,
     quantity: int = 1,
     discount_pct: float = 10.0,
+    inventory_item: dict = None,
 ) -> dict:
     """
     Add an inventory (injection/medicine) item to the cart.
@@ -100,14 +101,17 @@ def add_inventory_to_cart(
     Discount floor: never below inventory.price (cost price).
     Returns the inserted cart_items row.
     """
-    inv_res = supabase.table("inventory").select(
-        "id, name, price, compare_at_price"
-    ).eq("id", inventory_id).execute()
+    if inventory_item:
+        item = inventory_item
+    else:
+        inv_res = supabase.table("inventory").select(
+            "id, name, price, compare_at_price, gst_percentage"
+        ).eq("id", inventory_id).execute()
+        
+        if not inv_res.data:
+            raise ValueError(f"Inventory item {inventory_id} not found")
+        item = inv_res.data[0]
 
-    if not inv_res.data:
-        raise ValueError(f"Inventory item {inventory_id} not found")
-
-    item = inv_res.data[0]
     cost_price = float(item.get("price") or 0)
     mrp = float(item.get("compare_at_price") or item.get("price") or 0)
     gst_pct = float(item.get("gst_percentage") or 0.0)  # 0% GST unless explicitly configured
@@ -120,14 +124,18 @@ def add_inventory_to_cart(
     gst_per_unit = round(discounted_unit * gst_pct / 100, 2) if gst_pct > 0 else 0.0
     line_total = round((discounted_unit + gst_per_unit) * quantity, 2)
 
-    dosage = item.get("Dosage/Strength") or ""
-    item_description = f"{item['name']}{' ' + dosage if dosage else ''} × {quantity}"
+    dosage = item.get("label") or item.get("Dosage/Strength") or ""
+    base_name = item.get('name', 'Injection')
+    if dosage and dosage.lower() not in base_name.lower():
+        base_name = f"{base_name} ({dosage})"
+        
+    item_description = f"{base_name} × {quantity}"
 
     row = {
         "cart_id": cart_id,
         "item_type": "inventory",
         "inventory_id": inventory_id,
-        "item_name": item["name"],
+        "item_name": base_name,
         "item_description": item_description,
         "quantity": quantity,
         "unit_mrp": mrp,
@@ -401,35 +409,14 @@ def create_direct_injection_pi(
     inventory_item must be a dict with at least: id, name, price, compare_at_price, gst_percentage
     Returns the same shape as create_pi_from_cart.
     """
-    # ── Variant resolution ───────────────────────────────────────────────────
-    variant = None
-    inv_id = inventory_item.get("id")
-    if inv_id:
-        try:
-            var_query = supabase.table("inventory_variants").select("*").eq("inventory_id", inv_id)
-            if dosage:
-                var_res = var_query.ilike("dosage_strength", f"%{dosage}%").limit(1).execute()
-                if var_res.data:
-                    variant = var_res.data[0]
-            if not variant:
-                # Default to starter dose (e.g. 2.5mg for Mounjaro, 0.25mg for Wegovy/Ozempic) or lowest price
-                var_res = supabase.table("inventory_variants").select("*").eq("inventory_id", inv_id).order("price", desc=False).limit(1).execute()
-                if var_res.data:
-                    variant = var_res.data[0]
-        except Exception as _ve:
-            print(f"[CartService] Variant lookup error: {_ve}")
-
-    if variant:
-        item_label = variant.get("label") or variant.get("dosage_strength") or ""
-        item_name = f"{inventory_item.get('name', 'Injection')}"
-        if item_label and item_label.lower() not in item_name.lower():
-            item_name = f"{item_name} ({item_label})"
-        unit_price = float(variant.get("price") or inventory_item.get("price") or 0)
-        mrp = float(variant.get("compare_at_price") or inventory_item.get("compare_at_price") or unit_price)
-    else:
-        item_name = inventory_item.get("name", "Injection")
-        unit_price = float(inventory_item.get("price") or 0)
-        mrp = float(inventory_item.get("compare_at_price") or unit_price)
+    # ── Item naming and pricing using pre-resolved variant data ──────────────
+    item_label = inventory_item.get("label") or inventory_item.get("dosage_strength") or dosage or ""
+    item_name = f"{inventory_item.get('name', 'Injection')}"
+    if item_label and item_label.lower() not in item_name.lower():
+        item_name = f"{item_name} ({item_label})"
+    
+    unit_price = float(inventory_item.get("price") or 0)
+    mrp = float(inventory_item.get("compare_at_price") or unit_price)
 
     # Apply explicit discount_pct if provided (e.g. 10.0 for 10% off MRP)
     if discount_pct > 0:

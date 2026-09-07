@@ -1489,6 +1489,7 @@ async def process_whatsapp_message(
                                         inventory_id=inv_item["id"],
                                         quantity=quantity,
                                         discount_pct=discount_pct,
+                                        inventory_item=inv_item,
                                     )
                                     pi = create_pi_from_cart(
                                         supabase=supabase,
