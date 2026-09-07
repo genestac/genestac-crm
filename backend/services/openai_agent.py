@@ -497,7 +497,7 @@ _WEIGHT_LOSS_CALC = (
     "- Use user's weight from Lead Profile. If unknown, ask first: 'Aapka current weight approximately kitna hai?'\n"
     "- Always give a range, not a fixed number.\n"
     "- Always add: 'Ye clinical average hai, individual results vary karte hain.'\n"
-    "- After answering, steer back: 'Shuru karte hain? Mounjaro 2.5mg best starting dose hai.'\n"
+    "- After answering, steer back: 'Shuru karte hain? Konsa dose aapne already try kiya hai, ya fresh start hai?'\n"
     "- NEVER promise guaranteed results.\n"
 )
 
@@ -525,13 +525,15 @@ def _build_injection_track_prompt(lead: dict, metadata: dict, pricing_context: s
             phase_instruction = (
                 "CURRENT PHASE: PRODUCT SELECTION & PURCHASE\n"
                 "Safety screening is complete and passed.\n"
-                "Ask the user: 'Mounjaro 2.5mg se shuru karein? Ya aapki koi aur preference hai — "
-                "jaise Wegovy (Semaglutide)?'\n"
-                "- If they confirm Mounjaro or say 'haan'/'ok'/'theek hai'/'yes'/'bilkul': call generate_proforma_invoice(product_name='Mounjaro', discount_percentage=10).\n"
-                "- If they mention Wegovy/Ozempic/Semaglutide: call generate_proforma_invoice(product_name='Wegovy', discount_percentage=10).\n"
-                "- If they ask about price first: Mounjaro 2.5mg MRP ₹13,125 → aapke liye ₹11,812 (10% off). Wegovy pricing: share when asked.\n"
-                "- Do NOT generate invoice without their explicit confirmation.\n"
-                "- Once they confirm: IMMEDIATELY call generate_proforma_invoice. Do NOT ask again."
+                "Ask about the user's GLP-1 history first: 'Kya aapne pehle koi GLP-1 injection try kiya hai? Agar haan, toh konsa aur konsi dose?'\n"
+                "- If user has NO prior GLP-1 experience: suggest 2.5mg as the standard starter dose.\n"
+                "- If user mentions a specific dose they want or have used: use THAT exact dose. Do NOT override with 2.5mg.\n"
+                "- If they confirm purchase for a dose: call generate_proforma_invoice with that exact product+dose in product_name.\n"
+                "  Example: 'Mounjaro 5mg' if user wants 5mg, 'Mounjaro 2.5mg' if new user, 'Wegovy 0.25mg' if they prefer Wegovy.\n"
+                "- CRITICAL: product_name MUST always include the exact dose (e.g. '2.5mg', '5mg'). Never pass just 'Mounjaro'.\n"
+                "- If they ask about price first: refer to LIVE PRODUCT PRICING above. Never hardcode any price.\n"
+                "- Do NOT generate invoice without their explicit confirmation to purchase.\n"
+                "- Once they confirm purchase: IMMEDIATELY call generate_proforma_invoice. Do NOT ask again."
             )
     elif screen_done and not screen_passed:
         phase_instruction = (
@@ -551,7 +553,8 @@ def _build_injection_track_prompt(lead: dict, metadata: dict, pricing_context: s
             f"  Example: 'Ek quick safety check — kya aapke family mein ya aapko thyroid cancer ki history hai?{pregnancy_q} Aur kabhi pancreatitis hua hai?'\n\n"
             "Rules for evaluating the reply:\n"
             "  - If user answers NO to all → call save_lead_info(injection_screen_step=3, injection_screen_done=true, injection_screen_passed=true). "
-            "Then ask: 'Mounjaro 2.5mg se shuru karein? Ya koi aur preference hai?'\n"
+            "Then ask about their GLP-1 history: 'Kya pehle koi GLP-1 injection use kiya hai? Konsa dose tha?'\n"
+            "Proceed with the dose the user mentions or has used before — do not override with 2.5mg if they want something else.\n"
             "  - If any answer is YES → call save_lead_info(injection_screen_done=true, injection_screen_passed=false). "
             "Explain warmly, offer FREE doctor consultation via book_google_meet.\n"
             "  - If answer is ambiguous for any question → follow up ONLY on the unclear one in your next message.\n"
@@ -677,11 +680,11 @@ Step 1 — INTAKE + PITCH: Form is sent automatically. Your reply: pitch GLP-1 i
 Step 2 — DISCOVERY: After form filled → save info → ask about weight goal and how long the problem has existed.
 Step 3 — GLP-1 BRIDGE: "GLP-1 injections directly target hunger hormones and metabolism — Mounjaro ke trials mein 20% average weight loss dekha gaya hai."
 Step 4 — SAFETY SCREEN: Ask ALL contraindication questions in ONE message naturally before recommending a product.
-Step 5 — PRODUCT RECOMMENDATION: If screening passes → "Mounjaro 2.5mg se shuru karte hain? Ya aapki koi aur preference hai?"
-Step 6 — INVOICE: On confirmation → call generate_proforma_invoice immediately.
+Step 5 — PRODUCT RECOMMENDATION: If screening passes → ask about GLP-1 history. If they have never used it, mention 2.5mg is standard, but if they want a specific dose/product, follow that.
+Step 6 — INVOICE: ONLY after Step 5 when user confirms product purchase → call generate_proforma_invoice immediately.
 {first_msg_rule}
 GLP-1 PRODUCT KNOWLEDGE:
-- Mounjaro (Tirzepatide): GIP+GLP-1 dual agonist. Avg 20.2% body weight loss over 72 weeks (~17 months). Starter: 2.5mg.
+- Mounjaro (Tirzepatide): GIP+GLP-1 dual agonist. Avg 20.2% body weight loss over 72 weeks (~17 months). Standard starting dose is 2.5mg for beginners; if user has prior experience with a higher dose, always respect their preference.
 - Wegovy (Semaglutide): GLP-1 agonist. Avg 13.7% body weight loss over 72 weeks. Also available as Ozempic, Obeda, Sematrinity, Semafull.
 - All injections: self-administer or use local clinic/hospital/pharmacy.
 - Side effects if asked: Nausea, diarrhea, reduced appetite — mostly temporary during dose escalation.
@@ -694,7 +697,7 @@ CONTRAINDICATION SCREENING (ask all in ONE message before recommending product):
 
 TOOL RULES:
 - SAVE INFO: Whenever user shares personal details → call save_lead_info.
-- INVOICE: User confirms product → immediately call generate_proforma_invoice(product_name, discount_percentage=10).
+- INVOICE: ONLY call generate_proforma_invoice after safety screening passes AND user explicitly confirms they want to purchase a product. NEVER call this for 'hi' or simple 'yes' in early steps. ALWAYS include the exact dose in product_name — e.g. 'Mounjaro 2.5mg', 'Mounjaro 5mg', 'Wegovy 0.25mg'. NEVER pass just the brand name without dose.
 - TALK LATER: "baad mein" / "busy hoon" → call schedule_followup.
 - DOCTOR: User explicitly wants a doctor → call book_google_meet.
 - PRICING: Only share when user explicitly asks. Always refer to LIVE PRODUCT PRICING above.
@@ -873,7 +876,7 @@ TOOLS = [
                 "properties": {
                     "product_name": {
                         "type": "string",
-                        "description": "Name of the product to invoice (e.g. 'Mounjaro 2.5mg', 'Mounjaro'). Used to search inventory.",
+                        "description": "Brand name PLUS specific dose/variant of the product. ALWAYS include the dose. Examples: 'Mounjaro 2.5mg', 'Mounjaro 5mg', 'Wegovy 0.25mg', 'Ozempic 1mg'. Never pass just 'Mounjaro' — always include the exact dose the user discussed.",
                     },
                     "plan_name": {
                         "type": "string",
@@ -1041,55 +1044,6 @@ async def process_whatsapp_message(
 
 
 
-    # ── Injection purchase intent detection (Python-driven) ───────────────────────────────
-    # When screening is done and user expresses purchase intent, set pending_invoice=True.
-    # The system prompt then gives GPT an OVERRIDE instruction to call generate_proforma_invoice NOW.
-    _PURCHASE_KEYWORDS = [
-        "payment link", "link bhej", "link send", "link share", "link do",
-        "invoice", "bill send", "proforma",
-        "khareed", "buy ", "purchase",
-        "pay kar", "abhi le",
-    ]
-    _AFFIRM_KEYWORDS = [
-        "theek hai", "kar do", "kar dijiye", "bhej do", "send karo",
-        "pls send", "please send", "de do", "kardo", "bhejdo"
-    ]
-    _AFFIRM_EXACT = {"ok", "okay", "k", "yes", "haan", "ha", "haa", "theek", "sure", "bilkul", "proceed", "done", "fine", "sahi", "send", "bhejo", "chahiye", "dedo", "yep", "yeah"}
-    _msg_clean = message.lower().strip()
-    _msg_words = set(re.findall(r'[a-zA-Z]+', _msg_clean))
-    _msg_pad = " " + _msg_clean + " "
-    _inj_track = metadata.get("service_type") == "injection"
-    _wants_purchase = any(kw in _msg_pad for kw in _PURCHASE_KEYWORDS)
-    _is_affirm = bool(_msg_words & _AFFIRM_EXACT) or any(kw in _msg_pad for kw in _AFFIRM_KEYWORDS)
-
-    # ── Payment bypass: skip/override screening if user explicitly asks for payment/invoice ──
-    # Fires when screening not yet started OR was wrongly marked as failed (false-positive).
-    # Explicit purchase intent always overrides screening state.
-    if _inj_track and _wants_purchase and (
-        not metadata.get("injection_screen_done") or not metadata.get("injection_screen_passed")
-    ):
-        metadata["injection_screen_done"] = True
-        metadata["injection_screen_passed"] = True
-        metadata["injection_screen_step"] = 3
-        metadata["pending_invoice"] = True
-        print(f"[Agent] Payment bypass: overriding screening state for lead {lead_id}")
-        try:
-            supabase.table(table).update({"metadata": {**metadata}}).eq("id", lead_id).execute()
-        except Exception as _pe:
-            print(f"[Agent] Payment bypass DB save failed (non-fatal): {_pe}")
-
-    _inj_ready = (
-        _inj_track and
-        metadata.get("injection_screen_done") and
-        metadata.get("injection_screen_passed")
-    )
-    if _inj_ready:
-        _mentions_other_product = any(p in _msg_clean for p in ["wegovy", "semaglutide", "ozempic", "rybelsus"])
-        if (_wants_purchase or _is_affirm or metadata.get("pending_invoice")) and not _mentions_other_product:
-            metadata["pending_invoice"] = True
-        elif _mentions_other_product:
-            metadata["pending_invoice"] = False
-
     # ── Stale conversation_summary guard ──────────────────────────────────────
     _lead_name = (lead.get("name") or "").strip().lower()
     _summary = metadata.get("conversation_summary", "")
@@ -1124,107 +1078,6 @@ async def process_whatsapp_message(
             print(f"[Agent] Intake form DB update failed (non-fatal): {_ife}")
 
 
-    # ── Python-driven invoice generation ──────────────────────────────────────
-    # When pending_invoice=True, generate invoice from Python directly and return immediately.
-    _RESEND_KEYWORDS = [
-        "bheja nhi", "nhi bheja", "nhi aaya", "link nhi", "nhi mila",
-        "send nhi", "abhi tak nhi", "kahan hai", "kab milega",
-        "didn't send", "not received", "where is", "still waiting",
-        "haven't received", "havnt received", "havent received",
-        "check again", "check karo", "dobara bhejo", "phir bhejo",
-        "received nhi", "nhi receive", "link nahi", "nahi mila",
-        "send me now", "send it now", "abhi bhejo", "abhi bhej",
-        "pi ka link", "pi link", "invoice link", "bill link",
-        "kaha bheja", "kahan bheja", "link de do", "link bhejo",
-    ]
-    _msg_pad_lower = " " + message.lower().strip() + " "
-    _is_resend = any(kw in _msg_pad_lower for kw in _RESEND_KEYWORDS)
-
-    if _is_resend and _inj_ready:
-        metadata["pending_invoice"] = True
-
-    if metadata.get("pending_invoice") and metadata.get("injection_screen_passed"):
-        from services.cart_service import (
-            create_direct_injection_pi,
-            format_pi_whatsapp_message,
-        )
-        _pi_product = metadata.get("recommended_product") or "Mounjaro"
-        _inv_item = _get_inventory_item_by_name(supabase, _pi_product)
-        if _inv_item:
-            try:
-                # 1. Check if a recent pending invoice with a valid razorpay link exists from today for this lead
-                _pi = None
-                try:
-                    _pi_check = (
-                        supabase.table("proforma_invoices")
-                        .select("*")
-                        .eq("user_id", lead_id)
-                        .eq("status", "PENDING")
-                        .order("created_at", desc=True)
-                        .limit(1)
-                        .execute()
-                    )
-                    if _pi_check.data:
-                        _c = _pi_check.data[0]
-                        # If it has a valid razorpay_url and total amount is correct, reuse it
-                        if _c.get("razorpay_url") and float(_c.get("total_amount", 0)) == 11812.5:
-                            _pi = _c
-                            _pi["invoice_id"] = _c["id"]
-                            _pi["items"] = [{
-                                "item_name": f"{_inv_item.get('name', 'Mounjaro (Tirzepatide)')} (2.5mg pen)",
-                                "quantity": 1,
-                                "unit_mrp": 13125.0,
-                                "discounted_unit_price": 11812.5,
-                                "discount_percentage": 10.0,
-                            }]
-                            print(f"[Agent] Reusing existing pending invoice {_pi['invoice_number']} for lead {lead_id}")
-                except Exception as _e_ex:
-                    print(f"[Agent] Error checking existing PI: {_e_ex}")
-
-                if not _pi:
-                    _pi = create_direct_injection_pi(
-                        supabase=supabase,
-                        lead_id=lead_id,
-                        inventory_item=_inv_item,
-                        quantity=1,
-                        discount_pct=10.0,
-                        source="whatsapp_bot",
-                        dosage="2.5mg",
-                    )
-
-                _pi_msg = format_pi_whatsapp_message(_pi)
-                metadata["pending_invoice"] = False
-                try:
-                    supabase.table(table).update({"metadata": {**metadata}}).eq("id", lead_id).execute()
-                except Exception:
-                    pass
-                print(f"[Agent] Python-driven invoice ready: {_pi['invoice_number']} for lead {lead_id}")
-
-                # Update conversation summary asynchronously
-                asyncio.create_task(
-                    _update_conversation_summary(
-                        lead_id=lead_id,
-                        table=table,
-                        metadata=metadata,
-                        supabase=supabase,
-                        new_user_message=message,
-                        new_ai_response=_pi_msg,
-                    )
-                )
-                # Immediately return the formatted invoice message as the AI reply!
-                return _pi_msg, False
-
-            except Exception as _pie:
-                print(f"[Agent] Python-driven invoice FAILED: {_pie}")
-                import traceback; traceback.print_exc()
-                _pending_invoice_context = None
-        else:
-            print(f"[Agent] Python invoice: product '{_pi_product}' not found in inventory")
-            _pending_invoice_context = None
-    else:
-        _pending_invoice_context = None
-
-
     base_prompt = "You are a helpful, empathetic AI assistant for Genestac Therapeutics."
 
     settings_res = supabase.table("global_settings").select("settings_value").eq(
@@ -1241,10 +1094,6 @@ async def process_whatsapp_message(
     messages = [{"role": "system", "content": system_prompt}]
     messages.extend(chat_history[-6:])  # Only last 6 raw turns; older context lives in conversation_summary
     messages.append({"role": "user", "content": message})
-
-    # If Python pre-generated the invoice, inject as system context so GPT just confirms
-    if _pending_invoice_context:
-        messages.append({"role": "system", "content": _pending_invoice_context})
 
     # ── First call to GPT ────────────────────────────────────────────────────
     try:
