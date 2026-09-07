@@ -475,6 +475,33 @@ async def _update_conversation_summary(
         print(f"[Agent] Summary update failed (non-fatal): {e}")
 
 
+_WEIGHT_LOSS_CALC = (
+    "\nWEIGHT LOSS CALCULATOR GUIDE:\n"
+    "When user asks weight-related questions (\"kitna weight lose hoga?\", \"1 month mein kitna?\", "
+    "\"30kg lose karne mein kitna time?\"), calculate dynamically using their weight from Lead Profile.\n"
+    "Formula based on Mounjaro SURMOUNT-5 trial: avg 20.2% body weight loss over 72 weeks (~17 months).\n\n"
+    "Monthly breakdown:\n"
+    "  Month 1-3:   ~1.5-2% of body weight per month  (fastest phase)\n"
+    "  Month 4-6:   ~1.2-1.5% per month\n"
+    "  Month 7-12:  ~0.8-1% per month\n"
+    "  Month 13-17: ~0.5-0.7% per month\n"
+    "  Full 72 weeks: ~20% of starting body weight\n\n"
+    "For 'X mahine mein kitna lose hoga?' questions:\n"
+    "  Use monthly breakdown to estimate range. e.g. for 90kg person: 1 month ~1.5-2kg, 3 months ~4-5kg.\n\n"
+    "For 'mujhe X kg lose karne mein kitna time lagega?' questions:\n"
+    "  Step 1: Expected total = 20% of their weight. e.g. 90kg -> ~18kg total.\n"
+    "  Step 2: If X <= expected total: Time = (X / expected_total) * 17 months. Give as range.\n"
+    "  Step 3: If X > expected total: 'Clinical trials mein average ~Y kg loss hai aapke weight ke liye. "
+    "Kuch log isse zyada bhi achieve karte hain continued use se.'\n\n"
+    "RULES:\n"
+    "- Use user's weight from Lead Profile. If unknown, ask first: 'Aapka current weight approximately kitna hai?'\n"
+    "- Always give a range, not a fixed number.\n"
+    "- Always add: 'Ye clinical average hai, individual results vary karte hain.'\n"
+    "- After answering, steer back: 'Shuru karte hain? Mounjaro 2.5mg best starting dose hai.'\n"
+    "- NEVER promise guaranteed results.\n"
+)
+
+
 def _build_injection_track_prompt(lead: dict, metadata: dict, pricing_context: str = "") -> str:
     """System prompt for users who want to purchase a GLP-1 injection directly."""
     screen_done = metadata.get("injection_screen_done", False)
@@ -537,32 +564,6 @@ def _build_injection_track_prompt(lead: dict, metadata: dict, pricing_context: s
     ) if no_call else (
         "\nCALL RULE: ONLY call trigger_exotel_call if user explicitly says "
         "'mujhe call chahiye' or 'call karo'. Never proactively trigger a call.\n"
-    )
-
-    _WEIGHT_LOSS_CALC = (
-        "\nWEIGHT LOSS CALCULATOR GUIDE:\n"
-        "When user asks weight-related questions (\"kitna weight lose hoga?\", \"1 month mein kitna?\", "
-        "\"30kg lose karne mein kitna time?\"), calculate dynamically using their weight from Lead Profile.\n"
-        "Formula based on Mounjaro SURMOUNT-5 trial: avg 20.2% body weight loss over 72 weeks (~17 months).\n\n"
-        "Monthly breakdown:\n"
-        "  Month 1-3:   ~1.5-2% of body weight per month  (fastest phase)\n"
-        "  Month 4-6:   ~1.2-1.5% per month\n"
-        "  Month 7-12:  ~0.8-1% per month\n"
-        "  Month 13-17: ~0.5-0.7% per month\n"
-        "  Full 72 weeks: ~20% of starting body weight\n\n"
-        "For 'X mahine mein kitna lose hoga?' questions:\n"
-        "  Use monthly breakdown to estimate range. e.g. for 90kg person: 1 month ~1.5-2kg, 3 months ~4-5kg.\n\n"
-        "For 'mujhe X kg lose karne mein kitna time lagega?' questions:\n"
-        "  Step 1: Expected total = 20% of their weight. e.g. 90kg -> ~18kg total.\n"
-        "  Step 2: If X <= expected total: Time = (X / expected_total) * 17 months. Give as range.\n"
-        "  Step 3: If X > expected total: 'Clinical trials mein average ~Y kg loss hai aapke weight ke liye. "
-        "Kuch log isse zyada bhi achieve karte hain continued use se.'\n\n"
-        "RULES:\n"
-        "- Use user's weight from Lead Profile. If unknown, ask first: 'Aapka current weight approximately kitna hai?'\n"
-        "- Always give a range, not a fixed number.\n"
-        "- Always add: 'Ye clinical average hai, individual results vary karte hain.'\n"
-        "- After answering, steer back: 'Shuru karte hain? Mounjaro 2.5mg best starting dose hai.'\n"
-        "- NEVER promise guaranteed results.\n"
     )
 
     _pricing_block = (
