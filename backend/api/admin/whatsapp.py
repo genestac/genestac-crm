@@ -661,20 +661,29 @@ async def webhook_handler(payload: dict, background_tasks: BackgroundTasks, supa
                                 continue
                             
                             # ── First-message detection ─────────────────────
-                            # Check if there were any prior messages for this lead
-                            # (before the current one was inserted)
+                            # Count messages for this lead (we just inserted the current one).
+                            # prior_count == 1 means the only message is the one just inserted.
                             prior_msg_res = supabase.table("whatsapp_messages") \
                                 .select("id") \
                                 .eq(lead_col, existing["id"]) \
-                                .limit(2) \
+                                .limit(3) \
                                 .execute()
-                            # We just inserted the current message so count > 1 means prior messages exist
                             prior_count = len(prior_msg_res.data or [])
-                            # Also check if intake form was already sent (from leads.wa_intake_form_sent or metadata)
-                            _meta = existing.get("metadata") or {}
-                            _intake_sent = existing.get("wa_intake_form_sent") or _meta.get("wa_intake_form_sent") or False
-                            # is_first_message = True only when no prior messages AND intake form not yet sent
-                            is_first_message = (prior_count <= 1) and not _intake_sent
+
+                            # Re-fetch fresh metadata from DB so we pick up any wa_intake_form_sent
+                            # flag that may have been saved by a previous request (avoid stale cache).
+                            _fresh_res = supabase.table(table).select("wa_intake_form_sent, metadata") \
+                                .eq("id", existing["id"]).execute()
+                            _fresh = _fresh_res.data[0] if _fresh_res.data else {}
+                            _fresh_meta = _fresh.get("metadata") or {}
+                            _intake_sent = (
+                                _fresh.get("wa_intake_form_sent")
+                                or _fresh_meta.get("wa_intake_form_sent")
+                                or False
+                            )
+                            # is_first_message = True ONLY when this is the very first message
+                            # (prior_count == 1 means only the current message exists) AND form not yet sent.
+                            is_first_message = (prior_count == 1) and not _intake_sent
                             print(f"[WhatsApp Webhook] is_first_message={is_first_message} (prior_count={prior_count}, intake_sent={_intake_sent}) for {clean_phone}")
 
                             

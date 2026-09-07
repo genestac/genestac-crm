@@ -322,6 +322,7 @@ async def _update_conversation_summary(
     existing_summary = metadata.get("conversation_summary", "")
     service_type = metadata.get("service_type", "unknown")
     try:
+        intake_sent = metadata.get("wa_intake_form_sent", False)
         prompt = (
             "You are a conversation summarizer for Aalya, a WhatsApp healthcare sales AI "
             "(Genestac Therapeutics).\n\n"
@@ -329,9 +330,11 @@ async def _update_conversation_summary(
             f"Latest exchange:\n"
             f"User: {new_user_message}\n"
             f"Aalya: {new_ai_response}\n\n"
-            f"Service track: {service_type}\n\n"
+            f"Service track: {service_type}\n"
+            f"Intake form already sent: {intake_sent}\n\n"
             "Update the summary. Max 150 words. Include:\n"
             "- Service track (injection purchase OR program enrollment)\n"
+            "- IMPORTANT: Always state 'Intake form sent: YES' or 'Intake form sent: NO' so this is never forgotten\n"
             "- What user shared (name, age, weight, height, medical history, goals)\n"
             "- Product/plan interest expressed\n"
             "- Questions already asked and answered (avoid repeating)\n"
@@ -580,8 +583,22 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "send_intake_form",
-            "description": "Sends the GLP-1 eligibility intake form to the lead. Call this on the FIRST message if the form has not been sent yet.",
-            "parameters": {"type": "object", "properties": {}, "required": []},
+            "description": (
+                "Sends the GLP-1 eligibility intake form to the lead. "
+                "ONLY call this if 'Intake Form Sent: False' in the CURRENT LEAD PROFILE above. "
+                "If 'Intake Form Sent: True', DO NOT call this — the form was already sent. "
+                "Exception: call this if the user EXPLICITLY asks to resend the form (e.g. 'form dobara bhejo', 'send form again', 'form nahi mila')."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "resend_requested": {
+                        "type": "boolean",
+                        "description": "Set to true ONLY if the user explicitly asked to resend the form. False by default."
+                    }
+                },
+                "required": []
+            },
         },
     },
     {
@@ -1080,17 +1097,31 @@ async def process_whatsapp_message(
 
                 # ── 1. send_intake_form ──────────────────────────────────────
                 if func_name == "send_intake_form":
-                    extra_wa_messages.append(INTAKE_FORM_TEXT)
-                    # Mark form as sent
-                    meta_update = {**metadata, "wa_intake_form_sent": True}
-                    col_update = {"wa_intake_form_sent": True, "metadata": meta_update}
-                    try:
-                        supabase.table(table).update(col_update).eq("id", lead_id).execute()
-                    except Exception:
-                        supabase.table(table).update({"metadata": meta_update}).eq("id", lead_id).execute()
-                    metadata["wa_intake_form_sent"] = True
-                    tool_result_str = "INTAKE_FORM_SENT"
-                    tool_results_for_ai.append("Intake form sent. Wait for user to fill it in.")
+                    # GPT decides whether this is an explicit resend request via resend_requested arg
+                    _explicit_resend = args.get("resend_requested", False)
+
+                    # Idempotency guard: skip if already sent UNLESS GPT explicitly flagged resend
+                    if metadata.get("wa_intake_form_sent") and not _explicit_resend:
+                        print(f"[Agent] send_intake_form blocked — form already sent for lead {lead_id}")
+                        tool_result_str = "INTAKE_FORM_ALREADY_SENT"
+                        tool_results_for_ai.append(
+                            "Intake form was already sent earlier. Do NOT send it again. "
+                            "If user says they didn't receive it, tell them to check WhatsApp messages above."
+                        )
+                    else:
+                        if _explicit_resend:
+                            print(f"[Agent] GPT flagged explicit resend — resending intake form for lead {lead_id}")
+                        extra_wa_messages.append(INTAKE_FORM_TEXT)
+                        # Mark form as sent
+                        meta_update = {**metadata, "wa_intake_form_sent": True}
+                        col_update = {"wa_intake_form_sent": True, "metadata": meta_update}
+                        try:
+                            supabase.table(table).update(col_update).eq("id", lead_id).execute()
+                        except Exception:
+                            supabase.table(table).update({"metadata": meta_update}).eq("id", lead_id).execute()
+                        metadata["wa_intake_form_sent"] = True
+                        tool_result_str = "INTAKE_FORM_SENT"
+                        tool_results_for_ai.append("Intake form sent. Wait for user to fill it in.")
 
                 # ── 2. save_lead_info ────────────────────────────────────────
                 elif func_name == "save_lead_info":
