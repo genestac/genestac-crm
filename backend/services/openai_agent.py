@@ -213,9 +213,12 @@ def _get_inventory_item_by_name(supabase: Client, query: str) -> Optional[dict]:
         ).execute()
         all_variants = variants_res.data or []
 
+        # Only consider variants with stock > 0
+        in_stock_variants = [v for v in all_variants if int(v.get("stock_quantity") or 0) > 0]
+
         # Filter to variants whose parent product matches the brand
         matching = [
-            v for v in all_variants
+            v for v in in_stock_variants
             if brand_query.lower() in (v.get("inventory") or {}).get("name", "").lower()
         ]
 
@@ -284,13 +287,13 @@ def _merge_variant_with_inventory(variant: dict) -> dict:
 
 def _fetch_inventory_products(supabase: Client) -> str:
     """
-    Fetches live GLP-1 product variant prices from inventory_variants (joined with inventory).
+    Fetches live GLP-1 product variant prices AND stock from inventory_variants.
     Returns a formatted string injected into the system prompt.
     Prices are NEVER hardcoded — always pulled fresh from the database.
     """
     try:
         res = supabase.table("inventory_variants").select(
-            "label, dosage_strength, price, compare_at_price, inventory:inventory_id(name, category)"
+            "id, label, dosage_strength, price, compare_at_price, stock_quantity, inventory:inventory_id(name, category)"
         ).execute()
         variants = res.data or []
 
@@ -311,27 +314,37 @@ def _fetch_inventory_products(supabase: Client) -> str:
             prod_name = (v.get("inventory") or {}).get("name", "Unknown")
             by_product[prod_name].append(v)
 
-        lines = []
-        for prod_name, pvariants in by_product.items():
-            lines.append(f"{prod_name}:")
-            for v in pvariants:
-                label = v.get("label") or v.get("dosage_strength") or "?"
-                mrp = v.get("compare_at_price")
-                sale_price = v.get("price")
-                if mrp and sale_price:
-                    discount_pct = round((1 - sale_price / mrp) * 100)
-                    lines.append(
-                        f"  - {label}: MRP \u20b9{mrp:,.0f} \u2192 Customer price \u20b9{sale_price:,.0f} ({discount_pct}% off)"
-                    )
-                elif sale_price:
-                    lines.append(f"  - {label}: \u20b9{sale_price:,.0f}")
-                else:
-                    lines.append(f"  - {label}: Price on request")
+        lines = ["EXACT PRODUCT AVAILABILITY (sourced live from database — do NOT add or invent variants not listed here):"]
+        for prod_name, pvariants in sorted(by_product.items()):
+            in_stock_variants = [v for v in pvariants if int(v.get("stock_quantity") or 0) > 0]
+            out_of_stock_variants = [v for v in pvariants if int(v.get("stock_quantity") or 0) <= 0]
 
+            if in_stock_variants:
+                lines.append(f"\n{prod_name} — AVAILABLE doses:")
+                for v in in_stock_variants:
+                    label = v.get("label") or v.get("dosage_strength") or "?"
+                    mrp = v.get("compare_at_price")
+                    sale_price = v.get("price")
+                    stock = int(v.get("stock_quantity") or 0)
+                    price_str = f"MRP ₹{mrp:,.0f} → Customer ₹{sale_price:,.0f}" if mrp and sale_price else (f"₹{sale_price:,.0f}" if sale_price else "Price on request")
+                    lines.append(f"  ✓ {label}: {price_str} (stock: {stock})")
+
+            if out_of_stock_variants:
+                oos_labels = [v.get("label") or v.get("dosage_strength") or "?" for v in out_of_stock_variants]
+                lines.append(f"  ✗ OUT OF STOCK: {', '.join(oos_labels)}")
+
+        lines.append(
+            "\nAVAILABILITY RULE: ONLY offer/confirm variants marked ✓ above. "
+            "If a user asks for a dose not listed under a product (e.g. Wegovy 4mg — which does NOT exist), "
+            "tell them it's not available and show them what IS available for that brand. "
+            "NEVER invent a variant. NEVER say a ✓ variant is unavailable."
+        )
         return "\n".join(lines)
     except Exception as e:
         print(f"[Agent] _fetch_inventory_products error (non-fatal): {e}")
         return "(Pricing unavailable — check inventory_variants database)"
+
+
 
 
 
