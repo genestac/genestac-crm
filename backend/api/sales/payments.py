@@ -234,6 +234,22 @@ async def get_invoice_pdf(invoice_id: str, supabase: Client=Depends(get_supabase
         if plan_id:
             plan_res = supabase.table('plans').select('*').eq('id', plan_id).execute()
             invoice_data['plans'] = plan_res.data[0] if plan_res.data else {}
+
+        # Resolve product name from cart → cart_items (proper relational lookup)
+        cart_id = invoice_data.get('cart_id')
+        if cart_id and not plan_id:
+            try:
+                items_res = supabase.table('cart_items').select(
+                    'item_name, item_description, inventory_id, quantity'
+                ).eq('cart_id', cart_id).execute()
+                if items_res.data:
+                    # Build a readable item_name from cart_items
+                    names = [i.get('item_name') or i.get('item_description', '') for i in items_res.data]
+                    invoice_data['item_name'] = ', '.join(n for n in names if n)
+            except Exception as _ce:
+                print(f'[PDF] cart_items lookup failed: {_ce}')
+
+        # Remove variant_id lookup — not needed, cart_items already has the name
         user_id = invoice_data.get('user_id')
         if user_id:
             user_res = supabase.table('users').select('*').eq('id', user_id).execute()
@@ -247,6 +263,7 @@ async def get_invoice_pdf(invoice_id: str, supabase: Client=Depends(get_supabase
         bank_details = settings.get('bank_details', {})
         inv_settings = settings.get('invoice_settings', {})
         pdf_bytes = generate_invoice_pdf(invoice_data, user, plan, company_info, bank_details, inv_settings)
+
         safe_name = str(invoice_data.get('invoice_number', 'Invoice')).replace('/', '-')
         return Response(content=pdf_bytes, media_type='application/pdf', headers={'Content-Disposition': f'attachment; filename="PI_{safe_name}.pdf"'})
     except Exception as e:

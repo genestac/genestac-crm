@@ -75,7 +75,11 @@ def generate_invoice_pdf(
         or ""
     )
 
-    plan_name  = (plan or {}).get("name") or invoice_data.get("item_name") or "Mounjaro (Tirzepatide)"
+    plan_name = (
+        (plan or {}).get("name")
+        or invoice_data.get("item_name")
+        or "Injection Purchase"
+    )
     user_phone = (user or {}).get("phone") or (user or {}).get("phone_number") or ""
     user_name  = (user or {}).get("name") or user_phone or ""
     user_email = (user or {}).get("email") or "N/A"

@@ -504,7 +504,7 @@ def create_direct_injection_pi(
         except Exception as e:
             print(f"[CartService] Razorpay error (direct PI): {e}")
 
-    # ── Insert proforma_invoice row (no cart_id needed) ────────────────────────
+    # ── Insert proforma_invoice row (no cart_id — direct injection PI) ─────────
     overall_discount_pct = round(
         (discount_amount / base_price * 100) if base_price > 0 else 0, 2
     )
