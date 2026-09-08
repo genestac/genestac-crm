@@ -522,16 +522,27 @@ def _build_injection_track_prompt(lead: dict, metadata: dict, pricing_context: s
                 "Then generate invoice for whatever they confirm."
             )
         else:
+            _prev_product = (
+                metadata.get("interested_product")
+                or metadata.get("recommended_product")
+                or ""
+            ).strip()
+            _prev_product_line = (
+                f"PREVIOUSLY AGREED PRODUCT: The user has already said they want '{_prev_product}'. "
+                f"When they confirm purchase, call generate_proforma_invoice(product_name='{_prev_product}', discount_percentage=10) immediately. "
+                "Do NOT ask again which product they want.\n"
+            ) if _prev_product else ""
+
             phase_instruction = (
                 "CURRENT PHASE: PRODUCT SELECTION & PURCHASE\n"
                 "Safety screening is complete and passed.\n"
-                "Ask about the user's GLP-1 history first: 'Kya aapne pehle koi GLP-1 injection try kiya hai? Agar haan, toh konsa aur konsi dose?'\n"
-                "- If user has NO prior GLP-1 experience: suggest 2.5mg as the standard starter dose.\n"
-                "- If user mentions a specific dose they want or have used: use THAT exact dose. Do NOT override with 2.5mg.\n"
-                "- If they confirm purchase for a dose: call generate_proforma_invoice with that exact product+dose in product_name.\n"
-                "  Example: 'Mounjaro 5mg' if user wants 5mg, 'Mounjaro 2.5mg' if new user, 'Wegovy 0.25mg' if they prefer Wegovy.\n"
-                "- CRITICAL: product_name MUST always include the exact dose (e.g. '2.5mg', '5mg'). Never pass just 'Mounjaro'.\n"
-                "- If they ask about price first: refer to LIVE PRODUCT PRICING above. Never hardcode any price.\n"
+                + _prev_product_line +
+                "- If user has NO prior GLP-1 experience and no product has been discussed: suggest 2.5mg as the standard starter dose.\n"
+                "- If user mentions a specific dose/product they want: use THAT exactly. Do NOT override with 2.5mg.\n"
+                "- If they confirm purchase ('haa', 'kar do', 'yes', 'order karo'): immediately call generate_proforma_invoice with the product+dose they confirmed.\n"
+                "  Example: 'Wegovy 0.5mg' if they said Wegovy 0.5mg, 'Mounjaro 5mg' if they said 5mg.\n"
+                "- CRITICAL: product_name MUST always include the exact dose. Never pass just a brand name.\n"
+                "- If they ask about price: refer to LIVE PRODUCT PRICING above.\n"
                 "- Do NOT generate invoice without their explicit confirmation to purchase.\n"
                 "- Once they confirm purchase: IMMEDIATELY call generate_proforma_invoice. Do NOT ask again."
             )
@@ -608,7 +619,8 @@ DO NOT generate an invoice without the user explicitly confirming.
 DO NOT apologize or reference previous errors — just move forward.
 DO NOT proactively offer doctor consultation — only if user asks.
 DO NOT generate invoice for a plan (Starter/Medical/Premium) — only for the injection product.
-DO NOT quote any price not listed in the LIVE PRODUCT PRICING section above."""
+DO NOT quote any price NOT listed in the LIVE PRODUCT PRICING section above.
+SHARE PRICES FREELY when the user asks — use the live pricing data above. Never refuse to tell the price."""
 
 
 
@@ -700,7 +712,7 @@ TOOL RULES:
 - INVOICE: ONLY call generate_proforma_invoice after safety screening passes AND user explicitly confirms they want to purchase a product. NEVER call this for 'hi' or simple 'yes' in early steps. ALWAYS include the exact dose in product_name — e.g. 'Mounjaro 2.5mg', 'Mounjaro 5mg', 'Wegovy 0.25mg'. NEVER pass just the brand name without dose.
 - TALK LATER: "baad mein" / "busy hoon" → call schedule_followup.
 - DOCTOR: User explicitly wants a doctor → call book_google_meet.
-- PRICING: Only share when user explicitly asks. Always refer to LIVE PRODUCT PRICING above.
+- PRICING: Share prices FREELY and immediately when user asks — always use the LIVE PRODUCT PRICING above. NEVER refuse to share a price. Do NOT proactively quote prices mid-pitch, but always answer when asked.
 
 ABSOLUTE DON'T LIST:
 DO NOT mention monthly plans (Starter/Medical/Premium).
@@ -808,7 +820,7 @@ TOOLS = [
                     "phone": {"type": "string", "description": "Phone number if mentioned"},
                     "goals": {"type": "string", "description": "Health goals (e.g. weight loss, diabetes control)"},
                     "weight_goal": {"type": "string", "description": "Target weight or amount to lose"},
-                    "interested_product": {"type": "string", "description": "Product they showed interest in (e.g. Mounjaro 2.5mg)"},
+                    "interested_product": {"type": "string", "description": "ALWAYS save this when user expresses interest in a product. Must include brand + exact dose, e.g. 'Wegovy 0.5mg', 'Mounjaro 5mg'. Save immediately when they say they want a specific product."},
                     "service_type": {"type": "string", "enum": ["injection", "program"], "description": "Set to 'injection' if user wants to buy a GLP-1 injection directly. Set to 'program' for weight-loss program enrollment."},
                     "current_glp1": {"type": "boolean", "description": "True if user is already on a GLP-1 medication; False if GLP-1 naive."},
                     "injection_screen_step": {"type": "integer", "description": "Screening progress: call with 1 after Q1 answered No, 2 after Q2 answered No, 3 after Q3 answered No."},
