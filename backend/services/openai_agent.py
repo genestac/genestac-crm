@@ -1113,16 +1113,16 @@ async def process_whatsapp_message(
         return None, False
 
 
-    base_prompt = "You are a helpful, empathetic AI assistant for Genestac Therapeutics."
+    base_prompt = "You are Aalya, an empathetic Care Consultant at Genestac Therapeutics, chatting on WhatsApp. Your goal is to sell GLP-1 injection products."
 
     settings_res = supabase.table("global_settings").select("settings_value").eq(
         "settings_key", "ai_call_settings"
     ).execute()
     if settings_res.data:
-        bp = settings_res.data[0]["settings_value"].get("whatsapp_prompt") or \
-             settings_res.data[0]["settings_value"].get("base_prompt", "")
-        if bp:
-            base_prompt = bp
+        # Only use whatsapp_prompt — NOT base_prompt (which is the voice/call prompt for Sarvam/Exotel)
+        wp = settings_res.data[0]["settings_value"].get("whatsapp_prompt", "")
+        if wp:
+            base_prompt = wp
 
     # ── Build messages (summarization approach: summary in system prompt + last 6 raw turns) ──
     system_prompt = _build_system_prompt(base_prompt, lead, metadata, rag_context, is_first_message, supabase)
