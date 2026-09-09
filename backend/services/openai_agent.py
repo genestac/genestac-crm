@@ -1290,9 +1290,6 @@ async def process_whatsapp_message(
 
                     # If specific time given, use it; else try immediately
                     prefer_now = not (preferred_date or preferred_time)
-                    if preferred_date or preferred_time:
-                        # Parse and use for next slot finder
-                        prefer_now = False
 
                     lead_name = lead.get("name") or "Patient"
                     lead_email = metadata.get("email") or lead.get("email")
@@ -1304,6 +1301,8 @@ async def process_whatsapp_message(
                         lead_email=lead_email,
                         lead_phone=lead_phone,
                         preferred_now=prefer_now,
+                        preferred_date=preferred_date,
+                        preferred_time=preferred_time,
                         duration_minutes=30,
                     )
 

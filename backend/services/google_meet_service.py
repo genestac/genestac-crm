@@ -154,10 +154,10 @@ def get_next_available_doctor(supabase: Client, now: Optional[datetime] = None) 
         return None
 
 
-def get_next_free_slot(supabase: Client, duration_minutes: int = 30) -> Optional[tuple]:
+def get_next_free_slot(supabase: Client, duration_minutes: int = 30, search_from: Optional[datetime] = None) -> Optional[tuple]:
     """
     Finds the next free 30-minute slot across all schedulable doctors.
-    Searches within next 7 days.
+    Searches within next 7 days from search_from (defaults to now + 15 min).
     Returns: (datetime_of_slot_IST, doctor_dict) or None
     """
     try:
@@ -176,9 +176,12 @@ def get_next_free_slot(supabase: Client, duration_minutes: int = 30) -> Optional
         staff_map = {s["id"]: s for s in (staff_res.data or [])}
         sched_map = {s["staff_id"]: s for s in schedules}
 
-        # Start searching from 15 minutes from now
+        # Start searching from search_from or 15 minutes from now
         now = datetime.now(IST)
-        preferred_dt = now + timedelta(minutes=15)
+        preferred_dt = search_from or (now + timedelta(minutes=15))
+        # Ensure tz-aware
+        if preferred_dt.tzinfo is None:
+            preferred_dt = preferred_dt.replace(tzinfo=IST)
 
         best_slot = None
         best_doctor = None
@@ -220,6 +223,7 @@ def get_next_free_slot(supabase: Client, duration_minutes: int = 30) -> Optional
     except Exception as e:
         print(f"[GoogleMeet] get_next_free_slot error: {e}")
         return None
+
 
 
 # ── Google Calendar event creation ───────────────────────────────────────────
@@ -306,6 +310,8 @@ def book_google_meet_appointment(
     lead_email: Optional[str] = None,
     lead_phone: Optional[str] = None,
     preferred_now: bool = True,
+    preferred_date: str = "",
+    preferred_time: str = "",
     duration_minutes: int = 30,
 ) -> dict:
     """
@@ -313,7 +319,7 @@ def book_google_meet_appointment(
     inserts appointment into DB, returns full result.
 
     preferred_now=True → try to book immediately (within next 5 minutes)
-    preferred_now=False → find next available slot
+    preferred_date/preferred_time → book at user's requested time if doctor is available
 
     Returns:
     {
@@ -332,15 +338,59 @@ def book_google_meet_appointment(
     scheduled_at = None
     is_immediate = False
 
-    if preferred_now:
+    # ── Parse preferred date+time if given ──────────────────────────────────
+    requested_dt = None
+    if preferred_date or preferred_time:
+        try:
+            # Resolve date
+            if not preferred_date or preferred_date.lower() in ("today", "aaj"):
+                base_date = now.date()
+            elif preferred_date.lower() in ("tomorrow", "kal", "agle din"):
+                base_date = (now + timedelta(days=1)).date()
+            else:
+                # Try parsing ISO or common formats
+                for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%d %b %Y"):
+                    try:
+                        base_date = datetime.strptime(preferred_date.strip(), fmt).date()
+                        break
+                    except ValueError:
+                        continue
+                else:
+                    base_date = now.date()
+
+            # Resolve time
+            if preferred_time:
+                import re
+                t = preferred_time.strip().upper().replace(".", ":")
+                # Match "1:30 PM", "13:30", "1 PM", "130PM"
+                m = re.match(r"(\d{1,2})[:.]?(\d{0,2})\s*(AM|PM)?", t)
+                if m:
+                    h = int(m.group(1))
+                    mi = int(m.group(2)) if m.group(2) else 0
+                    ampm = m.group(3)
+                    if ampm == "PM" and h != 12:
+                        h += 12
+                    elif ampm == "AM" and h == 12:
+                        h = 0
+                    requested_dt = datetime(base_date.year, base_date.month, base_date.day,
+                                            h, mi, 0, tzinfo=IST)
+            else:
+                # No time — use next slot from that date
+                requested_dt = datetime(base_date.year, base_date.month, base_date.day,
+                                        9, 0, 0, tzinfo=IST)  # start of day
+        except Exception as _pe:
+            print(f"[GoogleMeet] Date/time parse error: {_pe}")
+
+    if preferred_now and not requested_dt:
         doctor = get_next_available_doctor(supabase, now)
         if doctor:
             scheduled_at = now + timedelta(minutes=2)  # 2 min buffer
             is_immediate = True
 
     if doctor is None:
-        # Find next free slot
-        result = get_next_free_slot(supabase, duration_minutes=duration_minutes)
+        # Find next free slot starting from requested_dt or now
+        search_from = requested_dt or (now + timedelta(minutes=15))
+        result = get_next_free_slot(supabase, duration_minutes=duration_minutes, search_from=search_from)
         if result:
             scheduled_at, doctor = result
         else:
@@ -355,6 +405,7 @@ def book_google_meet_appointment(
                 "is_immediate": False,
                 "next_available_display": None,
             }
+
 
     # Ensure scheduled_at is tz-aware
     if scheduled_at.tzinfo is None:
