@@ -328,27 +328,52 @@ def book_google_meet_appointment(
     except Exception as _ue:
         print(f"[Meeting] patient_id lookup failed (non-fatal): {_ue}")
 
-    # ── Insert appointment row ───────────────────────────────────────────────
-    appt_payload = {
-        "id": appointment_id,
-        "doctor_id": doctor["doctor_id"],
-        "sales_rep_id": sales_rep_id,
-        "scheduled_at": scheduled_at.isoformat(),
-        "duration_minutes": duration_minutes,
-        "status": "confirmed",
-        "type": "consultation",
-        "title": f"Free Consultation – {lead_name}",
-        "meeting_link": meeting_link,
-        "notes": (
-            f"Booked via WhatsApp AI. Lead: {lead_name}"
-            + f" [LEAD_ID: {lead_id}]"
-            + (f" [PHONE: {lead_phone}]" if lead_phone else "")
-        ),
-    }
-    if patient_id:
-        appt_payload["patient_id"] = patient_id
+    # ── Insert appointment row (with retry on double-booking conflict) ────────
+    MAX_RETRIES = 3
+    for attempt in range(MAX_RETRIES):
+        appointment_id = str(uuid.uuid4())
+        meeting_link = _generate_jitsi_link(appointment_id)
 
-    supabase.table("appointments").insert(appt_payload).execute()
+        appt_payload = {
+            "id": appointment_id,
+            "doctor_id": doctor["doctor_id"],
+            "sales_rep_id": sales_rep_id,
+            "scheduled_at": scheduled_at.isoformat(),
+            "duration_minutes": duration_minutes,
+            "status": "confirmed",
+            "type": "consultation",
+            "title": f"Free Consultation – {lead_name}",
+            "meeting_link": meeting_link,
+            "notes": (
+                f"Booked via WhatsApp AI. Lead: {lead_name}"
+                + f" [LEAD_ID: {lead_id}]"
+                + (f" [PHONE: {lead_phone}]" if lead_phone else "")
+            ),
+        }
+        if patient_id:
+            appt_payload["patient_id"] = patient_id
+
+        try:
+            supabase.table("appointments").insert(appt_payload).execute()
+            break  # ✅ Insert succeeded
+        except Exception as insert_err:
+            err_str = str(insert_err).lower()
+            is_conflict = any(k in err_str for k in ["unique", "duplicate", "23505", "conflict"])
+            if is_conflict and attempt < MAX_RETRIES - 1:
+                # Slot was taken by a concurrent booking — find the next free slot
+                print(f"[Meeting] Double-booking conflict on attempt {attempt + 1}, finding next slot...")
+                result = get_next_free_slot(
+                    supabase,
+                    duration_minutes=duration_minutes,
+                    search_from=scheduled_at + timedelta(minutes=30),
+                )
+                if result:
+                    scheduled_at, doctor = result
+                    if scheduled_at.tzinfo is None:
+                        scheduled_at = scheduled_at.replace(tzinfo=IST)
+                    continue
+            # Non-conflict error or out of retries — re-raise
+            raise
 
     # ── Update lead status ───────────────────────────────────────────────────
     try:
