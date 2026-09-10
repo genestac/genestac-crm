@@ -419,27 +419,23 @@ def book_google_meet_appointment(
         duration_minutes=duration_minutes,
     )
 
-    # Resolve sales_rep_id: look for a 'sales' role staff to represent the bot
-    # Falls back to doctor_id if none found (satisfies the NOT NULL constraint)
-    sales_rep_id = doctor["doctor_id"]  # safe default
+    # Resolve sales_rep_id — must not be null (DB constraint)
+    # Sales Bot staff ID (c842f1fd-66ec-4e95-bf08-3a3f76d0f0a7) is the default WhatsApp bot rep
+    SALES_BOT_ID = "c842f1fd-66ec-4e95-bf08-3a3f76d0f0a7"
+    sales_rep_id = SALES_BOT_ID  # hardcoded safe default
     try:
-        sales_role_res = supabase.table("staffs").select("id").eq("is_active", True).execute()
-        # Find any staff with email containing 'sales' or 'bot'
-        sales_staff = [
-            s for s in (sales_role_res.data or [])
-            if "sales" in str(s.get("id", "")).lower()
-        ]
-        # Try by joining roles
         rep_res = supabase.table("staffs").select(
             "id, roles:role_id(name)"
         ).eq("is_active", True).execute()
         for s in (rep_res.data or []):
             role_name = (s.get("roles") or {}).get("name", "")
-            if role_name == "sales":
+            full_name = s.get("full_name", "")
+            if "Sales Bot" in full_name or role_name == "sales":
                 sales_rep_id = s["id"]
                 break
     except Exception as _sre:
-        print(f"[GoogleMeet] sales_rep lookup failed (non-fatal): {_sre}")
+        print(f"[GoogleMeet] sales_rep lookup failed, using Sales Bot ID: {_sre}")
+
 
     appt_payload = {
         "patient_id": lead_id,
