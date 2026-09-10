@@ -1,5 +1,5 @@
 """
-meeting_service.py  (was google_meet_service.py)
+meeting_service.py  (was video_meet_service.py)
 Handles appointment booking with Jitsi Meet video links.
 
 Jitsi Meet is free, open-source, and requires zero credentials.

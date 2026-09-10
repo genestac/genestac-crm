@@ -1281,7 +1281,7 @@ async def process_whatsapp_message(
 
                 # ── 5. book_google_meet ───────────────────────────────────────
                 elif func_name == "book_google_meet":
-                    from services.google_meet_service import (
+                    from services.video_meet_service import (
                         book_google_meet_appointment,
                         format_meet_confirmation_whatsapp,
                     )
@@ -1332,7 +1332,7 @@ async def process_whatsapp_message(
                         )
                     else:
                         # Find next slot to offer
-                        from services.google_meet_service import get_next_free_slot
+                        from services.video_meet_service import get_next_free_slot
                         next_slot = get_next_free_slot(supabase)
                         if next_slot:
                             slot_dt, slot_doc = next_slot
