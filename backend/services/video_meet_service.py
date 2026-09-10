@@ -383,21 +383,23 @@ def format_meet_confirmation_whatsapp(result: dict, lead_name: str, doctor_phone
         return lead_msg, None
 
     meet_link = result.get("meeting_link")
-    doctor_name = result["doctor_name"]
+    raw_name = result["doctor_name"]
+    # Strip existing prefix to avoid "Dr. Dr. Harsh"
+    doctor_display = raw_name.lstrip().removeprefix("Dr.").strip()
     time_display = result["scheduled_at_display"]
     is_immediate = result["is_immediate"]
 
     if is_immediate and meet_link:
         lead_msg = (
             f"✅ *Consultation Confirmed!*\n\n"
-            f"Dr. {doctor_name} abhi available hain 🩺\n"
+            f"Dr. {doctor_display} abhi available hain 🩺\n"
             f"📹 Jitsi Meet Link: {meet_link}\n\n"
             f"Abhi click karein — doctor join kar rahe hain!"
         )
     elif meet_link:
         lead_msg = (
             f"✅ *Consultation Confirmed!*\n\n"
-            f"👨‍⚕️ Doctor: Dr. {doctor_name}\n"
+            f"👨‍⚕️ Doctor: Dr. {doctor_display}\n"
             f"📅 Date & Time: {time_display}\n"
             f"📹 Video Call Link: {meet_link}\n\n"
             f"Yeh link save kar lein. Time par click karein — koi install karne ki zaroorat nahi! 🗓️"
@@ -405,7 +407,7 @@ def format_meet_confirmation_whatsapp(result: dict, lead_name: str, doctor_phone
     else:
         lead_msg = (
             f"✅ *Consultation Booked!*\n\n"
-            f"👨‍⚕️ Doctor: Dr. {doctor_name}\n"
+            f"👨‍⚕️ Doctor: Dr. {doctor_display}\n"
             f"📅 Date & Time: {time_display}\n\n"
             f"Hamari team aapko call karegi. Kripya available rahein 📞"
         )

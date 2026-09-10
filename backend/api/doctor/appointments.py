@@ -149,10 +149,12 @@ async def get_appointments(
         query = supabase.table('appointments').select(
             '*, patients:users!patient_id(id, name, phone, email), '
             'sales:staffs!sales_rep_id(id, full_name)'
-        )
+        ).order('scheduled_at', desc=False)
+        # Note: PostgREST returns all rows including those with null patient_id
+        # because we handle missing patient data via the fallback below
         if not is_admin:
             query = query.eq('doctor_id', current_user['id'])
-        response = query.order('scheduled_at', desc=False).execute()
+        response = query.execute()
         appointments = response.data
         
         missing_patient_ids = [a['patient_id'] for a in appointments if not a.get('patients') and a.get('patient_id')]
