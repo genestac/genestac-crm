@@ -1328,12 +1328,20 @@ def sweep_meet_reminders():
                 patient_id = appt.get("patient_id")
                 meet_link = appt.get("meeting_link")
                 doctor_name = (appt.get("staffs") or {}).get("full_name", "Doctor")
+                notes = appt.get("notes") or ""
 
-                if not patient_id or not meet_link:
+                if not meet_link:
                     return
 
                 # Get patient phone
                 phone = None
+                
+                # 1. First try to extract from notes (fallback for AI bookings)
+                import re
+                phone_match = re.search(r'\[PHONE:\s*([^\]]+)\]', notes)
+                if phone_match:
+                    phone = phone_match.group(1).strip()
+
                 lead_res = supabase.table("leads").select("phone_number").eq("id", patient_id).execute()
                 if lead_res.data:
                     phone = lead_res.data[0].get("phone_number")
@@ -1345,10 +1353,13 @@ def sweep_meet_reminders():
                 if not phone:
                     return
 
+                # Strip existing 'Dr.' to prevent double prefix
+                doctor_display = doctor_name.lstrip().removeprefix("Dr.").strip()
+
                 reminder_msg = (
                     f"⏰ *Reminder: Consultation in 10 minutes!*\n\n"
-                    f"Doctor: Dr. {doctor_name}\n"
-                    f"Google Meet Link: {meet_link}\n\n"
+                    f"Doctor: Dr. {doctor_display}\n"
+                    f"Video Link: {meet_link}\n\n"
                     f"Link par click karein aur ready rahein. 🩺"
                 )
                 await send_whatsapp_text(phone, reminder_msg)
