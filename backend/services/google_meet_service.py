@@ -265,14 +265,8 @@ def create_google_meet_event(
         ),
         "start": {"dateTime": start_iso, "timeZone": "Asia/Kolkata"},
         "end": {"dateTime": end_iso, "timeZone": "Asia/Kolkata"},
-        # NOTE: attendees omitted — service accounts need Domain-Wide Delegation to invite
-        # Confirmation is sent via WhatsApp instead
-        "conferenceData": {
-            "createRequest": {
-                "requestId": str(uuid.uuid4()),
-                "conferenceSolutionKey": {"type": "hangoutsMeet"},
-            }
-        },
+        # conferenceData omitted — service accounts need Google Workspace + Domain-Wide Delegation
+        # for hangoutsMeet. Confirmation is sent via WhatsApp instead.
         "reminders": {
             "useDefault": False,
             "overrides": [
@@ -287,13 +281,13 @@ def create_google_meet_event(
             .insert(
                 calendarId=calendar_id,
                 body=event_body,
-                conferenceDataVersion=1,
-                sendUpdates="all",  # sends email invites to attendees
+                sendUpdates="none",
             )
             .execute()
         )
-        meet_link = created_event.get("hangoutLink")
-        print(f"[GoogleMeet] Created event for {lead_name} at {start_iso}, Meet: {meet_link}")
+        # hangoutLink only present when conferenceData is configured
+        meet_link = created_event.get("hangoutLink") or created_event.get("htmlLink")
+        print(f"[GoogleMeet] Created calendar event for {lead_name} at {start_iso}")
         return meet_link
     except Exception as e:
         print(f"[GoogleMeet] Event creation failed: {e}")
@@ -437,8 +431,21 @@ def book_google_meet_appointment(
         print(f"[GoogleMeet] sales_rep lookup failed, using Sales Bot ID: {_sre}")
 
 
+    # appointments.patient_id FK → users table, but WhatsApp leads are in leads table.
+    # Try to find a matching users record by phone; omit patient_id if not found.
+    patient_id = None
+    try:
+        if lead_phone:
+            clean_phone = lead_phone.lstrip("+")
+            u_res = supabase.table("users").select("id").eq("phone", clean_phone).limit(1).execute()
+            if not u_res.data:
+                u_res = supabase.table("users").select("id").eq("phone", "+" + clean_phone).limit(1).execute()
+            if u_res.data:
+                patient_id = u_res.data[0]["id"]
+    except Exception as _ue:
+        print(f"[GoogleMeet] patient_id lookup failed (non-fatal): {_ue}")
+
     appt_payload = {
-        "patient_id": lead_id,
         "doctor_id": doctor["doctor_id"],
         "sales_rep_id": sales_rep_id,
         "scheduled_at": scheduled_at.isoformat(),
@@ -449,9 +456,13 @@ def book_google_meet_appointment(
         "meeting_link": meet_link,
         "notes": (
             f"Booked via WhatsApp AI. Lead: {lead_name}"
+            + (f" [LEAD_ID: {lead_id}]")
             + (f" [PHONE: {lead_phone}]" if lead_phone else "")
         ),
     }
+    if patient_id:
+        appt_payload["patient_id"] = patient_id
+
     appt_res = supabase.table("appointments").insert(appt_payload).execute()
     appointment_id = appt_res.data[0]["id"] if appt_res.data else None
 
