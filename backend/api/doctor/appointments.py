@@ -26,7 +26,7 @@ def _enrich_patient_profile(appt: dict, supabase: Client) -> dict:
 
     # Try leads table first (WhatsApp leads)
     lead_res = supabase.table('leads').select(
-        'id, name, phone_number, email, city, street_address, postal_code, '
+        'id, name, phone_number, email, city, '
         'wa_intake_form_sent, whatsapp_followup_at, status, metadata, created_at'
     ).eq('id', patient_id).execute()
 
@@ -39,8 +39,6 @@ def _enrich_patient_profile(appt: dict, supabase: Client) -> dict:
             'phone': lead.get('phone_number'),
             'email': lead.get('email'),
             'city': lead.get('city') or meta.get('city'),
-            'address': lead.get('street_address') or meta.get('address'),
-            'pincode': lead.get('postal_code') or meta.get('pincode'),
             'status': lead.get('status'),
             'created_at': lead.get('created_at'),
             # Medical & personal details from WhatsApp form
