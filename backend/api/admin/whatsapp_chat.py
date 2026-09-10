@@ -132,7 +132,7 @@ async def get_reminder_subscribers(
         #    (sender_type = 'lead' or 'user') since their subscription start date.
         #    Also fetch the latest reminder message (sender_type = 'bot') for preview.
         msgs_res = supabase.table("whatsapp_messages") \
-            .select("user_id, message_body, sender_type, created_at, metadata") \
+            .select("user_id, message_body, sender_type, created_at") \
             .in_("user_id", user_ids) \
             .order("created_at", desc=True) \
             .limit(2000) \
