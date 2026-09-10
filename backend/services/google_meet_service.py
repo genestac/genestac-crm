@@ -236,16 +236,23 @@ def create_google_meet_event(
     duration_minutes: int = 30,
 ) -> Optional[str]:
     """
-    Creates a Google Calendar event with Meet conferencing on the doctor's calendar.
-    Returns the Google Meet URL (hangoutLink) or None on failure.
+    Creates a Google Calendar event on the doctor's calendar.
+    Returns the calendar event URL or None on failure.
+    NOTE: Only runs if doctor has google_calendar_id configured.
     """
+    # Only create Calendar event if doctor has their own calendar configured.
+    # If we fall back to 'primary', the event goes on the service account's private calendar
+    # which is inaccessible to the doctor — so skip it entirely.
+    calendar_id = doctor.get("google_calendar_id")
+    if not calendar_id:
+        print(f"[GoogleMeet] No google_calendar_id for {doctor.get('doctor_name')} — skipping calendar event")
+        return None
+
     service = _get_calendar_service()
     if service is None:
         print("[GoogleMeet] No Calendar service available — check GOOGLE_SERVICE_ACCOUNT_JSON env var")
         return None
 
-    calendar_id = doctor.get("google_calendar_id") or "primary"
-    doctor_email = doctor.get("doctor_email")
 
     # Build attendees
     attendees = []

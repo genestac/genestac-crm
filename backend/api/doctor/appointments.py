@@ -171,14 +171,44 @@ async def get_appointments(
                     
         # Fallback for AI-booked appointments with no patient_id
         for a in appointments:
-            if not a.get('patients') and not a.get('patient_id') and a.get('title'):
-                if "with " in a['title']:
-                    extracted_name = a['title'].split("with ")[-1].strip()
-                    extracted_phone = None
-                    if a.get('notes'):
-                        phone_match = re.search(r'\[PHONE:\s*([^\]]+)\]', a['notes'])
-                        if phone_match:
-                            extracted_phone = phone_match.group(1).strip()
+            if not a.get('patients') and not a.get('patient_id'):
+                title = a.get('title', '')
+                notes = a.get('notes', '')
+                extracted_name = None
+                extracted_phone = None
+                lead_id_from_notes = None
+
+                # Pattern 1: "Free Consultation – Name"
+                if '–' in title:
+                    extracted_name = title.split('–')[-1].strip()
+                # Pattern 2: "AI-Booked: Consultation with Name"
+                elif 'with ' in title:
+                    extracted_name = title.split('with ')[-1].strip()
+
+                if notes:
+                    phone_match = re.search(r'\[PHONE:\s*([^\]]+)\]', notes)
+                    if phone_match:
+                        extracted_phone = phone_match.group(1).strip()
+                    lead_match = re.search(r'\[LEAD_ID:\s*([^\]]+)\]', notes)
+                    if lead_match:
+                        lead_id_from_notes = lead_match.group(1).strip()
+
+                # Try to enrich from leads table using LEAD_ID stored in notes
+                if lead_id_from_notes:
+                    try:
+                        lr = supabase.table('leads').select('name, phone_number, email').eq('id', lead_id_from_notes).single().execute()
+                        if lr.data:
+                            a['patients'] = {
+                                'id': lead_id_from_notes,
+                                'name': lr.data.get('name') or extracted_name,
+                                'phone': lr.data.get('phone_number') or extracted_phone,
+                                'email': lr.data.get('email'),
+                            }
+                            continue
+                    except Exception:
+                        pass
+
+                if extracted_name:
                     a['patients'] = {'name': extracted_name, 'phone': extracted_phone}
 
         # Enrich every appointment with full patient WhatsApp profile
