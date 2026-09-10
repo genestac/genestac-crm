@@ -1,20 +1,13 @@
 """
-google_meet_service.py
-Handles Google Calendar event creation with Google Meet conferencing.
+meeting_service.py  (was google_meet_service.py)
+Handles appointment booking with Jitsi Meet video links.
 
-Setup (one-time):
-  1. Google Cloud Console → Enable Calendar API
-  2. Create Service Account → Download JSON key
-  3. Set GOOGLE_SERVICE_ACCOUNT_JSON env var (full JSON string)
-  4. Share each doctor's Google Calendar with the service account email
-  5. Add google_calendar_id column to doctor_schedules table
-
-The service account creates Calendar events on behalf of the doctor's calendar.
-Google auto-generates a meet.google.com link for every event with conferenceData.
+Jitsi Meet is free, open-source, and requires zero credentials.
+Every appointment gets a unique room: https://meet.jit.si/genestac-<short-id>
+Both doctor and patient click the same link to join.
 """
 
-import os
-import json
+import re
 import uuid
 import string
 import random
@@ -25,34 +18,18 @@ from zoneinfo import ZoneInfo
 
 IST = ZoneInfo("Asia/Kolkata")
 
-# ── Google Calendar client (lazy init) ───────────────────────────────────────
-_calendar_service = None
 
+# ── Jitsi Meet link generator ─────────────────────────────────────────────────
 
-def _get_calendar_service():
-    """Lazy-init the Google Calendar API client using service account credentials."""
-    global _calendar_service
-    if _calendar_service is not None:
-        return _calendar_service
-
-    sa_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
-    if not sa_json:
-        return None
-
-    try:
-        from google.oauth2 import service_account
-        from googleapiclient.discovery import build
-
-        creds_dict = json.loads(sa_json)
-        scopes = ["https://www.googleapis.com/auth/calendar"]
-        credentials = service_account.Credentials.from_service_account_info(
-            creds_dict, scopes=scopes
-        )
-        _calendar_service = build("calendar", "v3", credentials=credentials)
-        return _calendar_service
-    except Exception as e:
-        print(f"[GoogleMeet] Failed to init Calendar service: {e}")
-        return None
+def _generate_jitsi_link(appointment_id: str) -> str:
+    """
+    Generates a unique, unguessable Jitsi Meet room URL for the appointment.
+    Format: https://meet.jit.si/genestac-<short-id>-<random>
+    """
+    short_id = appointment_id.replace("-", "")[:8]
+    suffix = "".join(random.choices(string.ascii_lowercase + string.digits, k=6))
+    room = f"genestac-{short_id}-{suffix}"
+    return f"https://meet.jit.si/{room}"
 
 
 # ── Doctor availability ───────────────────────────────────────────────────────
@@ -81,7 +58,7 @@ def _is_within_schedule(schedule: dict, check_dt: datetime) -> bool:
 
         return sched_start_minutes <= slot_start_minutes < sched_end_minutes
     except Exception as e:
-        print(f"[GoogleMeet] Schedule parse error: {e}")
+        print(f"[Meeting] Schedule parse error: {e}")
         return False
 
 
@@ -100,7 +77,7 @@ def _has_appointment_conflict(supabase: Client, doctor_id: str, start_dt: dateti
 
         return bool(res.data)
     except Exception as e:
-        print(f"[GoogleMeet] Conflict check error: {e}")
+        print(f"[Meeting] Conflict check error: {e}")
         return False
 
 
@@ -111,7 +88,7 @@ def get_next_available_doctor(supabase: Client, now: Optional[datetime] = None) 
       a) Within their working hours right now
       b) Has no appointment conflict in the next 30 minutes
 
-    Returns dict: {doctor_id, doctor_name, doctor_email, google_calendar_id, exotel_number}
+    Returns dict: {doctor_id, doctor_name, doctor_email, exotel_number}
     Returns None if all doctors are busy.
     """
     if now is None:
@@ -119,7 +96,7 @@ def get_next_available_doctor(supabase: Client, now: Optional[datetime] = None) 
 
     try:
         sched_res = supabase.table("doctor_schedules").select(
-            "staff_id, available_days, start_time, end_time, allow_scheduling, exotel_number, google_calendar_id"
+            "staff_id, available_days, start_time, end_time, allow_scheduling, exotel_number"
         ).eq("allow_scheduling", True).eq("is_active", True).execute()
 
         schedules = sched_res.data or []
@@ -143,14 +120,13 @@ def get_next_available_doctor(supabase: Client, now: Optional[datetime] = None) 
                 "doctor_id": doc_id,
                 "doctor_name": staff.get("full_name", "Doctor"),
                 "doctor_email": staff.get("email"),
-                "google_calendar_id": sched.get("google_calendar_id"),
                 "exotel_number": sched.get("exotel_number"),
             }
 
         return None  # All doctors busy
 
     except Exception as e:
-        print(f"[GoogleMeet] get_next_available_doctor error: {e}")
+        print(f"[Meeting] get_next_available_doctor error: {e}")
         return None
 
 
@@ -164,7 +140,7 @@ def get_next_free_slot(supabase: Client, duration_minutes: int = 30, search_from
         from services.slot_service import find_nearest_available_slot
 
         sched_res = supabase.table("doctor_schedules").select(
-            "staff_id, allow_scheduling, google_calendar_id, exotel_number"
+            "staff_id, allow_scheduling, exotel_number"
         ).eq("allow_scheduling", True).eq("is_active", True).execute()
 
         schedules = sched_res.data or []
@@ -179,7 +155,6 @@ def get_next_free_slot(supabase: Client, duration_minutes: int = 30, search_from
         # Start searching from search_from or 15 minutes from now
         now = datetime.now(IST)
         preferred_dt = search_from or (now + timedelta(minutes=15))
-        # Ensure tz-aware
         if preferred_dt.tzinfo is None:
             preferred_dt = preferred_dt.replace(tzinfo=IST)
 
@@ -208,7 +183,6 @@ def get_next_free_slot(supabase: Client, duration_minutes: int = 30, search_from
                             "doctor_id": doc_id,
                             "doctor_name": staff.get("full_name", "Doctor"),
                             "doctor_email": staff.get("email"),
-                            "google_calendar_id": sched.get("google_calendar_id"),
                             "exotel_number": sched.get("exotel_number"),
                         }
                         best_slot = slot
@@ -221,83 +195,7 @@ def get_next_free_slot(supabase: Client, duration_minutes: int = 30, search_from
         return None
 
     except Exception as e:
-        print(f"[GoogleMeet] get_next_free_slot error: {e}")
-        return None
-
-
-
-# ── Google Calendar event creation ───────────────────────────────────────────
-
-def create_google_meet_event(
-    doctor: dict,
-    lead_name: str,
-    lead_email: Optional[str],
-    scheduled_at: datetime,
-    duration_minutes: int = 30,
-) -> Optional[str]:
-    """
-    Creates a Google Calendar event on the doctor's calendar.
-    Returns the calendar event URL or None on failure.
-    NOTE: Only runs if doctor has google_calendar_id configured.
-    """
-    # Only create Calendar event if doctor has their own calendar configured.
-    # If we fall back to 'primary', the event goes on the service account's private calendar
-    # which is inaccessible to the doctor — so skip it entirely.
-    calendar_id = doctor.get("google_calendar_id")
-    if not calendar_id:
-        print(f"[GoogleMeet] No google_calendar_id for {doctor.get('doctor_name')} — skipping calendar event")
-        return None
-
-    service = _get_calendar_service()
-    if service is None:
-        print("[GoogleMeet] No Calendar service available — check GOOGLE_SERVICE_ACCOUNT_JSON env var")
-        return None
-
-
-    # Build attendees
-    attendees = []
-    if doctor_email:
-        attendees.append({"email": doctor_email})
-    if lead_email:
-        attendees.append({"email": lead_email})
-
-    start_iso = scheduled_at.isoformat()
-    end_iso = (scheduled_at + timedelta(minutes=duration_minutes)).isoformat()
-
-    event_body = {
-        "summary": f"Genestac Consultation – {lead_name}",
-        "description": (
-            f"Free Initial Medical Consultation with {doctor.get('doctor_name', 'Doctor')} "
-            f"for {lead_name}.\n\nBooked via Genestac WhatsApp AI."
-        ),
-        "start": {"dateTime": start_iso, "timeZone": "Asia/Kolkata"},
-        "end": {"dateTime": end_iso, "timeZone": "Asia/Kolkata"},
-        # conferenceData omitted — service accounts need Google Workspace + Domain-Wide Delegation
-        # for hangoutsMeet. Confirmation is sent via WhatsApp instead.
-        "reminders": {
-            "useDefault": False,
-            "overrides": [
-                {"method": "popup", "minutes": 10},
-            ],
-        },
-    }
-
-    try:
-        created_event = (
-            service.events()
-            .insert(
-                calendarId=calendar_id,
-                body=event_body,
-                sendUpdates="none",
-            )
-            .execute()
-        )
-        # hangoutLink only present when conferenceData is configured
-        meet_link = created_event.get("hangoutLink") or created_event.get("htmlLink")
-        print(f"[GoogleMeet] Created calendar event for {lead_name} at {start_iso}")
-        return meet_link
-    except Exception as e:
-        print(f"[GoogleMeet] Event creation failed: {e}")
+        print(f"[Meeting] get_next_free_slot error: {e}")
         return None
 
 
@@ -315,22 +213,20 @@ def book_google_meet_appointment(
     duration_minutes: int = 30,
 ) -> dict:
     """
-    Master function: checks doctor availability, creates Google Meet event,
-    inserts appointment into DB, returns full result.
+    Books a doctor consultation appointment with a Jitsi Meet video link.
 
-    preferred_now=True → try to book immediately (within next 5 minutes)
-    preferred_date/preferred_time → book at user's requested time if doctor is available
+    preferred_now=True  → try to book immediately
+    preferred_date/time → book at user's requested time
 
     Returns:
     {
       "booked": bool,
-      "meeting_link": str | None,
+      "meeting_link": str | None,   # Jitsi Meet URL
       "appointment_id": str | None,
       "doctor_name": str,
-      "scheduled_at_display": str,   # human-readable IST
+      "scheduled_at_display": str,
       "scheduled_at_iso": str,
       "is_immediate": bool,
-      "next_available_display": str | None,  # if not booked, show next slot
     }
     """
     now = datetime.now(IST)
@@ -348,7 +244,6 @@ def book_google_meet_appointment(
             elif preferred_date.lower() in ("tomorrow", "kal", "agle din"):
                 base_date = (now + timedelta(days=1)).date()
             else:
-                # Try parsing ISO or common formats
                 for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%d %b %Y"):
                     try:
                         base_date = datetime.strptime(preferred_date.strip(), fmt).date()
@@ -360,9 +255,7 @@ def book_google_meet_appointment(
 
             # Resolve time
             if preferred_time:
-                import re
                 t = preferred_time.strip().upper().replace(".", ":")
-                # Match "1:30 PM", "13:30", "1 PM", "130PM"
                 m = re.match(r"(\d{1,2})[:.]?(\d{0,2})\s*(AM|PM)?", t)
                 if m:
                     h = int(m.group(1))
@@ -375,26 +268,23 @@ def book_google_meet_appointment(
                     requested_dt = datetime(base_date.year, base_date.month, base_date.day,
                                             h, mi, 0, tzinfo=IST)
             else:
-                # No time — use next slot from that date
                 requested_dt = datetime(base_date.year, base_date.month, base_date.day,
-                                        9, 0, 0, tzinfo=IST)  # start of day
+                                        9, 0, 0, tzinfo=IST)
         except Exception as _pe:
-            print(f"[GoogleMeet] Date/time parse error: {_pe}")
+            print(f"[Meeting] Date/time parse error: {_pe}")
 
     if preferred_now and not requested_dt:
         doctor = get_next_available_doctor(supabase, now)
         if doctor:
-            scheduled_at = now + timedelta(minutes=2)  # 2 min buffer
+            scheduled_at = now + timedelta(minutes=2)
             is_immediate = True
 
     if doctor is None:
-        # Find next free slot starting from requested_dt or now
         search_from = requested_dt or (now + timedelta(minutes=15))
         result = get_next_free_slot(supabase, duration_minutes=duration_minutes, search_from=search_from)
         if result:
             scheduled_at, doctor = result
         else:
-            # No slots at all within 7 days — create a waiting appointment
             return {
                 "booked": False,
                 "meeting_link": None,
@@ -403,100 +293,87 @@ def book_google_meet_appointment(
                 "scheduled_at_display": "",
                 "scheduled_at_iso": "",
                 "is_immediate": False,
-                "next_available_display": None,
             }
 
-
-    # Ensure scheduled_at is tz-aware
+    # Ensure tz-aware
     if scheduled_at.tzinfo is None:
         scheduled_at = scheduled_at.replace(tzinfo=IST)
 
-    # Create Google Meet event
-    meet_link = create_google_meet_event(
-        doctor=doctor,
-        lead_name=lead_name,
-        lead_email=lead_email,
-        scheduled_at=scheduled_at,
-        duration_minutes=duration_minutes,
-    )
+    # ── Generate appointment ID and Jitsi link ──────────────────────────────
+    appointment_id = str(uuid.uuid4())
+    meeting_link = _generate_jitsi_link(appointment_id)
 
-    # Resolve sales_rep_id — must not be null (DB constraint)
-    # Sales Bot staff ID (c842f1fd-66ec-4e95-bf08-3a3f76d0f0a7) is the default WhatsApp bot rep
+    # ── Resolve sales_rep_id (Sales Bot as default) ─────────────────────────
     SALES_BOT_ID = "c842f1fd-66ec-4e95-bf08-3a3f76d0f0a7"
-    sales_rep_id = SALES_BOT_ID  # hardcoded safe default
+    sales_rep_id = SALES_BOT_ID
     try:
-        rep_res = supabase.table("staffs").select(
-            "id, roles:role_id(name)"
-        ).eq("is_active", True).execute()
+        rep_res = supabase.table("staffs").select("id, full_name, roles:role_id(name)").eq("is_active", True).execute()
         for s in (rep_res.data or []):
-            role_name = (s.get("roles") or {}).get("name", "")
-            full_name = s.get("full_name", "")
-            if "Sales Bot" in full_name or role_name == "sales":
+            if "Sales Bot" in (s.get("full_name") or ""):
                 sales_rep_id = s["id"]
                 break
     except Exception as _sre:
-        print(f"[GoogleMeet] sales_rep lookup failed, using Sales Bot ID: {_sre}")
+        print(f"[Meeting] sales_rep lookup failed, using Sales Bot ID: {_sre}")
 
-
-    # appointments.patient_id FK → users table, but WhatsApp leads are in leads table.
-    # Try to find a matching users record by phone; omit patient_id if not found.
+    # ── Resolve patient_id (FK → users, WhatsApp leads are in leads table) ──
     patient_id = None
     try:
         if lead_phone:
             clean_phone = lead_phone.lstrip("+")
-            u_res = supabase.table("users").select("id").eq("phone", clean_phone).limit(1).execute()
-            if not u_res.data:
-                u_res = supabase.table("users").select("id").eq("phone", "+" + clean_phone).limit(1).execute()
-            if u_res.data:
-                patient_id = u_res.data[0]["id"]
+            for phone_fmt in [clean_phone, "+" + clean_phone, lead_phone]:
+                u_res = supabase.table("users").select("id").eq("phone", phone_fmt).limit(1).execute()
+                if u_res.data:
+                    patient_id = u_res.data[0]["id"]
+                    break
     except Exception as _ue:
-        print(f"[GoogleMeet] patient_id lookup failed (non-fatal): {_ue}")
+        print(f"[Meeting] patient_id lookup failed (non-fatal): {_ue}")
 
+    # ── Insert appointment row ───────────────────────────────────────────────
     appt_payload = {
+        "id": appointment_id,
         "doctor_id": doctor["doctor_id"],
         "sales_rep_id": sales_rep_id,
         "scheduled_at": scheduled_at.isoformat(),
         "duration_minutes": duration_minutes,
-        "status": "confirmed" if meet_link else "pending",
+        "status": "confirmed",
         "type": "consultation",
         "title": f"Free Consultation – {lead_name}",
-        "meeting_link": meet_link,
+        "meeting_link": meeting_link,
         "notes": (
             f"Booked via WhatsApp AI. Lead: {lead_name}"
-            + (f" [LEAD_ID: {lead_id}]")
+            + f" [LEAD_ID: {lead_id}]"
             + (f" [PHONE: {lead_phone}]" if lead_phone else "")
         ),
     }
     if patient_id:
         appt_payload["patient_id"] = patient_id
 
-    appt_res = supabase.table("appointments").insert(appt_payload).execute()
-    appointment_id = appt_res.data[0]["id"] if appt_res.data else None
+    supabase.table("appointments").insert(appt_payload).execute()
 
-    # Update lead status
-    supabase.table("leads").update({"status": "CONSULTATION_SCHEDULED"}).eq("id", lead_id).execute()
+    # ── Update lead status ───────────────────────────────────────────────────
+    try:
+        supabase.table("leads").update({"status": "CONSULTATION_SCHEDULED"}).eq("id", lead_id).execute()
+    except Exception:
+        pass
 
-    # Format display time
     scheduled_at_display = scheduled_at.strftime("%-d %b %Y at %-I:%M %p IST")
-    scheduled_at_iso = scheduled_at.isoformat()
 
     return {
         "booked": True,
-        "meeting_link": meet_link,
+        "meeting_link": meeting_link,
         "appointment_id": appointment_id,
         "doctor_name": doctor["doctor_name"],
         "scheduled_at_display": scheduled_at_display,
-        "scheduled_at_iso": scheduled_at_iso,
+        "scheduled_at_iso": scheduled_at.isoformat(),
         "is_immediate": is_immediate,
-        "next_available_display": None,
     }
 
 
 def format_meet_confirmation_whatsapp(result: dict, lead_name: str, doctor_phone: Optional[str] = None) -> tuple:
     """
     Returns (lead_message, doctor_message) as a tuple of strings.
-    lead_message → sent to the lead on WhatsApp
-    doctor_message → sent to the doctor on WhatsApp (via their phone number)
+    lead_message  → sent to the patient on WhatsApp
+    doctor_message → sent to the doctor on WhatsApp
     """
     if not result["booked"]:
         lead_msg = (
@@ -514,31 +391,30 @@ def format_meet_confirmation_whatsapp(result: dict, lead_name: str, doctor_phone
         lead_msg = (
             f"✅ *Consultation Confirmed!*\n\n"
             f"Dr. {doctor_name} abhi available hain 🩺\n"
-            f"Google Meet Link: {meet_link}\n\n"
-            f"Link par abhi click karein — doctor join kar rahe hain!"
+            f"📹 Jitsi Meet Link: {meet_link}\n\n"
+            f"Abhi click karein — doctor join kar rahe hain!"
         )
     elif meet_link:
         lead_msg = (
             f"✅ *Consultation Confirmed!*\n\n"
-            f"Doctor: Dr. {doctor_name}\n"
-            f"Date & Time: {time_display}\n"
-            f"Google Meet Link: {meet_link}\n\n"
-            f"Yeh link save kar lein. 10 minute pehle reminder milega 🗓️"
+            f"👨‍⚕️ Doctor: Dr. {doctor_name}\n"
+            f"📅 Date & Time: {time_display}\n"
+            f"📹 Video Call Link: {meet_link}\n\n"
+            f"Yeh link save kar lein. Time par click karein — koi install karne ki zaroorat nahi! 🗓️"
         )
     else:
         lead_msg = (
             f"✅ *Consultation Booked!*\n\n"
-            f"Doctor: Dr. {doctor_name}\n"
-            f"Date & Time: {time_display}\n\n"
+            f"👨‍⚕️ Doctor: Dr. {doctor_name}\n"
+            f"📅 Date & Time: {time_display}\n\n"
             f"Hamari team aapko call karegi. Kripya available rahein 📞"
         )
 
-    # Doctor notification message
     doctor_msg = (
         f"🔔 *New Consultation Booked via WhatsApp*\n\n"
         f"Patient: {lead_name}\n"
         f"Time: {time_display}\n"
-        + (f"Meet Link: {meet_link}\n" if meet_link else "")
+        + (f"📹 Jitsi Link: {meet_link}\n" if meet_link else "")
         + f"\nPlease join on time. 🙏"
     )
 
