@@ -522,9 +522,12 @@ async def trigger_whatsapp_report(
 ):
     if not is_admin(current_user, supabase):
         raise HTTPException(status_code=403, detail="Not authorized.")
-        
-    from core.scheduler import _send_daily_whatsapp_report_logic
-    import asyncio
-    asyncio.create_task(_send_daily_whatsapp_report_logic())
-    
-    return {"success": True, "message": "Report generation triggered in background."}
+
+    try:
+        from core.scheduler import _send_daily_whatsapp_report_logic
+        await _send_daily_whatsapp_report_logic()
+        return {"success": True, "message": "Report sent successfully."}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Report failed: {str(e)}")

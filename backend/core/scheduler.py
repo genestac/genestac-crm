@@ -624,6 +624,12 @@ async def _send_daily_whatsapp_report_logic():
     revenue = sum(o.get("total_amount", 0) for o in (orders_res.data or []))
     orders_count = len(orders_res.data or [])
             
+    # Completed consultations today
+    completed_appts_res = supabase.table("appointments").select("id", count="exact").eq(
+        "status", "completed"
+    ).gte("updated_at", start_of_today_str).execute()
+    completed_appts = completed_appts_res.count or 0
+
     # Pending appointments needing doctor action
     pending_appts_res = supabase.table("appointments").select("id", count="exact").eq("status", "pending").execute()
     pending_appts = pending_appts_res.count or 0
@@ -647,7 +653,7 @@ async def _send_daily_whatsapp_report_logic():
             date=date_str,
             new_leads=new_leads,
             consultations_booked=consults_today,
-            consultations_done=0,          # can add a query for status=completed if needed
+            consultations_done=completed_appts,
             orders=orders_count,
             revenue=revenue_str,
             pending_actions=pending_actions,
