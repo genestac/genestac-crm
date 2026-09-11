@@ -20,8 +20,11 @@ def is_within_calling_window(windows):
     """
     Check if the current time is within the allowed AI calling windows.
     windows: [{"start": "09:00", "end": "18:00", "days": ["Monday", "Tuesday", ...]}]
+    All times are treated as IST (Asia/Kolkata).
     """
-    now = datetime.datetime.now()
+    from zoneinfo import ZoneInfo
+    IST = ZoneInfo("Asia/Kolkata")
+    now = datetime.datetime.now(IST)
     current_time_str = now.strftime("%H:%M")
     current_day = now.strftime("%A")
 
@@ -589,8 +592,10 @@ async def _send_daily_whatsapp_report_logic():
         print("[WhatsApp Report] No phone numbers configured. Skipping.")
         return
         
-    # 2. Gather Stats
-    today_date = datetime.datetime.now()
+    # 2. Gather Stats — always in IST so start-of-day is correct for Indian timezone
+    from zoneinfo import ZoneInfo
+    IST = ZoneInfo("Asia/Kolkata")
+    today_date = datetime.datetime.now(IST)
     start_of_today_str = today_date.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
     
     # New Leads
@@ -668,16 +673,17 @@ def check_and_send_whatsapp_report():
         supabase = get_supabase_client()
         time_res = supabase.table("global_settings").select("settings_value").eq("settings_key", "whatsapp_report_time").execute()
         target_time = time_res.data[0].get("settings_value", {}).get("time", "21:00") if time_res.data else "21:00"
-        
-        now = datetime.datetime.now()
-        current_time_str = now.strftime("%H:%M")
-        
+
+        # ✅ Always compare in IST — target_time is entered in IST by the admin
+        from zoneinfo import ZoneInfo
+        IST = ZoneInfo("Asia/Kolkata")
+        now_ist = datetime.datetime.now(IST)
+        current_time_str = now_ist.strftime("%H:%M")
+
         if current_time_str == target_time:
-            # Prevent multiple sends within the same minute by checking a basic log/cache if needed,
-            # but apscheduler runs this exactly once per minute if we use interval=1m at 0 seconds.
             import asyncio
             asyncio.run(_send_daily_whatsapp_report_logic())
-            
+
     except Exception as e:
         print(f"[WhatsApp Report Trigger Error] {e}")
 
