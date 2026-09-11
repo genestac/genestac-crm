@@ -22,71 +22,94 @@ async def get_conversations(
 ):
     """Get paginated conversations ordered by most recent message."""
     try:
-        # Fetch the most recent 1000 messages to extract active leads
-        msg_res = supabase.table("whatsapp_messages") \
-            .select("lead_id, user_id, message_body, sender_type, created_at") \
+        # ── Pass 1: fetch only IDs + timestamps (NO message_body) ────────────
+        # This avoids the 'JSON could not be generated' overflow caused by
+        # fetching thousands of large message_body values at once.
+        id_res = supabase.table("whatsapp_messages") \
+            .select("id, lead_id, user_id, sender_type, created_at") \
             .order("created_at", desc=True) \
-            .limit(1000) \
+            .limit(3000) \
             .execute()
-            
-        messages = msg_res.data or []
-        
-        # Deduplicate to find the latest message per person
-        conversations_map = {}
-        for msg in messages:
-            person_id = msg.get("lead_id") or msg.get("user_id")
+
+        id_rows = id_res.data or []
+
+        # Deduplicate: keep latest timestamp per person
+        conversations_map: dict = {}
+        for row in id_rows:
+            person_id = row.get("lead_id") or row.get("user_id")
             if not person_id:
                 continue
-                
             if person_id not in conversations_map:
                 conversations_map[person_id] = {
                     "id": person_id,
-                    "is_user": bool(msg.get("user_id")),
-                    "last_message": msg["message_body"],
-                    "last_message_time": msg["created_at"],
-                    "sender_type": msg["sender_type"]
+                    "msg_id": row["id"],           # we'll fetch the body for this
+                    "is_user": bool(row.get("user_id")),
+                    "last_message_time": row["created_at"],
+                    "sender_type": row["sender_type"],
                 }
-                
-        # Now fetch the details for these leads and users
-        lead_ids = [c["id"] for c in conversations_map.values() if not c["is_user"]]
-        user_ids = [c["id"] for c in conversations_map.values() if c["is_user"]]
-        
-        leads_dict = {}
+
+        if not conversations_map:
+            return {"data": [], "total": 0, "has_more": False}
+
+        # Sort by time now so we slice the correct page before fetching bodies
+        sorted_persons = sorted(
+            conversations_map.values(),
+            key=lambda x: x["last_message_time"],
+            reverse=True
+        )
+        total = len(sorted_persons)
+        page_persons = sorted_persons[offset: offset + limit]
+
+        if not page_persons:
+            return {"data": [], "total": total, "has_more": False}
+
+        # ── Pass 2: fetch message_body only for the msg_ids on this page ──────
+        page_msg_ids = [p["msg_id"] for p in page_persons]
+        body_res = supabase.table("whatsapp_messages") \
+            .select("id, message_body") \
+            .in_("id", page_msg_ids) \
+            .execute()
+        body_map = {row["id"]: row["message_body"] for row in (body_res.data or [])}
+
+        # Attach body to each page entry
+        for p in page_persons:
+            p["last_message"] = body_map.get(p["msg_id"], "")
+            del p["msg_id"]   # clean up internal field
+
+        # ── Pass 3: fetch lead / user names + phones for this page ────────────
+        lead_ids = [p["id"] for p in page_persons if not p["is_user"]]
+        user_ids = [p["id"] for p in page_persons if p["is_user"]]
+
+        leads_dict: dict = {}
         if lead_ids:
-            leads_res = supabase.table("leads").select("id, name, phone_number, metadata").in_("id", lead_ids).execute()
-            for l in (leads_res.data or []):
-                leads_dict[l["id"]] = l
-                
-        users_dict = {}
+            lr = supabase.table("leads").select("id, name, phone_number, metadata") \
+                .in_("id", lead_ids).execute()
+            leads_dict = {l["id"]: l for l in (lr.data or [])}
+
+        users_dict: dict = {}
         if user_ids:
-            users_res = supabase.table("users").select("id, name, phone, metadata").in_("id", user_ids).execute()
-            for u in (users_res.data or []):
-                users_dict[u["id"]] = u
-                
-        # Merge data
+            ur = supabase.table("users").select("id, name, phone, metadata") \
+                .in_("id", user_ids).execute()
+            users_dict = {u["id"]: u for u in (ur.data or [])}
+
+        # Merge and build final list
         final_list = []
-        for person_id, conv in conversations_map.items():
-            if conv["is_user"] and person_id in users_dict:
-                user = users_dict[person_id]
-                conv["name"] = user.get("name") or "Unknown User"
-                conv["phone"] = user.get("phone")
-                conv["bot_paused"] = (user.get("metadata") or {}).get("bot_paused", False)
+        for conv in page_persons:
+            pid = conv["id"]
+            if conv["is_user"] and pid in users_dict:
+                u = users_dict[pid]
+                conv["name"] = u.get("name") or "Unknown User"
+                conv["phone"] = u.get("phone")
+                conv["bot_paused"] = (u.get("metadata") or {}).get("bot_paused", False)
                 final_list.append(conv)
-            elif not conv["is_user"] and person_id in leads_dict:
-                lead = leads_dict[person_id]
-                conv["name"] = lead.get("name") or "Unknown Lead"
-                conv["phone"] = lead.get("phone_number")
-                conv["bot_paused"] = (lead.get("metadata") or {}).get("bot_paused", False)
+            elif not conv["is_user"] and pid in leads_dict:
+                l = leads_dict[pid]
+                conv["name"] = l.get("name") or "Unknown Lead"
+                conv["phone"] = l.get("phone_number")
+                conv["bot_paused"] = (l.get("metadata") or {}).get("bot_paused", False)
                 final_list.append(conv)
-                
-        # They are already roughly ordered because we processed messages in DESC order,
-        # but let's strictly sort them just in case.
-        final_list.sort(key=lambda x: x["last_message_time"], reverse=True)
 
-        total = len(final_list)
-        page_slice = final_list[offset: offset + limit]
-
-        return {"data": page_slice, "total": total, "has_more": (offset + limit) < total}
+        return {"data": final_list, "total": total, "has_more": (offset + limit) < total}
     except Exception as e:
         import traceback
         traceback.print_exc()
