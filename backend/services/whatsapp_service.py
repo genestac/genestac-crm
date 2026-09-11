@@ -3,6 +3,118 @@ import httpx
 
 WHATSAPP_API_URL = "https://graph.facebook.com/v25.0"
 
+
+# ---------------------------------------------------------------------------
+# Named template senders — each maps to a specific Meta-approved template.
+# Using templates lets us send outside the free 24-hour customer-care window.
+# ---------------------------------------------------------------------------
+
+async def send_appointment_request_to_doctor(
+    doctor_phone: str,
+    doctor_name: str,
+    patient_name: str,
+    date_time: str,
+    jitsi_link: str,
+) -> dict:
+    """Template: appointment_new_request → sent to doctor when patient books."""
+    components = [
+        {
+            "type": "body",
+            "parameters": [
+                {"type": "text", "text": doctor_name},
+                {"type": "text", "text": patient_name},
+                {"type": "text", "text": date_time},
+                {"type": "text", "text": jitsi_link},
+            ],
+        }
+    ]
+    return await send_whatsapp_template(
+        doctor_phone, "appointment_new_request", "en", components
+    )
+
+
+async def send_appointment_confirmed_to_patient(
+    patient_phone: str,
+    patient_name: str,
+    doctor_name: str,
+    date_time: str,
+    jitsi_link: str,
+) -> dict:
+    """Template: appointment_confirmed_patient → sent to patient when doctor confirms."""
+    components = [
+        {
+            "type": "body",
+            "parameters": [
+                {"type": "text", "text": patient_name},
+                {"type": "text", "text": doctor_name},
+                {"type": "text", "text": date_time},
+                {"type": "text", "text": jitsi_link},
+            ],
+        }
+    ]
+    return await send_whatsapp_template(
+        patient_phone, "appointment_confirmed_patient", "en", components
+    )
+
+
+async def send_appointment_reminder(
+    phone: str,
+    recipient_name: str,
+    doctor_name: str,
+    time_str: str,
+    jitsi_link: str,
+) -> dict:
+    """Template: appointment_reminder_10min → sent to doctor + patient 10 min before."""
+    components = [
+        {
+            "type": "body",
+            "parameters": [
+                {"type": "text", "text": recipient_name},
+                {"type": "text", "text": doctor_name},
+                {"type": "text", "text": time_str},
+                {"type": "text", "text": jitsi_link},
+            ],
+        }
+    ]
+    return await send_whatsapp_template(
+        phone, "appointment_reminder_10min", "en", components
+    )
+
+
+async def send_daily_crm_report_template(
+    phone: str,
+    date: str,
+    new_leads: int,
+    consultations_booked: int,
+    consultations_done: int,
+    orders: int,
+    revenue: str,
+    pending_actions: str,
+) -> dict:
+    """Template: crm_daily_status_update → sent to admins for daily report.
+    Works outside 24-hour window (template-based, not session message)."""
+    components = [
+        {
+            "type": "header",
+            "parameters": [{"type": "text", "text": date}],
+        },
+        {
+            "type": "body",
+            "parameters": [
+                {"type": "text", "text": str(new_leads)},
+                {"type": "text", "text": str(consultations_booked)},
+                {"type": "text", "text": str(consultations_done)},
+                {"type": "text", "text": str(orders)},
+                {"type": "text", "text": revenue},
+                {"type": "text", "text": pending_actions or "None"},
+            ],
+        },
+    ]
+    return await send_whatsapp_template(
+        phone, "crm_daily_status_update", "en", components
+    )
+
+
 async def send_whatsapp_template(phone_number: str, template_name: str, language_code: str = "en_US", components: list = None):
     """
     Sends a WhatsApp template message using Meta Cloud API.

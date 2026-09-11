@@ -366,6 +366,52 @@ def book_google_meet_appointment(
 
     scheduled_at_display = scheduled_at.strftime("%-d %b %Y at %-I:%M %p IST")
 
+    # ── Notify doctor via WhatsApp template ───────────────────────────────────
+    try:
+        import asyncio
+        from services.whatsapp_service import send_appointment_request_to_doctor
+
+        doc_res = supabase.table("staffs").select("full_name, whatsapp_number").eq(
+            "id", doctor["doctor_id"]
+        ).single().execute()
+        doc_data = doc_res.data or {}
+        doc_wa_number = doc_data.get("whatsapp_number")
+
+        if doc_wa_number:
+            raw_name = doc_data.get("full_name", "Doctor")
+            doc_display = raw_name.lstrip().removeprefix("Dr.").strip()
+
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    asyncio.create_task(send_appointment_request_to_doctor(
+                        doctor_phone=doc_wa_number,
+                        doctor_name=doc_display,
+                        patient_name=lead_name,
+                        date_time=scheduled_at_display,
+                        jitsi_link=meeting_link,
+                    ))
+                else:
+                    loop.run_until_complete(send_appointment_request_to_doctor(
+                        doctor_phone=doc_wa_number,
+                        doctor_name=doc_display,
+                        patient_name=lead_name,
+                        date_time=scheduled_at_display,
+                        jitsi_link=meeting_link,
+                    ))
+            except RuntimeError:
+                asyncio.run(send_appointment_request_to_doctor(
+                    doctor_phone=doc_wa_number,
+                    doctor_name=doc_display,
+                    patient_name=lead_name,
+                    date_time=scheduled_at_display,
+                    jitsi_link=meeting_link,
+                ))
+        else:
+            print(f"[Meeting] Doctor {doctor['doctor_id']} has no whatsapp_number set — skipping notification")
+    except Exception as _we:
+        print(f"[Meeting] Doctor WhatsApp notify error (non-fatal): {_we}")
+
     return {
         "booked": True,
         "already_exists": False,

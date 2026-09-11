@@ -624,31 +624,37 @@ async def _send_daily_whatsapp_report_logic():
     revenue = sum(o.get("total_amount", 0) for o in (orders_res.data or []))
     orders_count = len(orders_res.data or [])
             
-    report_text = f"""📊 *Genestac Daily Report* 📊
-Date: {today_date.strftime('%Y-%m-%d')}
+    # Pending appointments needing doctor action
+    pending_appts_res = supabase.table("appointments").select("id", count="exact").eq("status", "pending").execute()
+    pending_appts = pending_appts_res.count or 0
 
-📈 *Leads & Sales*
-- New Leads: {new_leads}
-- Consultations Booked: {consults_today}
-- New Conversions: {conversions_today}
-- Orders Generated: {orders_count}
-- Total Revenue: ₹{revenue:,.2f}
+    # Build pending actions string
+    pending_parts = []
+    if pending_appts > 0:
+        pending_parts.append(f"{pending_appts} appointment(s) awaiting doctor approval")
+    pending_actions = "; ".join(pending_parts) if pending_parts else "None"
 
-🤖 *AI Calling*
-- Total Calls Triggered: {total_calls}
-- Calls Answered: {answered}
+    date_str = today_date.strftime("%d %b %Y")
+    revenue_str = f"{revenue:,.0f}"
 
-_This is an automated daily report from Genestac CRM._"""
-
-    from services.whatsapp_service import send_whatsapp_text
+    from services.whatsapp_service import send_daily_crm_report_template
     import asyncio
-    
+
     tasks = []
     for num in numbers:
-        tasks.append(send_whatsapp_text(num, report_text))
-        
+        tasks.append(send_daily_crm_report_template(
+            phone=num,
+            date=date_str,
+            new_leads=new_leads,
+            consultations_booked=consults_today,
+            consultations_done=0,          # can add a query for status=completed if needed
+            orders=orders_count,
+            revenue=revenue_str,
+            pending_actions=pending_actions,
+        ))
+
     results = await asyncio.gather(*tasks, return_exceptions=True)
-    print(f"[WhatsApp Report] Sent to {len(numbers)} numbers. Results: {results}")
+    print(f"[WhatsApp Report] Template sent to {len(numbers)} numbers. Results: {results}")
 
 
 def check_and_send_whatsapp_report():
@@ -1296,9 +1302,10 @@ def sweep_whatsapp_followups():
 
 def sweep_meet_reminders():
     """
-    Sends a WhatsApp reminder 10 minutes before a Google Meet appointment.
-    Marks reminder_sent=True to avoid duplicates.
-    Runs every minute.
+    Runs every minute. Sends appointment_reminder_10min WhatsApp TEMPLATE
+    to both patient and doctor 10 minutes before a confirmed appointment.
+    Uses Meta templates so it works even outside the 24-hour free window.
+    Marks reminder_sent=True to avoid duplicate sends.
     """
     import asyncio
     try:
@@ -1308,8 +1315,8 @@ def sweep_meet_reminders():
         window_end = (now + datetime.timedelta(minutes=12)).isoformat()
 
         res = supabase.table("appointments").select(
-            "id, patient_id, scheduled_at, meeting_link, doctor_id, "
-            "staffs!appointments_doctor_id_fkey(full_name)"
+            "id, patient_id, scheduled_at, meeting_link, doctor_id, notes, "
+            "staffs!appointments_doctor_id_fkey(full_name, whatsapp_number)"
         ).gte("scheduled_at", window_start).lte(
             "scheduled_at", window_end
         ).eq("status", "confirmed").eq("reminder_sent", False).not_.is_(
@@ -1320,49 +1327,86 @@ def sweep_meet_reminders():
         if not appts:
             return
 
-        print(f"[Meet Reminder] Sending {len(appts)} 10-min reminders")
+        print(f"[Meet Reminder] Sending {len(appts)} 10-min template reminders")
 
         async def _remind(appt):
             try:
-                from services.whatsapp_service import send_whatsapp_text
-                patient_id = appt.get("patient_id")
-                meet_link = appt.get("meeting_link")
-                doctor_name = (appt.get("staffs") or {}).get("full_name", "Doctor")
-                notes = appt.get("notes") or ""
+                from services.whatsapp_service import send_appointment_reminder
+                import re
 
+                meet_link = appt.get("meeting_link")
                 if not meet_link:
                     return
 
-                # Get patient phone
-                phone = None
-                
-                # 1. First try to extract from notes (fallback for AI bookings)
-                import re
-                phone_match = re.search(r'\[PHONE:\s*([^\]]+)\]', notes)
-                if phone_match:
-                    phone = phone_match.group(1).strip()
+                doc_info = appt.get("staffs") or {}
+                raw_doc_name = doc_info.get("full_name", "Doctor")
+                doctor_display = raw_doc_name.lstrip().removeprefix("Dr.").strip()
+                doctor_wa = doc_info.get("whatsapp_number")
 
-                lead_res = supabase.table("leads").select("phone_number").eq("id", patient_id).execute()
-                if lead_res.data:
-                    phone = lead_res.data[0].get("phone_number")
-                if not phone:
-                    user_res = supabase.table("users").select("phone").eq("id", patient_id).execute()
-                    if user_res.data:
-                        phone = user_res.data[0].get("phone")
+                notes = appt.get("notes") or ""
+                patient_id = appt.get("patient_id")
 
-                if not phone:
-                    return
+                # Resolve scheduled_at as IST time string
+                sched_raw = appt.get("scheduled_at", "")
+                try:
+                    from zoneinfo import ZoneInfo
+                    IST = ZoneInfo("Asia/Kolkata")
+                    sched_dt = datetime.datetime.fromisoformat(sched_raw)
+                    if sched_dt.tzinfo is None:
+                        sched_dt = sched_dt.replace(tzinfo=datetime.timezone.utc)
+                    sched_dt_ist = sched_dt.astimezone(IST)
+                    time_display = sched_dt_ist.strftime("%-I:%M %p IST")
+                except Exception:
+                    time_display = sched_raw
 
-                # Strip existing 'Dr.' to prevent double prefix
-                doctor_display = doctor_name.lstrip().removeprefix("Dr.").strip()
+                # Resolve patient phone + name
+                patient_phone = None
+                patient_name = "Patient"
 
-                reminder_msg = (
-                    f"⏰ *Reminder: Consultation in 10 minutes!*\n\n"
-                    f"Doctor: Dr. {doctor_display}\n"
-                    f"Video Link: {meet_link}\n\n"
-                    f"Link par click karein aur ready rahein. 🩺"
-                )
-                await send_whatsapp_text(phone, reminder_msg)
+                # From notes [PHONE: ...]
+                pm = re.search(r'\[PHONE:\s*([^\]]+)\]', notes)
+                if pm:
+                    patient_phone = pm.group(1).strip()
+
+                if patient_id:
+                    lead_res = supabase.table("leads").select("phone_number, name").eq("id", patient_id).execute()
+                    if lead_res.data:
+                        patient_phone = patient_phone or lead_res.data[0].get("phone_number")
+                        patient_name = lead_res.data[0].get("name") or patient_name
+                    if not patient_phone:
+                        user_res = supabase.table("users").select("phone, name").eq("id", patient_id).execute()
+                        if user_res.data:
+                            patient_phone = user_res.data[0].get("phone")
+                            patient_name = user_res.data[0].get("name") or patient_name
+
+                tasks = []
+
+                # ── Send to patient ──────────────────────────────────────────
+                if patient_phone:
+                    tasks.append(send_appointment_reminder(
+                        phone=patient_phone,
+                        recipient_name=patient_name,
+                        doctor_name=doctor_display,
+                        time_str=time_display,
+                        jitsi_link=meet_link,
+                    ))
+                else:
+                    print(f"[Meet Reminder] ⚠️ No patient phone for appt {appt['id']}")
+
+                # ── Send to doctor ───────────────────────────────────────────
+                if doctor_wa:
+                    tasks.append(send_appointment_reminder(
+                        phone=doctor_wa,
+                        recipient_name=f"Dr. {doctor_display}",
+                        doctor_name=doctor_display,
+                        time_str=time_display,
+                        jitsi_link=meet_link,
+                    ))
+                else:
+                    print(f"[Meet Reminder] ⚠️ Doctor has no whatsapp_number — skipping doctor reminder")
+
+                if tasks:
+                    await asyncio.gather(*tasks, return_exceptions=True)
 
                 # Mark reminder sent
                 supabase.table("appointments").update({"reminder_sent": True}).eq("id", appt["id"]).execute()

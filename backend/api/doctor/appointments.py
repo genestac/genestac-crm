@@ -339,10 +339,87 @@ async def create_next_appointment(
 async def update_appointment_status(
     id: str,
     status: str = Body(embed=True),
+    suggested_time: Optional[str] = Body(default=None),
     current_user: dict = Depends(get_current_user),
     supabase: Client = Depends(get_supabase_client),
 ):
-    supabase.table('appointments').update({'status': status}).eq('id', id).execute()
+    """
+    Update appointment status. When set to 'confirmed':
+    - Optionally updates scheduled_at if doctor suggested a new time
+    - Sends WhatsApp template to patient with Jitsi link + confirmed time
+    """
+    update_payload = {'status': status}
+    if suggested_time and status == 'confirmed':
+        update_payload['scheduled_at'] = suggested_time
+
+    supabase.table('appointments').update(update_payload).eq('id', id).execute()
+
+    # ── On confirmation: notify patient via WhatsApp template ───────────────
+    if status == 'confirmed':
+        try:
+            import asyncio
+            import re as _re
+            from services.whatsapp_service import send_appointment_confirmed_to_patient
+
+            appt_res = supabase.table('appointments').select(
+                'id, scheduled_at, meeting_link, notes, patient_id, doctor_id, title'
+            ).eq('id', id).single().execute()
+            appt = appt_res.data or {}
+
+            # Resolve scheduled_at display
+            sched_raw = appt.get('scheduled_at', '')
+            try:
+                import datetime as _dt
+                from zoneinfo import ZoneInfo
+                IST = ZoneInfo('Asia/Kolkata')
+                sched_dt = _dt.datetime.fromisoformat(sched_raw)
+                if sched_dt.tzinfo is None:
+                    sched_dt = sched_dt.replace(tzinfo=IST)
+                time_display = sched_dt.strftime('%-d %b %Y at %-I:%M %p IST')
+            except Exception:
+                time_display = sched_raw
+
+            # Resolve doctor name
+            doc_res = supabase.table('staffs').select('full_name').eq('id', appt.get('doctor_id', '')).single().execute()
+            raw_doc_name = (doc_res.data or {}).get('full_name', 'Doctor')
+            doctor_display = raw_doc_name.lstrip().removeprefix('Dr.').strip()
+
+            # Resolve patient phone + name
+            patient_phone = None
+            patient_name = 'Patient'
+            notes = appt.get('notes') or ''
+
+            # From notes [PHONE: ...]
+            pm = _re.search(r'\[PHONE:\s*([^\]]+)\]', notes)
+            if pm:
+                patient_phone = pm.group(1).strip()
+
+            # From patient_id → leads or users
+            patient_id = appt.get('patient_id')
+            if patient_id:
+                lead_res = supabase.table('leads').select('phone_number, name').eq('id', patient_id).execute()
+                if lead_res.data:
+                    patient_phone = patient_phone or lead_res.data[0].get('phone_number')
+                    patient_name = lead_res.data[0].get('name') or patient_name
+                if not patient_phone:
+                    user_res = supabase.table('users').select('phone, name').eq('id', patient_id).execute()
+                    if user_res.data:
+                        patient_phone = user_res.data[0].get('phone')
+                        patient_name = user_res.data[0].get('name') or patient_name
+
+            meet_link = appt.get('meeting_link', '')
+
+            if patient_phone and meet_link:
+                asyncio.create_task(send_appointment_confirmed_to_patient(
+                    patient_phone=patient_phone,
+                    patient_name=patient_name,
+                    doctor_name=doctor_display,
+                    date_time=time_display,
+                    jitsi_link=meet_link,
+                ))
+        except Exception as _e:
+            print(f'[Appointment Confirm] WhatsApp notify error (non-fatal): {_e}')
+
     return {'success': True}
 
 
