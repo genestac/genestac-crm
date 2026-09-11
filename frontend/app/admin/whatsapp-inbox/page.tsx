@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { getWhatsappConversations } from '@/app/sales/actions'
 import { getInactiveSubscriberConversations } from '@/app/admin/whatsapp-actions'
 import { WhatsappChat } from '@/components/sales/whatsapp-chat'
@@ -21,30 +21,72 @@ type ConversationEntry = {
 
 type ActiveTab = 'all' | 'reminders'
 
+const PAGE = 30
+
 export default function WhatsappInboxPage() {
   const [conversations, setConversations] = useState<ConversationEntry[]>([])
   const [reminders, setReminders] = useState<ConversationEntry[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [hasMore, setHasMore] = useState(true)
+  const [offset, setOffset] = useState(0)
   const [search, setSearch] = useState('')
   const [activeLeadId, setActiveLeadId] = useState<string | null>(null)
   const [activeLeadName, setActiveLeadName] = useState<string>('Lead')
   const [activeTab, setActiveTab] = useState<ActiveTab>('all')
 
-  const fetchAll = useCallback(async () => {
+  // Sentinel for IntersectionObserver (load more trigger)
+  const sentinelRef = useRef<HTMLDivElement>(null)
+  const listRef = useRef<HTMLDivElement>(null)
+
+  // Initial + periodic poll for new conversations (page 0 only, to get updates)
+  const fetchFirst = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true)
     const [convData, reminderData] = await Promise.all([
-      getWhatsappConversations(),
+      getWhatsappConversations(PAGE, 0),
       getInactiveSubscriberConversations(),
     ])
-    setConversations(convData)
+    setConversations(convData.data)
+    setHasMore(convData.has_more)
+    setOffset(PAGE)
     setReminders(reminderData)
-    setLoading(false)
+    if (!silent) setLoading(false)
   }, [])
 
   useEffect(() => {
-    fetchAll()
-    const interval = setInterval(fetchAll, 15000)
+    fetchFirst()
+    const interval = setInterval(() => fetchFirst(true), 15000)
     return () => clearInterval(interval)
-  }, [fetchAll])
+  }, [fetchFirst])
+
+  // IntersectionObserver for sentinel (load more)
+  useEffect(() => {
+    if (!sentinelRef.current || !hasMore || activeTab !== 'all') return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && !loadingMore && hasMore && !search) {
+          loadMore()
+        }
+      },
+      { threshold: 0.1 }
+    )
+    observer.observe(sentinelRef.current)
+    return () => observer.disconnect()
+  }, [hasMore, loadingMore, search, activeTab, offset])
+
+  const loadMore = useCallback(async () => {
+    if (loadingMore || !hasMore) return
+    setLoadingMore(true)
+    const convData = await getWhatsappConversations(PAGE, offset)
+    setConversations(prev => {
+      const existingIds = new Set(prev.map(c => c.id))
+      const newOnes = convData.data.filter((c: ConversationEntry) => !existingIds.has(c.id))
+      return [...prev, ...newOnes]
+    })
+    setHasMore(convData.has_more)
+    setOffset(o => o + PAGE)
+    setLoadingMore(false)
+  }, [loadingMore, hasMore, offset])
 
   const filteredConversations = conversations.filter(c =>
     c.name?.toLowerCase().includes(search.toLowerCase()) ||
@@ -67,7 +109,6 @@ export default function WhatsappInboxPage() {
   }
 
   const displayList = activeTab === 'all' ? filteredConversations : filteredReminders
-
 
   return (
     <div className="flex h-[calc(100vh-6rem)] -m-6 bg-white overflow-hidden shadow-sm border border-gray-200">
@@ -142,7 +183,7 @@ export default function WhatsappInboxPage() {
         )}
 
         {/* Conversation List */}
-        <div className="flex-1 overflow-y-auto scrollbar-thin">
+        <div ref={listRef} className="flex-1 overflow-y-auto scrollbar-thin">
           {loading ? (
             <div className="flex justify-center p-10">
               <Loader2 className="w-6 h-6 animate-spin text-gray-400" />
@@ -160,62 +201,70 @@ export default function WhatsappInboxPage() {
               )}
             </div>
           ) : (
-            displayList.map(conv => (
-              <div
-                key={conv.id}
-                onClick={() => { setActiveLeadId(conv.id); setActiveLeadName(conv.name || 'Lead') }}
-                className={`flex items-start px-4 py-3 cursor-pointer hover:bg-[#f5f6f6] transition group border-b border-gray-100 ${
-                  activeLeadId === conv.id ? 'bg-[#f0f2f5]' : ''
-                }`}
-              >
-                {/* Avatar */}
-                <div className={`w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0 mr-3 mt-0.5 ${
-                  conv.is_reminder_subscriber
-                    ? 'bg-amber-100'
-                    : 'bg-gray-200'
-                }`}>
-                  {conv.is_reminder_subscriber
-                    ? <Bell className="w-5 h-5 text-amber-500" />
-                    : <User className="w-6 h-6 text-gray-500" />
-                  }
-                </div>
-
-                <div className="flex-1 min-w-0">
-                  <div className="flex justify-between items-baseline mb-0.5">
-                    <h3 className="font-semibold text-gray-900 truncate pr-2 text-base">{conv.name}</h3>
-                    <span className="text-xs text-gray-500 flex-shrink-0">{formatTime(conv.last_message_time)}</span>
+            <>
+              {displayList.map(conv => (
+                <div
+                  key={conv.id}
+                  onClick={() => { setActiveLeadId(conv.id); setActiveLeadName(conv.name || 'Lead') }}
+                  className={`flex items-start px-4 py-3 cursor-pointer hover:bg-[#f5f6f6] transition group border-b border-gray-100 ${
+                    activeLeadId === conv.id ? 'bg-[#f0f2f5]' : ''
+                  }`}
+                >
+                  {/* Avatar */}
+                  <div className={`w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0 mr-3 mt-0.5 ${
+                    conv.is_reminder_subscriber ? 'bg-amber-100' : 'bg-gray-200'
+                  }`}>
+                    {conv.is_reminder_subscriber
+                      ? <Bell className="w-5 h-5 text-amber-500" />
+                      : <User className="w-6 h-6 text-gray-500" />
+                    }
                   </div>
 
-                  {/* Reminder badge row */}
-                  {conv.is_reminder_subscriber && (
-                    <div className="flex items-center gap-1.5 mb-1">
-                      <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-200">
-                        <Bell className="w-2.5 h-2.5" />
-                        Reminder Sent
-                      </span>
-                      <span className="inline-flex items-center gap-1 text-[10px] text-gray-500">
-                        <Clock className="w-2.5 h-2.5" />
-                        {conv.days_inactive ?? 0}d inactive
-                      </span>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex justify-between items-baseline mb-0.5">
+                      <h3 className="font-semibold text-gray-900 truncate pr-2 text-base">{conv.name}</h3>
+                      <span className="text-xs text-gray-500 flex-shrink-0">{formatTime(conv.last_message_time)}</span>
                     </div>
-                  )}
 
-                  <div className="flex items-center gap-1 text-sm text-gray-500 truncate">
-                    {!conv.is_reminder_subscriber && (conv.sender_type === 'bot' || conv.sender_type === 'admin') && (
-                      <span className="text-[#53bdeb] text-xs mr-0.5">✓✓</span>
+                    {conv.is_reminder_subscriber && (
+                      <div className="flex items-center gap-1.5 mb-1">
+                        <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-200">
+                          <Bell className="w-2.5 h-2.5" />
+                          Reminder Sent
+                        </span>
+                        <span className="inline-flex items-center gap-1 text-[10px] text-gray-500">
+                          <Clock className="w-2.5 h-2.5" />
+                          {conv.days_inactive ?? 0}d inactive
+                        </span>
+                      </div>
                     )}
-                    <span className="truncate">{conv.last_message}</span>
-                  </div>
 
-                  {/* Subscription start date for reminders */}
-                  {conv.is_reminder_subscriber && conv.subscription_start_date && (
-                    <p className="text-[10px] text-gray-400 mt-0.5">
-                      Subscribed since {new Date(conv.subscription_start_date).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })}
-                    </p>
+                    <div className="flex items-center gap-1 text-sm text-gray-500 truncate">
+                      {!conv.is_reminder_subscriber && (conv.sender_type === 'bot' || conv.sender_type === 'admin') && (
+                        <span className="text-[#53bdeb] text-xs mr-0.5">✓✓</span>
+                      )}
+                      <span className="truncate">{conv.last_message}</span>
+                    </div>
+
+                    {conv.is_reminder_subscriber && conv.subscription_start_date && (
+                      <p className="text-[10px] text-gray-400 mt-0.5">
+                        Subscribed since {new Date(conv.subscription_start_date).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              ))}
+
+              {/* Infinite scroll sentinel */}
+              {activeTab === 'all' && !search && (
+                <div ref={sentinelRef} className="py-3 flex justify-center">
+                  {loadingMore && <Loader2 className="w-4 h-4 animate-spin text-gray-400" />}
+                  {!loadingMore && !hasMore && conversations.length > 0 && (
+                    <p className="text-xs text-gray-400">All conversations loaded</p>
                   )}
                 </div>
-              </div>
-            ))
+              )}
+            </>
           )}
         </div>
       </div>

@@ -204,14 +204,16 @@ export async function triggerAICall(leadId: string) {
   }
 }
 
-export async function getWhatsappChats(leadId: string) {
+export async function getWhatsappChats(leadId: string, before?: string) {
   try {
-    const res = await fetchAPI(`/api/admin/whatsapp/chat/${leadId}`)
-    // Returns { data: messages[], is_blocked: bool, abuse_strikes: number }
+    const url = before
+      ? `/api/admin/whatsapp/chat/${leadId}?before=${encodeURIComponent(before)}`
+      : `/api/admin/whatsapp/chat/${leadId}`
+    const res = await fetchAPI(url)
     return res
   } catch (error) {
-    console.error("Failed to get WA chats:", error)
-    return { data: [], is_blocked: false, abuse_strikes: 0 }
+    console.error('Failed to get WA chats:', error)
+    return { data: [], is_blocked: false, abuse_strikes: 0, has_more: false }
   }
 }
 
@@ -241,15 +243,15 @@ export async function resumeWhatsappBot(leadId: string) {
   }
 }
 
-export async function getWhatsappConversations() {
+export async function getWhatsappConversations(limit = 30, offset = 0) {
   try {
-    const res = await fetchAPI('/api/admin/whatsapp/chat/conversations', {
-      next: { revalidate: 5 } // Short cache
+    const res = await fetchAPI(`/api/admin/whatsapp/chat/conversations?limit=${limit}&offset=${offset}`, {
+      next: { revalidate: 5 },
     })
-    return res.data || []
+    return { data: res.data || [], total: res.total || 0, has_more: !!res.has_more }
   } catch (error) {
-    console.error("Failed to get WA conversations:", error)
-    return []
+    console.error('Failed to get WA conversations:', error)
+    return { data: [], total: 0, has_more: false }
   }
 }
 

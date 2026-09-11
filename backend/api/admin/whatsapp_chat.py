@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Body
+from fastapi import APIRouter, Depends, HTTPException, Body, Query
 from pydantic import BaseModel
 from supabase import Client
 from db.supabase import get_supabase_client
@@ -9,13 +9,18 @@ from datetime import datetime, timezone
 
 router = APIRouter()
 
+PAGE_SIZE = 30   # conversations per page
+MSG_PAGE  = 50   # messages per page
+
 
 @router.get("/conversations")
 async def get_conversations(
+    limit: int = Query(default=PAGE_SIZE, le=100),
+    offset: int = Query(default=0, ge=0),
     current_user: dict = Depends(get_current_user),
     supabase: Client = Depends(get_supabase_client)
 ):
-    """Get a list of all active conversations ordered by the most recent message."""
+    """Get paginated conversations ordered by most recent message."""
     try:
         # Fetch the most recent 1000 messages to extract active leads
         msg_res = supabase.table("whatsapp_messages") \
@@ -77,8 +82,11 @@ async def get_conversations(
         # They are already roughly ordered because we processed messages in DESC order,
         # but let's strictly sort them just in case.
         final_list.sort(key=lambda x: x["last_message_time"], reverse=True)
-        
-        return {"data": final_list}
+
+        total = len(final_list)
+        page_slice = final_list[offset: offset + limit]
+
+        return {"data": page_slice, "total": total, "has_more": (offset + limit) < total}
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -207,11 +215,13 @@ async def get_reminder_subscribers(
 @router.get("/{lead_id}")
 async def get_whatsapp_chat(
     lead_id: str,
+    limit: int = Query(default=MSG_PAGE, le=200),
+    before: Optional[str] = Query(default=None, description="ISO timestamp cursor — load messages older than this"),
     current_user: dict = Depends(get_current_user),
-
     supabase: Client = Depends(get_supabase_client)
 ):
-    """Get the full chat history for a lead/user, plus abuse-block status."""
+    """Get paginated chat history for a lead/user. Returns newest `limit` messages,
+    or messages older than `before` cursor for infinite scroll."""
     try:
         # Check if it's a lead or user and fetch metadata
         is_user = False
@@ -228,18 +238,25 @@ async def get_whatsapp_chat(
 
         lead_col = "user_id" if is_user else "lead_id"
 
-        chat_res = supabase.table("whatsapp_messages") \
+        query = supabase.table("whatsapp_messages") \
             .select("*") \
             .eq(lead_col, lead_id) \
-            .order("created_at", desc=False) \
-            .execute()
+            .order("created_at", desc=True) \
+            .limit(limit)
+
+        if before:
+            query = query.lt("created_at", before)
+
+        chat_res = query.execute()
+        # Reverse to chronological order for display
+        msgs = list(reversed(chat_res.data or []))
 
         return {
-            "data": chat_res.data,
+            "data": msgs,
+            "has_more": len(msgs) >= limit,
+            "oldest_timestamp": msgs[0]["created_at"] if msgs else None,
             "is_blocked": bool(metadata.get("abuse_blocked")),
             "abuse_strikes": int(metadata.get("abuse_strikes", 0)),
-            # Return chat-specific score so the WhatsApp window shows what the
-            # chatbot scored, independent of any call score.
             "score_label": metadata.get("chat_score_label") or metadata.get("lead_score_label"),
             "score": metadata.get("chat_score") if metadata.get("chat_score") is not None else metadata.get("lead_score"),
         }

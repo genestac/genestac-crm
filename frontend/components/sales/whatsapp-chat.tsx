@@ -1,6 +1,6 @@
 'use client'
-import { useState, useEffect, useRef } from 'react'
-import { Loader2, Send, Bot, User, CheckCheck, Trash2, Pencil, Check, X, Phone, ShieldOff, ShieldAlert, Flame, Thermometer, Snowflake, RefreshCw, ExternalLink } from 'lucide-react'
+import { useState, useEffect, useRef, useCallback } from 'react'
+import { Loader2, Send, Bot, User, CheckCheck, Trash2, Pencil, Check, X, Phone, ShieldOff, ShieldAlert, Flame, Thermometer, Snowflake, RefreshCw, ExternalLink, ChevronsUp } from 'lucide-react'
 import {
   getWhatsappChats,
   sendWhatsappChat,
@@ -16,6 +16,9 @@ import { UserManagementSheet } from '@/components/sales/user-management-sheet'
 export function WhatsappChat({ leadId, leadName: initialLeadName, showManageButton = false }: { leadId: string; leadName?: string; showManageButton?: boolean }) {
   const [messages, setMessages] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadingOlder, setLoadingOlder] = useState(false)
+  const [hasOlderMessages, setHasOlderMessages] = useState(false)
+  const [oldestTs, setOldestTs] = useState<string | null>(null)
   const [inputText, setInputText] = useState('')
   const [sending, setSending] = useState(false)
   const [isBlocked, setIsBlocked] = useState(false)
@@ -34,7 +37,6 @@ export function WhatsappChat({ leadId, leadName: initialLeadName, showManageButt
     setManageLoading(true)
     try {
       const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
-      // Try users table first, then leads
       let res = await fetch(`${BACKEND_URL}/api/sales/leads/${leadId}`, { credentials: 'include' })
       if (!res.ok) res = await fetch(`${BACKEND_URL}/api/admin/leads/${leadId}`, { credentials: 'include' })
       if (res.ok) {
@@ -66,6 +68,8 @@ export function WhatsappChat({ leadId, leadName: initialLeadName, showManageButt
   const [unblockState, setUnblockState] = useState<BtnState>(null)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const messagesTopRef = useRef<HTMLDivElement>(null)  // sentinel for loading older msgs
+  const scrollContainerRef = useRef<HTMLDivElement>(null)
   const prevMessageCountRef = useRef<number>(0)
 
   const autoDismiss = (setter: (v: BtnState) => void) =>
@@ -86,11 +90,14 @@ export function WhatsappChat({ leadId, leadName: initialLeadName, showManageButt
     return msgDate.toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })
   }
 
-  const fetchChats = async () => {
+  // Initial fetch — newest 50 messages
+  const fetchChats = useCallback(async () => {
     try {
       const res = await getWhatsappChats(leadId)
       if (res?.data) {
         setMessages(res.data)
+        setHasOlderMessages(!!res.has_more)
+        setOldestTs(res.oldest_timestamp || null)
         setIsBlocked(!!res.is_blocked)
         setAbuseStrikes(res.abuse_strikes ?? 0)
         setScoreLabel(res.score_label ?? null)
@@ -101,20 +108,82 @@ export function WhatsappChat({ leadId, leadName: initialLeadName, showManageButt
     } finally {
       setLoading(false)
     }
-  }
-
-  useEffect(() => {
-    fetchChats()
-    const interval = setInterval(fetchChats, 5000)
-    return () => clearInterval(interval)
   }, [leadId])
 
+  // Poll for new messages only — merge at bottom, don't reload all history
+  const pollNewMessages = useCallback(async () => {
+    try {
+      const res = await getWhatsappChats(leadId)
+      if (res?.data) {
+        setMessages(prev => {
+          const existingIds = new Set(prev.map((m: any) => m.id))
+          const newMsgs = res.data.filter((m: any) => !existingIds.has(m.id))
+          if (newMsgs.length === 0) return prev
+          return [...prev, ...newMsgs]
+        })
+        setIsBlocked(!!res.is_blocked)
+      }
+    } catch { /* silent */ }
+  }, [leadId])
+
+  useEffect(() => {
+    setMessages([])
+    setHasOlderMessages(false)
+    setOldestTs(null)
+    setLoading(true)
+    fetchChats()
+  }, [leadId])
+
+  useEffect(() => {
+    const interval = setInterval(pollNewMessages, 5000)
+    return () => clearInterval(interval)
+  }, [pollNewMessages])
+
+  // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
     if (messages.length > prevMessageCountRef.current) {
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
     }
     prevMessageCountRef.current = messages.length
   }, [messages])
+
+  // IntersectionObserver on top sentinel — load older messages
+  useEffect(() => {
+    if (!messagesTopRef.current || !hasOlderMessages) return
+    const observer = new IntersectionObserver(
+      async (entries) => {
+        if (entries[0].isIntersecting && hasOlderMessages && !loadingOlder) {
+          setLoadingOlder(true)
+          const container = scrollContainerRef.current
+          const prevScrollHeight = container?.scrollHeight || 0
+          try {
+            const res = await getWhatsappChats(leadId, oldestTs || undefined)
+            if (res?.data && res.data.length > 0) {
+              setMessages(prev => {
+                const existingIds = new Set(prev.map((m: any) => m.id))
+                const olderMsgs = res.data.filter((m: any) => !existingIds.has(m.id))
+                return [...olderMsgs, ...prev]
+              })
+              setHasOlderMessages(!!res.has_more)
+              setOldestTs(res.oldest_timestamp || null)
+              // Restore scroll position so it doesn't jump
+              requestAnimationFrame(() => {
+                if (container) {
+                  container.scrollTop = container.scrollHeight - prevScrollHeight
+                }
+              })
+            } else {
+              setHasOlderMessages(false)
+            }
+          } catch { /* silent */ }
+          finally { setLoadingOlder(false) }
+        }
+      },
+      { threshold: 0.1 }
+    )
+    observer.observe(messagesTopRef.current)
+    return () => observer.disconnect()
+  }, [hasOlderMessages, loadingOlder, leadId, oldestTs])
 
   useEffect(() => {
     setLeadName(initialLeadName || 'Lead')
@@ -471,6 +540,7 @@ export function WhatsappChat({ leadId, leadName: initialLeadName, showManageButt
 
       {/* ── Chat Area ── */}
       <div
+        ref={scrollContainerRef}
         className="flex-1 overflow-y-auto p-4 space-y-4"
         style={{
           backgroundColor: '#efeae2',
@@ -478,6 +548,24 @@ export function WhatsappChat({ leadId, leadName: initialLeadName, showManageButt
           backgroundBlendMode: 'soft-light',
         }}
       >
+        {/* Top sentinel — triggers loading older messages when scrolled to */}
+        <div ref={messagesTopRef} className="h-1" />
+
+        {/* Loading older indicator */}
+        {loadingOlder && (
+          <div className="flex justify-center py-2">
+            <div className="flex items-center gap-2 bg-white/80 px-3 py-1.5 rounded-full text-xs text-gray-500 shadow-sm">
+              <Loader2 className="w-3 h-3 animate-spin" />
+              Loading older messages...
+            </div>
+          </div>
+        )}
+        {!loadingOlder && !hasOlderMessages && messages.length > 0 && (
+          <div className="flex justify-center py-1">
+            <span className="text-[10px] text-gray-400 bg-white/60 px-2 py-1 rounded-full">Beginning of conversation</span>
+          </div>
+        )}
+
         {messages.length === 0 ? (
           <div className="text-center text-sm text-gray-500 mt-10 bg-white/80 w-fit mx-auto px-4 py-2 rounded-lg">
             No messages found. Say hi!
