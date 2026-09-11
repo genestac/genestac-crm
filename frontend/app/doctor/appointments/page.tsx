@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { getDoctorAppointments, updateAppointmentStatus } from '@/app/doctor/actions'
-import { Calendar, CheckCircle, XCircle, Clock, FileText } from 'lucide-react'
+import { Calendar, CheckCircle, XCircle, Clock, FileText, Video, ExternalLink } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 
 export default function DoctorAppointmentsPage() {
@@ -90,6 +90,20 @@ export default function DoctorAppointmentsPage() {
                       <Calendar className="w-4 h-4 text-gray-400" />
                       <span>{new Date(appt.scheduled_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}</span>
                     </div>
+                    {appt.meeting_link && (
+                      <div className="flex items-center gap-2">
+                        <Video className="w-4 h-4 text-teal-500 shrink-0" />
+                        <a
+                          href={appt.meeting_link}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          className="text-xs text-teal-600 hover:text-teal-800 font-medium underline truncate max-w-[200px]"
+                        >
+                          {appt.meeting_link.replace('https://', '')}
+                        </a>
+                      </div>
+                    )}
                     {appt.notes && (
                       <div className="flex items-start gap-2 bg-gray-50 p-2 rounded-lg">
                         <FileText className="w-4 h-4 text-gray-400 shrink-0 mt-0.5" />
@@ -132,9 +146,10 @@ export default function DoctorAppointmentsPage() {
             <table className="w-full text-sm text-left">
               <thead className="bg-gray-50 text-gray-500 uppercase text-xs font-semibold">
                 <tr>
-                  <th className="px-6 py-4">Date & Time</th>
+                  <th className="px-6 py-4">Date &amp; Time</th>
                   <th className="px-6 py-4">Patient</th>
                   <th className="px-6 py-4">Contact</th>
+                  <th className="px-6 py-4">Video Link</th>
                   <th className="px-6 py-4">Status</th>
                   <th className="px-6 py-4 text-right">Actions</th>
                 </tr>
@@ -142,7 +157,7 @@ export default function DoctorAppointmentsPage() {
               <tbody className="divide-y divide-gray-100">
                 {upcomingAppointments.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="px-6 py-8 text-center text-gray-500">
+                    <td colSpan={6} className="px-6 py-8 text-center text-gray-500">
                       No upcoming appointments.
                     </td>
                   </tr>
@@ -161,6 +176,23 @@ export default function DoctorAppointmentsPage() {
                       </td>
                       <td className="px-4 py-3 text-gray-500">
                         {appt.patients?.phone || 'No phone'}
+                      </td>
+                      <td className="px-4 py-3">
+                        {appt.meeting_link ? (
+                          <a
+                            href={appt.meeting_link}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="inline-flex items-center gap-1.5 bg-teal-50 hover:bg-teal-100 text-teal-700 font-semibold text-xs px-3 py-1.5 rounded-lg transition-colors"
+                          >
+                            <Video className="w-3.5 h-3.5" />
+                            Join Meeting
+                            <ExternalLink className="w-3 h-3 opacity-60" />
+                          </a>
+                        ) : (
+                          <span className="text-gray-400 text-xs">—</span>
+                        )}
                       </td>
                       <td className="px-6 py-4">
                         <span className={`px-2 py-1 text-xs font-semibold rounded-full ${appt.status === 'confirmed' ? 'bg-teal-100 text-teal-800' : 'bg-blue-100 text-blue-800'}`}>
@@ -200,9 +232,10 @@ export default function DoctorAppointmentsPage() {
               <table className="w-full text-sm text-left">
                 <thead className="bg-gray-50 text-gray-500 uppercase text-xs font-semibold">
                   <tr>
-                    <th className="px-6 py-4">Date & Time</th>
+                    <th className="px-6 py-4">Date &amp; Time</th>
                     <th className="px-6 py-4">Patient</th>
                     <th className="px-6 py-4">Contact</th>
+                    <th className="px-6 py-4">Video Link</th>
                     <th className="px-6 py-4">Status</th>
                     <th className="px-6 py-4 text-right">Actions</th>
                   </tr>
@@ -222,6 +255,22 @@ export default function DoctorAppointmentsPage() {
                       </td>
                       <td className="px-4 py-3 text-gray-500">
                         {appt.patients?.phone || 'No phone'}
+                      </td>
+                      <td className="px-4 py-3">
+                        {appt.meeting_link ? (
+                          <a
+                            href={appt.meeting_link}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="inline-flex items-center gap-1.5 bg-gray-50 hover:bg-gray-100 text-gray-600 text-xs px-2.5 py-1 rounded-lg transition-colors"
+                          >
+                            <Video className="w-3.5 h-3.5" />
+                            View Link
+                          </a>
+                        ) : (
+                          <span className="text-gray-400 text-xs">—</span>
+                        )}
                       </td>
                       <td className="px-6 py-4">
                         <span className={`px-2 py-1 text-xs font-semibold rounded-full ${appt.status === 'confirmed' ? 'bg-teal-100 text-teal-800' : 'bg-gray-100 text-gray-800'}`}>
