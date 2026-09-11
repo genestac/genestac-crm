@@ -359,7 +359,7 @@ async def update_appointment_status(
         try:
             import asyncio
             import re as _re
-            from services.whatsapp_service import send_appointment_confirmed_to_patient
+            from services.whatsapp_service import send_trigger
 
             appt_res = supabase.table('appointments').select(
                 'id, scheduled_at, meeting_link, notes, patient_id, doctor_id, title'
@@ -410,12 +410,14 @@ async def update_appointment_status(
             meet_link = appt.get('meeting_link', '')
 
             if patient_phone and meet_link:
-                asyncio.create_task(send_appointment_confirmed_to_patient(
-                    patient_phone=patient_phone,
-                    patient_name=patient_name,
-                    doctor_name=doctor_display,
-                    date_time=time_display,
-                    jitsi_link=meet_link,
+                context = {
+                    "patient_name": patient_name,
+                    "doctor_name":  doctor_display,
+                    "scheduled_at": time_display,
+                    "jitsi_link":   meet_link,
+                }
+                asyncio.create_task(send_trigger(
+                    "appointment_confirmed_patient", context, patient_phone
                 ))
         except Exception as _e:
             print(f'[Appointment Confirm] WhatsApp notify error (non-fatal): {_e}')

@@ -5,6 +5,80 @@ WHATSAPP_API_URL = "https://graph.facebook.com/v25.0"
 
 
 # ---------------------------------------------------------------------------
+# Universal trigger-based sender
+# Looks up template + variable_map from DB, auto-fills variables from context.
+# ---------------------------------------------------------------------------
+
+async def send_trigger(trigger_key: str, context: dict, phone: str, supabase=None) -> dict:
+    """
+    Send a WhatsApp message using the template mapped to `trigger_key`.
+
+    Args:
+        trigger_key: e.g. "appointment_new_request"
+        context: dict of data available for this event, e.g. {"doctor_name": "Harsh", ...}
+        phone: recipient phone number
+        supabase: optional Supabase client (imported lazily if not provided)
+
+    The variable_map stored in template_triggers drives which context field
+    fills which {{N}} placeholder. Order is determined by `position`.
+    """
+    try:
+        if supabase is None:
+            from db.supabase import get_supabase_client
+            supabase = get_supabase_client()
+
+        # Fetch trigger + linked template
+        trig_res = supabase.table("template_triggers").select(
+            "trigger_key, template_id, variable_map, is_active, "
+            "whatsapp_templates!template_triggers_template_id_fkey(name, language)"
+        ).eq("trigger_key", trigger_key).single().execute()
+
+        if not trig_res.data:
+            print(f"[send_trigger] No trigger found for key: {trigger_key}")
+            return {"error": "trigger_not_found"}
+
+        trigger = trig_res.data
+        if not trigger.get("is_active"):
+            print(f"[send_trigger] Trigger {trigger_key} is inactive — skipping")
+            return {"skipped": "inactive"}
+
+        template_info = trigger.get("whatsapp_templates") or {}
+        template_name = template_info.get("name")
+        language = template_info.get("language", "en")
+
+        if not template_name:
+            print(f"[send_trigger] Trigger {trigger_key} has no linked template")
+            return {"error": "no_template_linked"}
+
+        # Parse variable_map
+        import json as _json
+        variable_map = trigger.get("variable_map") or []
+        if isinstance(variable_map, str):
+            try:
+                variable_map = _json.loads(variable_map)
+            except Exception:
+                variable_map = []
+
+        # Sort by position, build parameters list
+        variable_map_sorted = sorted(variable_map, key=lambda x: x.get("position", 0))
+        parameters = []
+        for mapping in variable_map_sorted:
+            field = mapping.get("field", "")
+            value = str(context.get(field, ""))
+            parameters.append({"type": "text", "text": value or "—"})
+
+        components = []
+        if parameters:
+            components.append({"type": "body", "parameters": parameters})
+
+        return await send_whatsapp_template(phone, template_name, language, components)
+
+    except Exception as e:
+        print(f"[send_trigger] Error for {trigger_key} → {phone}: {e}")
+        return {"error": str(e)}
+
+
+# ---------------------------------------------------------------------------
 # Named template senders — each maps to a specific Meta-approved template.
 # Using templates lets us send outside the free 24-hour customer-care window.
 # ---------------------------------------------------------------------------

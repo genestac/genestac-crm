@@ -366,10 +366,10 @@ def book_google_meet_appointment(
 
     scheduled_at_display = scheduled_at.strftime("%-d %b %Y at %-I:%M %p IST")
 
-    # ── Notify doctor via WhatsApp template ───────────────────────────────────
+    # ── Notify doctor via WhatsApp trigger ────────────────────────────────────
     try:
         import asyncio
-        from services.whatsapp_service import send_appointment_request_to_doctor
+        from services.whatsapp_service import send_trigger
 
         doc_res = supabase.table("staffs").select("full_name, whatsapp_number").eq(
             "id", doctor["doctor_id"]
@@ -381,34 +381,22 @@ def book_google_meet_appointment(
             raw_name = doc_data.get("full_name", "Doctor")
             doc_display = raw_name.lstrip().removeprefix("Dr.").strip()
 
+            context = {
+                "doctor_name":  doc_display,
+                "patient_name": lead_name,
+                "scheduled_at": scheduled_at_display,
+                "jitsi_link":   meeting_link,
+            }
             try:
                 loop = asyncio.get_event_loop()
                 if loop.is_running():
-                    asyncio.create_task(send_appointment_request_to_doctor(
-                        doctor_phone=doc_wa_number,
-                        doctor_name=doc_display,
-                        patient_name=lead_name,
-                        date_time=scheduled_at_display,
-                        jitsi_link=meeting_link,
-                    ))
+                    asyncio.create_task(send_trigger("appointment_new_request", context, doc_wa_number, supabase))
                 else:
-                    loop.run_until_complete(send_appointment_request_to_doctor(
-                        doctor_phone=doc_wa_number,
-                        doctor_name=doc_display,
-                        patient_name=lead_name,
-                        date_time=scheduled_at_display,
-                        jitsi_link=meeting_link,
-                    ))
+                    loop.run_until_complete(send_trigger("appointment_new_request", context, doc_wa_number, supabase))
             except RuntimeError:
-                asyncio.run(send_appointment_request_to_doctor(
-                    doctor_phone=doc_wa_number,
-                    doctor_name=doc_display,
-                    patient_name=lead_name,
-                    date_time=scheduled_at_display,
-                    jitsi_link=meeting_link,
-                ))
+                asyncio.run(send_trigger("appointment_new_request", context, doc_wa_number, supabase))
         else:
-            print(f"[Meeting] Doctor {doctor['doctor_id']} has no whatsapp_number set — skipping notification")
+            print(f"[Meeting] Doctor {doctor['doctor_id']} has no whatsapp_number — skipping notification")
     except Exception as _we:
         print(f"[Meeting] Doctor WhatsApp notify error (non-fatal): {_we}")
 

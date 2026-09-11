@@ -29,7 +29,8 @@ import {
   Star,
   Megaphone,
   Bell,
-  Dumbbell
+  Dumbbell,
+  Webhook
 } from 'lucide-react'
 import { logout } from '@/app/auth/actions'
 
@@ -62,6 +63,7 @@ const modules: { title: string; routes: RouteItem[] }[] = [
     routes: [
       { name: 'WhatsApp Campaigns', path: '/admin/whatsapp', icon: MessageCircle },
       { name: 'WhatsApp Inbox', path: '/admin/whatsapp-inbox', icon: MessageCircle },
+      { name: 'Template Manager', path: '/admin/template-manager', icon: Webhook },
       { name: 'Push Notifications', path: '/admin/push-notifications', icon: Megaphone },
     ]
   },

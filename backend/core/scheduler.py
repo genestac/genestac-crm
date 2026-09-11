@@ -643,24 +643,24 @@ async def _send_daily_whatsapp_report_logic():
     date_str = today_date.strftime("%d %b %Y")
     revenue_str = f"{revenue:,.0f}"
 
-    from services.whatsapp_service import send_daily_crm_report_template
+    from services.whatsapp_service import send_trigger
     import asyncio
 
     tasks = []
     for num in numbers:
-        tasks.append(send_daily_crm_report_template(
-            phone=num,
-            date=date_str,
-            new_leads=new_leads,
-            consultations_booked=consults_today,
-            consultations_done=completed_appts,
-            orders=orders_count,
-            revenue=revenue_str,
-            pending_actions=pending_actions,
-        ))
+        context = {
+            "date":                 date_str,
+            "new_leads":            str(new_leads),
+            "consultations_booked": str(consults_today),
+            "consultations_done":   str(completed_appts),
+            "orders":               str(orders_count),
+            "revenue":              revenue_str,
+            "pending_actions":      pending_actions,
+        }
+        tasks.append(send_trigger("crm_daily_status_update", context, num))
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
-    print(f"[WhatsApp Report] Template sent to {len(numbers)} numbers. Results: {results}")
+    print(f"[WhatsApp Report] Trigger sent to {len(numbers)} numbers. Results: {results}")
 
 
 def check_and_send_whatsapp_report():
@@ -1337,7 +1337,7 @@ def sweep_meet_reminders():
 
         async def _remind(appt):
             try:
-                from services.whatsapp_service import send_appointment_reminder
+                from services.whatsapp_service import send_trigger
                 import re
 
                 meet_link = appt.get("meeting_link")
@@ -1387,27 +1387,25 @@ def sweep_meet_reminders():
 
                 tasks = []
 
+                patient_context = {
+                    "recipient_name":    patient_name,
+                    "doctor_name":       doctor_display,
+                    "scheduled_at_time": time_display,
+                    "jitsi_link":        meet_link,
+                }
                 # ── Send to patient ──────────────────────────────────────────
                 if patient_phone:
-                    tasks.append(send_appointment_reminder(
-                        phone=patient_phone,
-                        recipient_name=patient_name,
-                        doctor_name=doctor_display,
-                        time_str=time_display,
-                        jitsi_link=meet_link,
-                    ))
+                    tasks.append(send_trigger("appointment_reminder_10min", patient_context, patient_phone))
                 else:
                     print(f"[Meet Reminder] ⚠️ No patient phone for appt {appt['id']}")
 
+                doctor_context = {
+                    **patient_context,
+                    "recipient_name": f"Dr. {doctor_display}",
+                }
                 # ── Send to doctor ───────────────────────────────────────────
                 if doctor_wa:
-                    tasks.append(send_appointment_reminder(
-                        phone=doctor_wa,
-                        recipient_name=f"Dr. {doctor_display}",
-                        doctor_name=doctor_display,
-                        time_str=time_display,
-                        jitsi_link=meet_link,
-                    ))
+                    tasks.append(send_trigger("appointment_reminder_10min", doctor_context, doctor_wa))
                 else:
                     print(f"[Meet Reminder] ⚠️ Doctor has no whatsapp_number — skipping doctor reminder")
 

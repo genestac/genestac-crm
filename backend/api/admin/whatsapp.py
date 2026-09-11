@@ -741,3 +741,154 @@ async def webhook_handler(payload: dict, background_tasks: BackgroundTasks, supa
         traceback.print_exc()
         
     return {"status": "success"}
+
+
+# ---------------------------------------------------------------------------
+# Template Trigger Management
+# ---------------------------------------------------------------------------
+
+# Available fields each trigger context exposes for variable mapping
+TRIGGER_AVAILABLE_FIELDS = {
+    "appointment_new_request": [
+        {"field": "doctor_name",    "label": "Doctor Name",      "example": "Harsh"},
+        {"field": "patient_name",   "label": "Patient Name",     "example": "Neelesh"},
+        {"field": "scheduled_at",   "label": "Date & Time",      "example": "11 Sep 2026 at 1:30 PM IST"},
+        {"field": "jitsi_link",     "label": "Video Link",       "example": "https://meet.jit.si/genestac-abc123"},
+    ],
+    "appointment_confirmed_patient": [
+        {"field": "patient_name",   "label": "Patient Name",     "example": "Neelesh"},
+        {"field": "doctor_name",    "label": "Doctor Name",      "example": "Harsh"},
+        {"field": "scheduled_at",   "label": "Date & Time",      "example": "11 Sep 2026 at 1:30 PM IST"},
+        {"field": "jitsi_link",     "label": "Video Link",       "example": "https://meet.jit.si/genestac-abc123"},
+    ],
+    "appointment_reminder_10min": [
+        {"field": "recipient_name",    "label": "Recipient Name",   "example": "Neelesh"},
+        {"field": "doctor_name",       "label": "Doctor Name",      "example": "Harsh"},
+        {"field": "scheduled_at_time", "label": "Time (short)",     "example": "1:30 PM IST"},
+        {"field": "jitsi_link",        "label": "Video Link",       "example": "https://meet.jit.si/genestac-abc123"},
+    ],
+    "crm_daily_status_update": [
+        {"field": "date",                  "label": "Date",                   "example": "11 Sep 2026"},
+        {"field": "new_leads",             "label": "New Leads",              "example": "12"},
+        {"field": "consultations_booked",  "label": "Consultations Booked",   "example": "4"},
+        {"field": "consultations_done",    "label": "Consultations Done",     "example": "2"},
+        {"field": "orders",                "label": "Orders",                 "example": "3"},
+        {"field": "revenue",               "label": "Revenue (₹)",            "example": "45,000"},
+        {"field": "pending_actions",       "label": "Action Required",        "example": "2 appointments awaiting approval"},
+    ],
+}
+
+
+@router.get("/template-triggers")
+async def list_template_triggers(
+    current_user: dict = Depends(get_current_user),
+    supabase: Client = Depends(get_supabase_client),
+):
+    """Return all trigger→template links with the full template data."""
+    if not is_admin(current_user, supabase):
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    triggers_res = supabase.table("template_triggers").select("*").order("created_at").execute()
+    triggers = triggers_res.data or []
+
+    # Attach full template info and available fields
+    tpl_ids = [t["template_id"] for t in triggers if t.get("template_id")]
+    tpl_map = {}
+    if tpl_ids:
+        tpl_res = supabase.table("whatsapp_templates").select(
+            "id, name, content, status, language, default_components"
+        ).in_("id", tpl_ids).execute()
+        tpl_map = {t["id"]: t for t in (tpl_res.data or [])}
+
+    # Also return all approved templates for the dropdown
+    all_tpls_res = supabase.table("whatsapp_templates").select(
+        "id, name, content, status, language, default_components"
+    ).order("name").execute()
+
+    for trigger in triggers:
+        trigger["template"] = tpl_map.get(trigger.get("template_id"))
+        trigger["available_fields"] = TRIGGER_AVAILABLE_FIELDS.get(trigger["trigger_key"], [])
+        # Parse variable_map from JSON string if needed
+        if isinstance(trigger.get("variable_map"), str):
+            import json
+            try:
+                trigger["variable_map"] = json.loads(trigger["variable_map"])
+            except Exception:
+                trigger["variable_map"] = []
+
+    return {
+        "triggers": triggers,
+        "all_templates": all_tpls_res.data or [],
+    }
+
+
+class TriggerUpdate(BaseModel):
+    template_id: Optional[str] = None
+    variable_map: Optional[list] = None
+    is_active: Optional[bool] = None
+
+
+@router.put("/template-triggers/{trigger_key}")
+async def update_template_trigger(
+    trigger_key: str,
+    data: TriggerUpdate,
+    current_user: dict = Depends(get_current_user),
+    supabase: Client = Depends(get_supabase_client),
+):
+    """Update a trigger's linked template and variable mappings."""
+    if not is_admin(current_user, supabase):
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    import json
+    update_payload: dict = {"updated_at": "now()"}
+    if data.template_id is not None:
+        update_payload["template_id"] = data.template_id
+    if data.variable_map is not None:
+        update_payload["variable_map"] = json.dumps(data.variable_map)
+    if data.is_active is not None:
+        update_payload["is_active"] = data.is_active
+
+    res = supabase.table("template_triggers").update(update_payload).eq(
+        "trigger_key", trigger_key
+    ).execute()
+
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Trigger not found")
+
+    return {"success": True, "trigger": res.data[0]}
+
+
+@router.post("/template-triggers/sync-meta")
+async def sync_meta_templates(
+    current_user: dict = Depends(get_current_user),
+    supabase: Client = Depends(get_supabase_client),
+):
+    """Pull latest approved templates from Meta and upsert into whatsapp_templates."""
+    if not is_admin(current_user, supabase):
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    from services.whatsapp_service import sync_templates_from_meta
+    result = await sync_templates_from_meta()
+
+    if "error" in result:
+        raise HTTPException(status_code=502, detail=result["error"])
+
+    templates = result.get("data", [])
+    upserted = 0
+    for tpl in templates:
+        if tpl.get("status") != "APPROVED":
+            continue
+        supabase.table("whatsapp_templates").upsert({
+            "name": tpl["name"],
+            "status": tpl["status"],
+            "language": tpl.get("language", "en"),
+            "content": "\n".join(
+                c.get("text", "") for comp in tpl.get("components", [])
+                if comp.get("type") == "BODY"
+                for c in [comp]
+            ),
+            "default_components": tpl.get("components", []),
+        }, on_conflict="name").execute()
+        upserted += 1
+
+    return {"success": True, "synced": upserted, "total": len(templates)}
