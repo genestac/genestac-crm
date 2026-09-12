@@ -776,6 +776,12 @@ TRIGGER_AVAILABLE_FIELDS = {
         {"field": "revenue",               "label": "Revenue (₹)",            "example": "45,000"},
         {"field": "pending_actions",       "label": "Action Required",        "example": "2 appointments awaiting approval"},
     ],
+    "pi_created": [
+        {"field": "customer_name",  "label": "Customer Name",     "example": "Neelesh"},
+        {"field": "invoice_number", "label": "Invoice Number",    "example": "GEN/26-27/001"},
+        {"field": "total_amount",   "label": "Total Amount",      "example": "₹5,100.00"},
+        {"field": "payment_link",   "label": "Razorpay Payment Link", "example": "https://rzp.io/l/abc123"},
+    ],
 }
 
 
