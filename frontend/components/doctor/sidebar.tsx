@@ -13,6 +13,7 @@ import {
   UserCheck,
   Pin,
   FileText,
+  FlaskConical,
 } from 'lucide-react'
 import { logout } from '@/app/auth/actions'
 
@@ -22,6 +23,7 @@ const routes = [
   { name: 'Availability', path: '/doctor/availability', icon: Activity },
   { name: 'Patients', path: '/doctor/patients', icon: Users },
   { name: 'Onboarded', path: '/doctor/onboarded', icon: UserCheck },
+  { name: 'Test Requests', path: '/doctor/test-requests', icon: FlaskConical },
   { name: 'Consultations', path: '/doctor/consultations', icon: Stethoscope },
   { name: 'Prescription Settings', path: '/doctor/prescription-settings', icon: FileText },
 ]

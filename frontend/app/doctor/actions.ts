@@ -235,3 +235,35 @@ export async function retranscribeCall(appointmentId: string, recordingUrl: stri
   })
   return response
 }
+
+export async function getTestRequests(status?: string) {
+  const url = status ? `/api/doctor/test-requests?status=${status}` : '/api/doctor/test-requests'
+  const response = await fetchAPI(url)
+  return response || []
+}
+
+export async function updateTestRequest(id: string, data: { status?: string; doctor_notes?: string; suggested_tests?: any[] }) {
+  const response = await fetchAPI(`/api/doctor/test-requests/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  })
+  revalidatePath('/doctor/test-requests')
+  revalidatePath('/doctor', 'layout')
+  return response
+}
+
+export async function getTestTypes() {
+  const response = await fetchAPI('/api/doctor/test-types')
+  return response || []
+}
+
+export async function createTestType(data: { name: string; category?: string; description?: string }) {
+  const response = await fetchAPI('/api/doctor/test-types', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  })
+  return response
+}
+
