@@ -1359,13 +1359,16 @@ def sweep_meet_reminders():
                 patient_id = appt.get("patient_id")
 
                 # Resolve scheduled_at as IST time string
+                # Always convert to IST — Supabase returns UTC (with +00:00)
                 sched_raw = appt.get("scheduled_at", "")
                 try:
                     from zoneinfo import ZoneInfo
                     IST = ZoneInfo("Asia/Kolkata")
                     sched_dt = datetime.datetime.fromisoformat(sched_raw)
                     if sched_dt.tzinfo is None:
+                        # Naive datetime — assume it was stored as UTC
                         sched_dt = sched_dt.replace(tzinfo=datetime.timezone.utc)
+                    # Always convert to IST before formatting
                     sched_dt_ist = sched_dt.astimezone(IST)
                     time_display = sched_dt_ist.strftime("%-I:%M %p IST")
                 except Exception:

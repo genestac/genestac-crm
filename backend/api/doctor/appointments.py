@@ -366,7 +366,9 @@ async def update_appointment_status(
             ).eq('id', id).single().execute()
             appt = appt_res.data or {}
 
-            # Resolve scheduled_at display
+            # Resolve scheduled_at display — always convert to IST first
+            # (Supabase returns UTC timestamps with +00:00, so we must
+            # convert instead of just re-labelling the UTC time as IST)
             sched_raw = appt.get('scheduled_at', '')
             try:
                 import datetime as _dt
@@ -374,7 +376,10 @@ async def update_appointment_status(
                 IST = ZoneInfo('Asia/Kolkata')
                 sched_dt = _dt.datetime.fromisoformat(sched_raw)
                 if sched_dt.tzinfo is None:
-                    sched_dt = sched_dt.replace(tzinfo=IST)
+                    # Naive datetime — assume it was stored as UTC
+                    sched_dt = sched_dt.replace(tzinfo=_dt.timezone.utc)
+                # Always convert to IST before formatting
+                sched_dt = sched_dt.astimezone(IST)
                 time_display = sched_dt.strftime('%-d %b %Y at %-I:%M %p IST')
             except Exception:
                 time_display = sched_raw

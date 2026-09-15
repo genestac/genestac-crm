@@ -115,94 +115,133 @@ def _build_user_context(user_id: str) -> dict:
 def _build_system_prompt(ctx: dict) -> str:
     """Build a rich, context-aware system prompt from the fetched user data."""
 
+    user = ctx.get("user", {})
+    ha   = ctx.get("health_assessment", {})
+    logs = ctx.get("recent_logs", [])
+    plan = ctx.get("current_plan", {})
+
+    first_name = (user.get("name") or "").split()[0] if user.get("name") else ""
+
+    # Compact recent log summary for context injection
+    recent_summary_lines = []
+    for log in logs[:3]:
+        parts = [log.get("date", "")]
+        if log.get("weight"):
+            parts.append(f"weight {log['weight']}kg")
+        if log.get("mood"):
+            parts.append(f"mood: {log['mood']}")
+        if log.get("notes"):
+            parts.append(f"note: {log['notes'][:120]}")
+        if log.get("coach_feedback"):
+            parts.append(f"feedback: {log['coach_feedback'][:80]}")
+        recent_summary_lines.append(" | ".join(parts))
+    recent_summary = "\n".join(f"  - {l}" for l in recent_summary_lines) if recent_summary_lines else "  (none yet)"
+
     lines = [
-        "You are the Genestac AI Health Coach — a warm, professional, and empathetic AI health advisor.",
-        "You are chatting with this specific user through the Genestac mobile app.",
+        "You are the Genestac AI Health Coach — a warm, witty, and deeply empathetic health advisor.",
+        "You are having a one-on-one conversation with a real person through the Genestac mobile app.",
         "",
-        "YOUR ROLE:",
-        "1. On first interaction: Greet warmly, then ask ONE question at a time to understand their health profile.",
-        "   Collect: name, age, gender, primary health goal, weight/height (if comfortable), medical conditions, lifestyle basics.",
-        "   Skip fields you already know from the profile below. Never overwhelm with multiple questions at once.",
-        "2. After collecting basics: Provide personalised health guidance, answer health questions, check in on progress.",
-        "3. Always respond in the same language the user uses (English/Hindi/Hinglish all supported).",
-        "4. Be concise — 2-4 sentences max per turn unless a detailed explanation is truly needed.",
-        "5. Never diagnose. For serious symptoms, always recommend consulting a real doctor.",
-        "6. Tone: warm, encouraging — like a knowledgeable friend, not clinical or robotic.",
+        "======================================================",
+        "PERSONALITY & TONE RULES — follow these strictly",
+        "======================================================",
+        "",
+        "1. NAME USAGE — CRITICAL:",
+        f"   The user's first name is '{first_name}'. Use it AT MOST ONCE across the entire conversation —",
+        "   only in the very first greeting message if you have not said hello yet.",
+        "   After that: NEVER use their name again. It feels robotic and irritating when an AI",
+        "   keeps repeating someone's name every message. Talk like a real friend would.",
+        "",
+        "2. NO HOLLOW OPENERS — these phrases are BANNED:",
+        "   Never start a response with any of these:",
+        "     'Great choice!', 'Absolutely!', 'Of course!', 'That's great!', 'Sure thing!',",
+        "     'Great question!', 'Definitely!', 'Wonderful!', 'Fantastic!', 'You got it!',",
+        "     'Great job!', 'Perfect!', 'Excellent!'",
+        "   These feel fake and hollow. Just answer directly and naturally.",
+        "",
+        "3. CONVERSATION MEMORY — USE THE FULL CHAT HISTORY:",
+        "   Before replying, read the full conversation history carefully.",
+        "   - If the user mentioned a problem in an earlier message (bad sleep, stress, cravings,",
+        "     pain, low energy, skipped workout, bloating, emotional eating), proactively follow",
+        "     up on it a few turns later — e.g. 'How's the sleep been — any better?'",
+        "   - If the user committed to something (e.g. 'I'll try walking tomorrow'), check in on it.",
+        "   - Never make the user feel like they're starting from scratch each time.",
+        "   - Reference specific things they said earlier, not generic health advice.",
+        "",
+        "4. NATURAL, CONCISE RESPONSES:",
+        "   - Keep replies to 2-4 sentences max unless they explicitly asked for detail.",
+        "   - Ask only ONE follow-up question per reply — never fire multiple questions at once.",
+        "   - Match the user's energy and language style.",
+        "   - If they write in Hinglish or Hindi, respond in kind.",
+        "",
+        "5. MOTIVATION — genuine, specific, not performative:",
+        "   - When someone logs progress (weight down, workout done, good meal choice), acknowledge",
+        "     the specific achievement briefly, then keep moving. Don't over-celebrate.",
+        "   - When recent logs show a dip (bad mood, weight up, missed days), address it with",
+        "     empathy + one small, concrete suggestion. Don't ignore it or over-coddle either.",
+        "   - Draw on their recent log data to make encouragement feel real and relevant.",
+        "",
+        "6. HEALTH LIMITS:",
+        "   Never diagnose. For serious or persistent symptoms, always recommend a real doctor.",
+        "",
+        "=======================================================",
+        "USER DATA — reference naturally, never dump it back at them",
+        "=======================================================",
         "",
     ]
 
-    user = ctx.get("user", {})
     if user:
-        lines.append("USER PROFILE:")
-        if user.get("name"):
-            lines.append(f"  Name: {user['name']}")
+        lines.append("PROFILE:")
+        if first_name:
+            lines.append(f"  Name: {first_name}")
         if user.get("age"):
             lines.append(f"  Age: {user['age']}")
         if user.get("gender"):
             lines.append(f"  Gender: {user['gender']}")
-        if user.get("status"):
-            lines.append(f"  CRM Status: {user['status']}")
         wlj = user.get("weight_loss_journey")
         if wlj and isinstance(wlj, dict):
-            lines.append(f"  Weight loss journey data: {wlj}")
+            history = wlj.get("history", [])
+            meals   = wlj.get("meals", [])
+            if history:
+                lines.append(f"  Weight history (last 3): {history[-3:]}")
+            if meals:
+                lines.append(f"  Recent meals logged (last 3): {meals[-3:]}")
         lines.append("")
 
-    ha = ctx.get("health_assessment", {})
     if ha:
         lines.append("HEALTH ASSESSMENT:")
-        if ha.get("age"):
-            lines.append(f"  Age: {ha['age']}")
-        if ha.get("gender"):
-            lines.append(f"  Gender: {ha['gender']}")
         if ha.get("height_cm"):
             lines.append(f"  Height: {ha['height_cm']} cm")
         if ha.get("weight_kg"):
-            lines.append(f"  Weight: {ha['weight_kg']} kg")
+            lines.append(f"  Current weight: {ha['weight_kg']} kg")
         if ha.get("health_goals"):
-            lines.append(f"  Health goals: {ha['health_goals']}")
+            lines.append(f"  Goals: {ha['health_goals']}")
         conditions = []
-        if ha.get("diabetes"):
-            conditions.append("Diabetes")
-        if ha.get("high_blood_pressure"):
-            conditions.append("High blood pressure")
-        if ha.get("thyroid_disorder"):
-            conditions.append("Thyroid disorder")
+        if ha.get("diabetes"):            conditions.append("Diabetes")
+        if ha.get("high_blood_pressure"): conditions.append("High BP")
+        if ha.get("thyroid_disorder"):    conditions.append("Thyroid disorder")
         if conditions:
-            lines.append(f"  Known conditions: {', '.join(conditions)}")
+            lines.append(f"  Conditions: {', '.join(conditions)}")
         if ha.get("lifestyle_data"):
-            lines.append(f"  Lifestyle data: {ha['lifestyle_data']}")
+            lines.append(f"  Lifestyle: {ha['lifestyle_data']}")
         if ha.get("medical_data"):
-            lines.append(f"  Medical history: {ha['medical_data']}")
+            lines.append(f"  Medical Hx: {ha['medical_data']}")
         lines.append("")
 
-    logs = ctx.get("recent_logs", [])
-    if logs:
-        lines.append("RECENT DAILY LOGS (last 5 days):")
-        for log in logs:
-            parts = [f"  {log.get('date', 'Unknown date')}"]
-            if log.get("weight"):
-                parts.append(f"weight={log['weight']}kg")
-            if log.get("mood"):
-                parts.append(f"mood={log['mood']}")
-            if log.get("notes"):
-                parts.append(f"notes={log['notes'][:100]}")
-            lines.append(" | ".join(parts))
-        lines.append("")
+    lines.append("RECENT DAILY LOGS (last 3 days — use to personalise follow-ups and motivation):")
+    lines.append(recent_summary)
+    lines.append("")
 
-    plan = ctx.get("current_plan", {})
     if plan:
-        lines.append("CURRENT PLAN:")
+        lines.append("CURRENT PLAN (refer to when giving diet/exercise advice):")
         if plan.get("diet_plan"):
-            dp = plan["diet_plan"]
-            lines.append(f"  Diet plan: {str(dp)[:400]}")
+            lines.append(f"  Diet: {str(plan['diet_plan'])[:350]}")
         if plan.get("exercise_plan"):
-            ep = plan["exercise_plan"]
-            lines.append(f"  Exercise plan: {str(ep)[:400]}")
+            lines.append(f"  Exercise: {str(plan['exercise_plan'])[:350]}")
         lines.append("")
 
     lines.append(
-        "Use this context to give personalised, specific advice. "
-        "Reference the user's data naturally when relevant — don't just list it back at them."
+        "REMEMBER: Be a real person, not a chatbot. No name-dropping every message, no hollow affirmations. "
+        "Reference their actual data and past conversation naturally. Keep it human."
     )
 
     return "\n".join(lines)
