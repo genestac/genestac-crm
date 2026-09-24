@@ -509,9 +509,30 @@ async def health_chat(body: HealthChatRequest, request: Request):
     # 4. Build messages array for OpenAI (keep last 20 turns to control token usage)
     recent_messages = body.messages[-20:]
     messages: list[dict] = [{"role": "system", "content": system_prompt}]
-    for m in recent_messages:
+
+    # Separate history from the last user message
+    history = recent_messages[:-1] if len(recent_messages) > 1 else []
+    last_user_msg = recent_messages[-1] if recent_messages else None
+
+    for m in history:
         if m.role in ("user", "assistant"):
             messages.append({"role": m.role, "content": m.content})
+
+    # ── Format-enforcement reminder ──────────────────────────────────────────
+    # Injected as a system message right before every user turn.
+    # GPT learns from conversation history and reverts to numbered lists after
+    # 2-3 turns. This re-asserts the EXERCISE tag requirement every single turn.
+    exercise_reminder = (
+        "CRITICAL FORMAT REMINDER (applies to this reply, overrides prior patterns):\n"
+        "When suggesting exercises, you MUST emit [EXERCISE name=\"...\" desc=\"...\" "
+        "duration=\"...\" thumb=\"URL\" videoUrl=\"URL\"] tags — one per exercise.\n"
+        "Do NOT use numbered lists, bullet points, or plain text for exercises.\n"
+        "Use ONLY exercises from the EXERCISE LIBRARY. Always include a valid thumb URL."
+    )
+    messages.append({"role": "system", "content": exercise_reminder})
+
+    if last_user_msg and last_user_msg.role == "user":
+        messages.append({"role": "user", "content": last_user_msg.content})
 
     if not body.messages or body.messages[-1].role != "user":
         raise HTTPException(status_code=400, detail="Last message must be from the user")
