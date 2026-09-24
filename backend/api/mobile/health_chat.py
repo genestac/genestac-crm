@@ -93,6 +93,58 @@ def _fmt_habits(habits):
         parts.append(f"missed: {', '.join(missed)}")
     return " | ".join(parts) if parts else "none"
 
+
+
+# ── Rich UI system prompt block ───────────────────────────────────────────────
+
+RICH_UI_FOOD_REMINDER_INSTRUCTIONS = """
+=======================================================
+RICH UI — FOOD & REMINDER CARDS
+=======================================================
+
+FOOD CARD — emit one per food item suggested:
+[FOOD name="Name" desc="One line benefit." cals="CALORIES" thumb="UNSPLASH_URL"]
+
+Use these Unsplash thumbnails:
+- Oatmeal:   https://images.unsplash.com/photo-1517673132405-a56a62b18caf?w=400&q=80
+- Salad:     https://images.unsplash.com/photo-1512621776951-a57141f2eefd?w=400&q=80
+- Eggs:      https://images.unsplash.com/photo-1482049016688-2d3e1b311543?w=400&q=80
+- Dal:       https://images.unsplash.com/photo-1546833999-b9f581a1996d?w=400&q=80
+- Chicken:   https://images.unsplash.com/photo-1598103442097-8b74394b95c3?w=400&q=80
+- Fruits:    https://images.unsplash.com/photo-1519996529931-28324d5a630e?w=400&q=80
+- Smoothie:  https://images.unsplash.com/photo-1502741126161-b048400d085d?w=400&q=80
+
+REMINDER CARD — emit at end of reply when scheduling a reminder:
+[REMINDER type="TYPE" time="HH:MM" label="Label Text"]
+Types: workout | water | sleep | meal | medication | meditation | walk | fasting
+
+GLOBAL RULES FOR ALL CARDS:
+1. NEVER wrap tags in code blocks, backticks, or quotes.
+2. Each tag must be on its own line.
+3. Brief intro text goes BEFORE the tags.
+4. NEVER use plain numbered lists for exercises or food — always use card tags.
+"""
+
+
+# ── Exercise library fetcher ───────────────────────────────────────────────────
+
+def _fetch_exercises(sb, limit: int = 40) -> list:
+    """
+    Fetch active exercises from DB so the AI uses real thumbnails and video URLs.
+    Returns list of dicts: id, title, description, category, type,
+    difficulty, duration_minutes, thumbnail_url, video_url, benefits, tags.
+    """
+    try:
+        res = sb.table("exercises").select(
+            "id, title, description, category, type, difficulty, "
+            "duration_minutes, thumbnail_url, video_url, benefits, tags"
+        ).eq("is_active", True).limit(limit).execute()
+        return res.data or []
+    except Exception as e:
+        logger.warning(f"[HealthChat] _fetch_exercises error: {e}")
+        return []
+
+
 # ── Context builder ───────────────────────────────────────────────────────────
 
 def _build_user_context(user_id: str) -> dict:
@@ -145,18 +197,88 @@ def _build_user_context(user_id: str) -> dict:
         if plan.data:
             ctx["current_plan"] = plan.data[0]
 
+        # Exercise library — gives AI real thumbnails + video URLs
+        ctx["exercises"] = _fetch_exercises(sb, limit=40)
+
     except Exception as e:
         logger.warning(f"[HealthChat] Context fetch error: {e}")
 
     return ctx
 
 
-def _build_system_prompt(ctx: dict, mobile_daily_context: Optional[str] = None) -> str:
+
+def _build_exercise_rich_ui(exercises: list) -> str:
+    """
+    Build the RICH UI instructions block for GPT.
+    When exercises are available from DB, include them as a numbered catalogue
+    so the AI picks real titles, real thumbs, and real video URLs.
+    Falls back to a generic message if library is empty.
+    """
+    lines = [
+        "=======================================================",
+        "RICH UI — EXERCISE CARDS (MANDATORY)",
+        "=======================================================",
+        "",
+        "The mobile app renders beautiful cards. For exercises you MUST emit:",
+        '[EXERCISE name="..." desc="..." duration="..." thumb="THUMBNAIL_URL" videoUrl="VIDEO_URL"]',
+        "",
+        "RULES:",
+        "1. ONLY suggest exercises from the EXERCISE LIBRARY below.",
+        "2. Use EXACTLY the title, thumbnail_url, and video_url from the library.",
+        "3. Emit one [EXERCISE ...] tag per suggested exercise.",
+        "4. Do NOT invent exercises not in the list.",
+        "5. Choose exercises that match the user's goals, difficulty, and category.",
+        "6. NEVER use Unsplash links — use the thumbnail_url from the library.",
+        "7. Do NOT use numbered lists — use card tags only.",
+        "",
+    ]
+
+    if not exercises:
+        lines.append("(Exercise library is currently empty — skip exercise card tags.)")
+        return "\n".join(lines)
+
+    lines.append("EXERCISE LIBRARY (choose from these only):")
+    lines.append("")
+
+    # Group by category for readability
+    by_cat: dict = {}
+    for ex in exercises:
+        cat = ex.get("category") or "general"
+        by_cat.setdefault(cat, []).append(ex)
+
+    for cat, exs in sorted(by_cat.items()):
+        lines.append(f"  [{cat.upper()}]")
+        for ex in exs:
+            thumb = ex.get("thumbnail_url") or ""
+            video = ex.get("video_url") or ""
+            duration = f"{ex.get('duration_minutes')} mins" if ex.get("duration_minutes") else "—"
+            diff = ex.get("difficulty") or "beginner"
+            desc = (ex.get("description") or "").replace('"', "'")[:100]
+            title = (ex.get("title") or "").replace('"', "'")
+            lines.append(
+                f'    - name="{title}" | difficulty={diff} | duration={duration} '
+                f'| thumb="{thumb}" | videoUrl="{video}" | desc="{desc}"'
+            )
+        lines.append("")
+
+    lines += [
+        "EXAMPLE TAG FORMAT:",
+        '[EXERCISE name="Sun Salutation A" desc="Full body warm-up flow." duration="10 mins" '
+        'thumb="https://your-cdn.com/sun-sal.jpg" videoUrl="https://cloudinary.com/video.mp4"]',
+        "",
+        "When no exercise fits, you may skip the card and suggest a general tip instead.",
+    ]
+
+    return "\n".join(lines)
+
+
+def _build_system_prompt(ctx: dict, mobile_daily_context: Optional[str] = None, extra_instructions: Optional[str] = None) -> str:
     user = ctx.get("user", {})
     ha   = ctx.get("health_assessment", {})
     logs = ctx.get("recent_logs", [])
     today = ctx.get("today_log", {})
     plan = ctx.get("current_plan", {})
+    exercises: list = ctx.get("exercises", [])
 
     first_name = (user.get("name") or "").split()[0] if user.get("name") else ""
 
@@ -239,6 +361,8 @@ def _build_system_prompt(ctx: dict, mobile_daily_context: Optional[str] = None) 
         "",
         "6. HEALTH LIMITS:",
         "   Never diagnose. For serious symptoms, always recommend a real doctor.",
+        "",
+        _build_exercise_rich_ui(exercises),
         "",
         "=======================================================",
         "REMINDER CAPABILITY — Follow exactly",
@@ -324,8 +448,16 @@ def _build_system_prompt(ctx: dict, mobile_daily_context: Optional[str] = None) 
         lines.append("")
 
     lines.append(
-        "REMEMBER: Be a real person, not a chatbot. Reference their actual data naturally. Keep it human."
+        "REMEMBER: Be human, not a chatbot. Reference real data naturally.\n"
+        "When suggesting exercises or food, ALWAYS use RICH UI CARD TAGS — never plain numbered lists."
     )
+
+    if extra_instructions and extra_instructions.strip():
+        lines.append("")
+        lines.append("=======================================================")
+        lines.append("ADDITIONAL CLIENT INSTRUCTIONS:")
+        lines.append("=======================================================")
+        lines.append(extra_instructions.strip())
 
     return "\n".join(lines)
 
@@ -353,11 +485,16 @@ async def health_chat(body: HealthChatRequest, request: Request):
     ctx = _build_user_context(user_id)
 
     # 3. Build system prompt
-    system_prompt = _build_system_prompt(ctx, mobile_daily_context=body.daily_context)
+    system_prompt = _build_system_prompt(
+        ctx,
+        mobile_daily_context=body.daily_context,
+        extra_instructions=body.extra_instructions,
+    )
 
-    # 4. Build messages array for OpenAI
+    # 4. Build messages array for OpenAI (keep last 20 turns to control token usage)
+    recent_messages = body.messages[-20:]
     messages: list[dict] = [{"role": "system", "content": system_prompt}]
-    for m in body.messages:
+    for m in recent_messages:
         if m.role in ("user", "assistant"):
             messages.append({"role": m.role, "content": m.content})
 
@@ -370,7 +507,7 @@ async def health_chat(body: HealthChatRequest, request: Request):
         resp = await client.chat.completions.create(
             model="gpt-4o",
             messages=messages,
-            max_tokens=500,
+            max_tokens=1200,   # increased: rich card tags need more tokens
             temperature=0.7,
         )
         reply = resp.choices[0].message.content.strip()
@@ -378,5 +515,8 @@ async def health_chat(body: HealthChatRequest, request: Request):
         logger.error(f"[HealthChat] OpenAI error: {e}")
         raise HTTPException(status_code=502, detail="AI service temporarily unavailable")
 
-    logger.info(f"[HealthChat] user_id={user_id} | reply_len={len(reply)}")
+    logger.info(
+        f"[HealthChat] user_id={user_id} | input_msgs={len(body.messages)} | reply_len={len(reply)} | "
+        f"has_exercise={'[EXERCISE' in reply} | has_food={'[FOOD' in reply} | has_reminder={'[REMINDER' in reply}"
+    )
     return HealthChatResponse(reply=reply)
