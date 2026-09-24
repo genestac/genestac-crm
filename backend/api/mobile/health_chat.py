@@ -5,20 +5,23 @@ Mobile-app AI Health Coach chat endpoint.
 
 POST /api/mobile/health-chat
   - Auth: Supabase JWT (Bearer token) — verified server-side
-  - Body: { "messages": [{"role": "user"|"assistant", "content": "..."}] }
+  - Body: { "messages": [...], "daily_context": "...(optional)" }
   - Response: { "reply": "..." }
 
 The endpoint:
   1. Verifies the Supabase JWT to get the user_id
-  2. Fetches user health profile from DB (health_assessments, daily_logs, user_plans, users)
-  3. Builds a rich system prompt with that context
+  2. Fetches user health profile + full today's daily_logs from DB
+  3. Builds a rich system prompt with all that context + reminder capability
   4. Calls OpenAI GPT-4o and returns the reply
 
-This keeps the OpenAI key server-side and allows the AI to reference real user data.
+Reminder capability: The AI emits [REMINDER type="..." time="HH:MM" label="..."] tags
+in its reply when the user asks to set a reminder. The mobile app parses and schedules
+these as local notifications.
 """
 
 import os
 import logging
+from datetime import date
 from typing import Optional
 
 import openai
@@ -38,6 +41,8 @@ class ChatMessage(BaseModel):
 
 class HealthChatRequest(BaseModel):
     messages: list[ChatMessage]
+    daily_context: Optional[str] = None        # today's health data summary from mobile (fallback)
+    extra_instructions: Optional[str] = None   # future use
 
 class HealthChatResponse(BaseModel):
     reply: str
@@ -45,15 +50,10 @@ class HealthChatResponse(BaseModel):
 # ── Supabase auth verification ────────────────────────────────────────────────
 
 def _verify_supabase_jwt(token: str) -> Optional[str]:
-    """
-    Verify a Supabase anon/user JWT and return the user_id (sub claim).
-    Uses the Supabase service-role client to call auth.get_user().
-    Returns None if invalid.
-    """
     try:
         sb = create_client(
             os.getenv("SUPABASE_URL", ""),
-            os.getenv("SUPABASE_KEY", ""),  # service role key
+            os.getenv("SUPABASE_KEY", ""),
         )
         resp = sb.auth.get_user(token)
         if resp and resp.user:
@@ -62,13 +62,40 @@ def _verify_supabase_jwt(token: str) -> Optional[str]:
         logger.warning(f"[HealthChat] JWT verification failed: {e}")
     return None
 
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _fmt(val, unit="", fallback="not logged"):
+    if val is None:
+        return fallback
+    return f"{val}{unit}"
+
+def _fmt_workout(ids, total):
+    if not ids or not isinstance(ids, list):
+        return "none completed yet today"
+    return f"{len(ids)} / {total or '?'} exercises completed"
+
+def _fmt_meals(meal_logs):
+    if not meal_logs or not isinstance(meal_logs, list) or len(meal_logs) == 0:
+        return "none logged today"
+    total_cal = sum(m.get("calories", 0) for m in meal_logs)
+    types = ", ".join(m.get("meal_type", "") for m in meal_logs if m.get("meal_type"))
+    return f"{len(meal_logs)} meals ({types}) — ~{total_cal} kcal total"
+
+def _fmt_habits(habits):
+    if not habits or not isinstance(habits, dict):
+        return "none logged"
+    done = [k for k, v in habits.items() if v]
+    missed = [k for k, v in habits.items() if not v]
+    parts = []
+    if done:
+        parts.append(f"completed: {', '.join(done)}")
+    if missed:
+        parts.append(f"missed: {', '.join(missed)}")
+    return " | ".join(parts) if parts else "none"
+
 # ── Context builder ───────────────────────────────────────────────────────────
 
 def _build_user_context(user_id: str) -> dict:
-    """
-    Pull user health data from Supabase and return a context dict.
-    Gracefully handles missing tables / rows.
-    """
     ctx = {}
     try:
         sb = create_client(
@@ -76,14 +103,14 @@ def _build_user_context(user_id: str) -> dict:
             os.getenv("SUPABASE_KEY", ""),
         )
 
-        # ── Basic user profile ────────────────────────────────────────────
+        # Basic user profile
         u = sb.table("users").select(
             "name, age, gender, phone, status, weight_loss_journey"
         ).eq("id", user_id).limit(1).execute()
         if u.data:
             ctx["user"] = u.data[0]
 
-        # ── Health assessment ─────────────────────────────────────────────
+        # Health assessment
         ha = sb.table("health_assessments").select(
             "age, gender, height_cm, weight_kg, health_goals, "
             "diabetes, high_blood_pressure, thyroid_disorder, "
@@ -92,14 +119,26 @@ def _build_user_context(user_id: str) -> dict:
         if ha.data:
             ctx["health_assessment"] = ha.data[0]
 
-        # ── Recent daily logs (last 5) ────────────────────────────────────
+        # Recent daily logs (last 7 days) — full tracking columns
         logs = sb.table("daily_logs").select(
-            "date, weight, mood, notes, coach_feedback"
-        ).eq("user_id", user_id).order("date", desc=True).limit(5).execute()
+            "date, weight, weight_kg, mood, notes, coach_feedback, "
+            "steps, distance_km, calories_burned, water_ml, "
+            "sleep_hours, sleep_quality, bed_time, wake_time, "
+            "workout_completed_ids, workout_total, "
+            "meal_logs, diet_followed, "
+            "fasting_status, fasting_target_hours, fasting_started_at, fasting_ended_at, "
+            "habits, measurements"
+        ).eq("user_id", user_id).order("date", desc=True).limit(7).execute()
         if logs.data:
             ctx["recent_logs"] = logs.data
 
-        # ── Current plan ──────────────────────────────────────────────────
+        # Today's log specifically
+        today_str = date.today().isoformat()
+        today_logs = [l for l in (logs.data or []) if l.get("date") == today_str]
+        if today_logs:
+            ctx["today_log"] = today_logs[0]
+
+        # Current plan
         plan = sb.table("user_plans").select(
             "diet_plan, exercise_plan"
         ).eq("user_id", user_id).order("created_at", desc=True).limit(1).execute()
@@ -112,30 +151,58 @@ def _build_user_context(user_id: str) -> dict:
     return ctx
 
 
-def _build_system_prompt(ctx: dict) -> str:
-    """Build a rich, context-aware system prompt from the fetched user data."""
-
+def _build_system_prompt(ctx: dict, mobile_daily_context: Optional[str] = None) -> str:
     user = ctx.get("user", {})
     ha   = ctx.get("health_assessment", {})
     logs = ctx.get("recent_logs", [])
+    today = ctx.get("today_log", {})
     plan = ctx.get("current_plan", {})
 
     first_name = (user.get("name") or "").split()[0] if user.get("name") else ""
 
-    # Compact recent log summary for context injection
+    # Compact 7-day log summary
     recent_summary_lines = []
-    for log in logs[:3]:
+    for log in logs[:7]:
         parts = [log.get("date", "")]
-        if log.get("weight"):
-            parts.append(f"weight {log['weight']}kg")
+        w = log.get("weight_kg") or log.get("weight")
+        if w:
+            parts.append(f"weight {w}kg")
         if log.get("mood"):
-            parts.append(f"mood: {log['mood']}")
+            parts.append(f"mood {log['mood']}/5")
+        if log.get("steps"):
+            parts.append(f"{log['steps']} steps")
+        if log.get("sleep_hours"):
+            parts.append(f"sleep {log['sleep_hours']}h ({log.get('sleep_quality', '')})")
+        if log.get("water_ml"):
+            parts.append(f"water {log['water_ml']}ml")
+        wids = log.get("workout_completed_ids")
+        if wids:
+            parts.append(f"workout {len(wids)}/{log.get('workout_total', '?')} done")
         if log.get("notes"):
-            parts.append(f"note: {log['notes'][:120]}")
-        if log.get("coach_feedback"):
-            parts.append(f"feedback: {log['coach_feedback'][:80]}")
+            parts.append(f"note: {log['notes'][:80]}")
         recent_summary_lines.append(" | ".join(parts))
     recent_summary = "\n".join(f"  - {l}" for l in recent_summary_lines) if recent_summary_lines else "  (none yet)"
+
+    # Today's detailed block
+    today_block = ""
+    if today:
+        today_lines = [
+            f"  Steps: {_fmt(today.get('steps'), ' steps')}",
+            f"  Distance: {_fmt(today.get('distance_km'), ' km')}",
+            f"  Calories burned: {_fmt(today.get('calories_burned'), ' kcal')}",
+            f"  Water: {_fmt(today.get('water_ml'), ' ml')}",
+            f"  Sleep last night: {_fmt(today.get('sleep_hours'), ' hours')} (quality: {today.get('sleep_quality') or 'not logged'})",
+            f"  Bedtime: {_fmt(today.get('bed_time'))} | Wake: {_fmt(today.get('wake_time'))}",
+            f"  Mood: {_fmt(today.get('mood'), '/5')}",
+            f"  Weight: {_fmt(today.get('weight_kg') or today.get('weight'), ' kg')}",
+            f"  Workout: {_fmt_workout(today.get('workout_completed_ids'), today.get('workout_total'))}",
+            f"  Meals: {_fmt_meals(today.get('meal_logs'))}",
+            f"  Fasting: {today.get('fasting_status') or 'not active'}" + (f" ({today.get('fasting_target_hours')}h target)" if today.get("fasting_target_hours") else ""),
+            f"  Habits: {_fmt_habits(today.get('habits'))}",
+        ]
+        today_block = "\n".join(today_lines)
+    elif mobile_daily_context:
+        today_block = mobile_daily_context
 
     lines = [
         "You are the Genestac AI Health Coach — a warm, witty, and deeply empathetic health advisor.",
@@ -148,40 +215,52 @@ def _build_system_prompt(ctx: dict) -> str:
         "1. NAME USAGE — CRITICAL:",
         f"   The user's first name is '{first_name}'. Use it AT MOST ONCE across the entire conversation —",
         "   only in the very first greeting message if you have not said hello yet.",
-        "   After that: NEVER use their name again. It feels robotic and irritating when an AI",
-        "   keeps repeating someone's name every message. Talk like a real friend would.",
+        "   After that: NEVER use their name again. Talk like a real friend would.",
         "",
         "2. NO HOLLOW OPENERS — these phrases are BANNED:",
-        "   Never start a response with any of these:",
-        "     'Great choice!', 'Absolutely!', 'Of course!', 'That's great!', 'Sure thing!',",
-        "     'Great question!', 'Definitely!', 'Wonderful!', 'Fantastic!', 'You got it!',",
-        "     'Great job!', 'Perfect!', 'Excellent!'",
-        "   These feel fake and hollow. Just answer directly and naturally.",
+        "   'Great choice!', 'Absolutely!', 'Of course!', 'That's great!', 'Sure thing!',",
+        "   'Great question!', 'Definitely!', 'Wonderful!', 'Fantastic!', 'You got it!',",
+        "   'Great job!', 'Perfect!', 'Excellent!'",
+        "   Just answer directly and naturally.",
         "",
         "3. CONVERSATION MEMORY — USE THE FULL CHAT HISTORY:",
-        "   Before replying, read the full conversation history carefully.",
-        "   - If the user mentioned a problem in an earlier message (bad sleep, stress, cravings,",
-        "     pain, low energy, skipped workout, bloating, emotional eating), proactively follow",
-        "     up on it a few turns later — e.g. 'How's the sleep been — any better?'",
-        "   - If the user committed to something (e.g. 'I'll try walking tomorrow'), check in on it.",
-        "   - Never make the user feel like they're starting from scratch each time.",
-        "   - Reference specific things they said earlier, not generic health advice.",
+        "   Reference specific things they said earlier. Follow up on problems they mentioned.",
+        "   Never make the user feel like they're starting from scratch each time.",
         "",
         "4. NATURAL, CONCISE RESPONSES:",
         "   - Keep replies to 2-4 sentences max unless they explicitly asked for detail.",
-        "   - Ask only ONE follow-up question per reply — never fire multiple questions at once.",
+        "   - Ask only ONE follow-up question per reply.",
         "   - Match the user's energy and language style.",
         "   - If they write in Hinglish or Hindi, respond in kind.",
         "",
         "5. MOTIVATION — genuine, specific, not performative:",
-        "   - When someone logs progress (weight down, workout done, good meal choice), acknowledge",
-        "     the specific achievement briefly, then keep moving. Don't over-celebrate.",
-        "   - When recent logs show a dip (bad mood, weight up, missed days), address it with",
-        "     empathy + one small, concrete suggestion. Don't ignore it or over-coddle either.",
-        "   - Draw on their recent log data to make encouragement feel real and relevant.",
+        "   Draw on their real data (steps, sleep, workout, water) to make encouragement specific.",
+        "   Address dips with empathy + one small concrete suggestion.",
         "",
         "6. HEALTH LIMITS:",
-        "   Never diagnose. For serious or persistent symptoms, always recommend a real doctor.",
+        "   Never diagnose. For serious symptoms, always recommend a real doctor.",
+        "",
+        "=======================================================",
+        "REMINDER CAPABILITY — Follow exactly",
+        "=======================================================",
+        "",
+        "When the user asks to SET, CREATE, or SCHEDULE a reminder (workout, water, sleep,",
+        "meals, medication, meditation, walking, fasting, or any health habit):",
+        "",
+        "1. If no time was mentioned, suggest a sensible default and confirm.",
+        "   If time is confirmed or already given, proceed immediately.",
+        "2. At the END of your reply, emit this EXACT machine-readable tag:",
+        '   [REMINDER type="TYPE" time="HH:MM" label="Label Text"]',
+        "   - TYPE: workout | water | sleep | meal | medication | meditation | walk | fasting",
+        "   - time: 24-hour HH:MM format",
+        "   - label: short human-readable name for the notification",
+        "3. You may emit multiple [REMINDER ...] tags if needed.",
+        "4. Tell the user their reminder has been set in plain language.",
+        "5. The app strips the tag silently and schedules the device notification.",
+        "",
+        "Example — 'Set a workout reminder at 7am':",
+        "  Your morning workout reminder is set for 7:00 AM — you'll get a nudge every day.",
+        '  [REMINDER type="workout" time="07:00" label="Morning Workout"]',
         "",
         "=======================================================",
         "USER DATA — reference naturally, never dump it back at them",
@@ -227,7 +306,12 @@ def _build_system_prompt(ctx: dict) -> str:
             lines.append(f"  Medical Hx: {ha['medical_data']}")
         lines.append("")
 
-    lines.append("RECENT DAILY LOGS (last 3 days — use to personalise follow-ups and motivation):")
+    if today_block:
+        lines.append("TODAY'S HEALTH DATA (use to give real, personalised advice right now):")
+        lines.append(today_block)
+        lines.append("")
+
+    lines.append("RECENT 7-DAY LOG (use for trends, follow-ups, motivation):")
     lines.append(recent_summary)
     lines.append("")
 
@@ -240,8 +324,7 @@ def _build_system_prompt(ctx: dict) -> str:
         lines.append("")
 
     lines.append(
-        "REMEMBER: Be a real person, not a chatbot. No name-dropping every message, no hollow affirmations. "
-        "Reference their actual data and past conversation naturally. Keep it human."
+        "REMEMBER: Be a real person, not a chatbot. Reference their actual data naturally. Keep it human."
     )
 
     return "\n".join(lines)
@@ -253,9 +336,7 @@ def _build_system_prompt(ctx: dict) -> str:
 async def health_chat(body: HealthChatRequest, request: Request):
     """
     POST /api/mobile/health-chat
-
     Authenticated endpoint for the mobile app's AI Health Coach chat.
-    Accepts the Supabase access token as a Bearer token.
     """
 
     # 1. Extract + verify Bearer token
@@ -272,7 +353,7 @@ async def health_chat(body: HealthChatRequest, request: Request):
     ctx = _build_user_context(user_id)
 
     # 3. Build system prompt
-    system_prompt = _build_system_prompt(ctx)
+    system_prompt = _build_system_prompt(ctx, mobile_daily_context=body.daily_context)
 
     # 4. Build messages array for OpenAI
     messages: list[dict] = [{"role": "system", "content": system_prompt}]
@@ -289,7 +370,7 @@ async def health_chat(body: HealthChatRequest, request: Request):
         resp = await client.chat.completions.create(
             model="gpt-4o",
             messages=messages,
-            max_tokens=400,
+            max_tokens=500,
             temperature=0.7,
         )
         reply = resp.choices[0].message.content.strip()

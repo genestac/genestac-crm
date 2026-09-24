@@ -67,6 +67,12 @@ export async function updatePatientUserPlans(userId: string, data: { diet_plan?:
   return response
 }
 
+export async function getDoctorExerciseLibrary(category?: string) {
+  const params = category && category !== 'all' ? `?category=${encodeURIComponent(category)}` : ''
+  const response = await fetchAPI(`/api/doctor/patients/exercise-library${params}`)
+  return response || []
+}
+
 export async function getPatientHistory(patientId: string) {
   if (!patientId || patientId === 'null' || patientId === 'undefined') return []
   const response = await fetchAPI(`/api/doctor/patients/${patientId}/history`)

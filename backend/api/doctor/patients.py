@@ -40,6 +40,22 @@ async def get_patient_user_plans(
         return res.data[0]
     return {"user_id": user_id, "diet_plan": {}, "exercise_plan": {}}
 
+
+@router.get('/patients/exercise-library')
+async def get_exercise_library_for_doctor(
+    category: str = None,
+    current_user: dict = Depends(get_current_user),
+    supabase: Client = Depends(get_supabase_client),
+):
+    """Return active exercises from the library for the doctor to build plans."""
+    q = supabase.table('exercises').select(
+        'id, title, category, type, difficulty, description, instructions, benefits, video_url, thumbnail_url'
+    ).eq('is_active', True).order('category').order('title')
+    if category and category != 'all':
+        q = q.eq('category', category)
+    res = q.execute()
+    return res.data or []
+
 @router.post('/patients/{user_id}/generate-plans')
 async def generate_patient_plans(
     user_id: str,
@@ -112,19 +128,30 @@ Example output structure:
             raise HTTPException(status_code=500, detail=f"Failed to generate diet plan: {str(e)}")
 
     if target in ("exercise", "both"):
+        # Fetch exercise library titles to inject into the prompt
+        lib_res = supabase.table('exercises').select('title, category, difficulty').eq('is_active', True).order('category').order('title').execute()
+        lib_items = lib_res.data or []
+        lib_names_text = "\n".join([f"- {ex['title']} ({ex.get('category', 'general')}, {ex.get('difficulty', 'beginner')})" for ex in lib_items]) if lib_items else "- Bodyweight Squats\n- Walking Lunges\n- Plank Hold\n- Jumping Jacks\n- High Knees"
+
         exercise_user_prompt = f"""
 Generate a balanced 7-day Exercise Plan for patient '{patient_name}' (Health Goals: '{health_goals}').
 Return a single JSON object with exact keys for each day: "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday".
+
+IMPORTANT: You MUST use exercise names EXACTLY as listed below (copy-paste the name). These come from our exercise library and must match exactly for the patient's video player to work:
+
+{lib_names_text}
 
 Each day must contain:
 - "type": string summary of workout (e.g. "Full Body Warm-up & Cardio", "Lower Body & Core", "Rest Day")
 - "duration_minutes": number (e.g. 30, 45, 0)
 - "exercises": array of objects, each containing:
-  - "name": string exercise name (e.g., "Bodyweight Squats")
+  - "name": string exercise name — MUST be EXACTLY one of the names from the list above
   - "sets": number
   - "reps": string or number (optional)
   - "duration": string (optional)
   - "notes": string (optional)
+
+Sunday must always be a rest day with empty exercises array.
 
 Example output structure:
 {{
@@ -132,8 +159,8 @@ Example output structure:
     "type": "Full Body Warm-up & Cardio",
     "duration_minutes": 30,
     "exercises": [
-      {{ "name": "Brisk Walking", "sets": 1, "duration": "20 mins" }},
-      {{ "name": "Jumping Jacks", "sets": 3, "reps": 15 }}
+      {{ "name": "Jumping Jacks", "sets": 3, "reps": 15 }},
+      {{ "name": "Bodyweight Squats", "sets": 3, "reps": 15 }}
     ]
   }},
   ... (include all 7 days: monday, tuesday, wednesday, thursday, friday, saturday, sunday)

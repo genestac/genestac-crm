@@ -187,7 +187,7 @@ async def upload_exercise_video(
             folder="exercises/videos",
             resource_type="video",
             # Generate a thumbnail automatically
-            eager=[{"format": "jpg", "transformation": [{"width": 640, "height": 360, "crop": "fill"}]}],
+            eager=[{"format": "webp", "transformation": [{"width": 640, "height": 360, "crop": "fill"}]}],
         )
         return {
             "success": True,
@@ -228,7 +228,7 @@ async def upload_exercise_thumbnail(
             contents,
             folder="exercises/thumbnails",
             resource_type="image",
-            transformation=[{"width": 640, "height": 360, "crop": "fill", "quality": "auto"}],
+            transformation=[{"width": 640, "height": 360, "crop": "fill", "quality": "auto", "fetch_format": "webp"}],
         )
         return {"success": True, "url": result["secure_url"], "public_id": result.get("public_id")}
     except Exception as e:

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { getOnboardedPatients, generatePatientPlans, updatePatientUserPlans } from '@/app/doctor/actions'
+import { getOnboardedPatients, generatePatientPlans, updatePatientUserPlans, getDoctorExerciseLibrary } from '@/app/doctor/actions'
 import { 
   UserCheck, 
   Search, 
@@ -21,7 +21,12 @@ import {
   RefreshCw,
   Info,
   CheckCircle2,
-  Stethoscope
+  Stethoscope,
+  Pencil,
+  PlusCircle,
+  Trash2,
+  Save,
+  List
 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -90,6 +95,15 @@ export default function DoctorOnboardedPatientsPage() {
   // AI Generation State
   const [isGenerating, setIsGenerating] = useState(false)
   const [generatingTarget, setGeneratingTarget] = useState<'diet' | 'exercise' | 'both' | null>(null)
+
+  // Manual Plan Builder State
+  const [exerciseBuildMode, setExerciseBuildMode] = useState<'ai' | 'manual'>('ai')
+  const [exLibrary, setExLibrary] = useState<any[]>([])
+  const [exLibraryLoading, setExLibraryLoading] = useState(false)
+  const [exSearchQuery, setExSearchQuery] = useState('')
+  const [manualPlan, setManualPlan] = useState<Record<string, {type: string, duration_minutes: number, exercises: any[]}>>({})
+  const [savingManualPlan, setSavingManualPlan] = useState(false)
+  const [manualPlanDay, setManualPlanDay] = useState('monday')
 
   // Doctor Review Toggle Loading State
   const [togglingUserIds, setTogglingUserIds] = useState<Record<string, boolean>>({})
@@ -166,6 +180,10 @@ export default function DoctorOnboardedPatientsPage() {
     } else {
       setActiveTab('diet')
     }
+    setExerciseBuildMode('ai')
+    setExSearchQuery('')
+    if (exLibrary.length === 0) loadExLibrary()
+    initManualPlan(user.user_plans?.exercise_plan)
   }
 
   const handleGeneratePlan = async (target: 'diet' | 'exercise' | 'both') => {
@@ -200,6 +218,77 @@ export default function DoctorOnboardedPatientsPage() {
     } finally {
       setIsGenerating(false)
       setGeneratingTarget(null)
+    }
+  }
+
+  const loadExLibrary = async () => {
+    setExLibraryLoading(true)
+    try {
+      const data = await getDoctorExerciseLibrary()
+      setExLibrary(Array.isArray(data) ? data : [])
+    } catch (err) {
+      console.error('Failed to load exercise library:', err)
+    } finally {
+      setExLibraryLoading(false)
+    }
+  }
+
+  const initManualPlan = (existing: any) => {
+    const parsed = parsePlanJson(existing)
+    if (parsed && Object.keys(parsed).length > 0) {
+      setManualPlan(parsed)
+    } else {
+      const empty: Record<string, any> = {}
+      DAYS.forEach(d => { empty[d.key] = { type: '', duration_minutes: 30, exercises: [] } })
+      setManualPlan(empty)
+    }
+  }
+
+  const addExerciseToDay = (ex: any) => {
+    setManualPlan(prev => ({
+      ...prev,
+      [manualPlanDay]: {
+        ...prev[manualPlanDay],
+        exercises: [...(prev[manualPlanDay]?.exercises || []), {
+          name: ex.title,
+          sets: 3,
+          reps: 12,
+          notes: ex.description || ''
+        }]
+      }
+    }))
+  }
+
+  const removeExerciseFromDay = (dayKey: string, idx: number) => {
+    setManualPlan(prev => ({
+      ...prev,
+      [dayKey]: {
+        ...prev[dayKey],
+        exercises: prev[dayKey].exercises.filter((_: any, i: number) => i !== idx)
+      }
+    }))
+  }
+
+  const updateExerciseField = (dayKey: string, idx: number, field: string, value: any) => {
+    setManualPlan(prev => {
+      const exs = [...prev[dayKey].exercises]
+      exs[idx] = { ...exs[idx], [field]: value }
+      return { ...prev, [dayKey]: { ...prev[dayKey], exercises: exs } }
+    })
+  }
+
+  const saveManualPlan = async () => {
+    if (!selectedUser) return
+    setSavingManualPlan(true)
+    try {
+      await updatePatientUserPlans(selectedUser.id, { exercise_plan: manualPlan })
+      setSelectedUser(prev => prev ? { ...prev, user_plans: { ...prev.user_plans, exercise_plan: manualPlan } } : null)
+      setUsers(prev => prev.map(u => u.id === selectedUser.id ? { ...u, user_plans: { ...u.user_plans, exercise_plan: manualPlan } } : u))
+      setExerciseBuildMode('ai')
+    } catch (err) {
+      console.error('Failed to save manual plan:', err)
+    } finally {
+      setSavingManualPlan(false)
     }
   }
 
@@ -647,119 +736,232 @@ export default function DoctorOnboardedPatientsPage() {
               {/* ===================================================================== */}
               {activeTab === 'exercise' && (
                 <div className="space-y-4">
-                  {!exercisePlanPresent ? (
-                    <div className="bg-white rounded-3xl border border-gray-200 p-10 text-center space-y-4 shadow-sm">
-                      <div className="w-16 h-16 bg-blue-50 rounded-2xl flex items-center justify-center mx-auto text-blue-600">
-                        <Dumbbell className="w-8 h-8" />
-                      </div>
-                      <div>
-                        <h3 className="text-xl font-bold text-gray-900">No Exercise Plan Assigned</h3>
-                        <p className="text-sm text-gray-500 max-w-md mx-auto mt-1">
-                          This patient currently has no active workout plan stored in the system. You can generate a 7-day workout plan with OpenAI.
-                        </p>
-                      </div>
-                      <Button
-                        onClick={() => handleGeneratePlan('exercise')}
-                        disabled={isGenerating}
-                        className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-6 py-6 rounded-2xl shadow-lg gap-2 text-sm"
+
+                  {/* Mode Toggle Bar */}
+                  <div className="flex items-center justify-between bg-white border border-gray-200 rounded-2xl p-3 shadow-sm">
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setExerciseBuildMode('ai')}
+                        className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-bold transition-all ${exerciseBuildMode === 'ai' ? 'bg-blue-600 text-white shadow-md' : 'text-gray-500 hover:bg-gray-100'}`}
                       >
-                        {isGenerating && generatingTarget === 'exercise' ? (
-                          <Loader2 className="w-5 h-5 animate-spin" />
-                        ) : (
-                          <Sparkles className="w-5 h-5" />
-                        )}
-                        {isGenerating && generatingTarget === 'exercise'
-                          ? 'Generating 7-Day Exercise Plan...'
-                          : 'Generate 7-Day Exercise Plan with AI'}
-                      </Button>
+                        <Sparkles className="w-4 h-4" /> AI Generate
+                      </button>
+                      <button
+                        onClick={() => { setExerciseBuildMode('manual'); initManualPlan(selectedUser?.user_plans?.exercise_plan); if (exLibrary.length === 0) loadExLibrary() }}
+                        className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-bold transition-all ${exerciseBuildMode === 'manual' ? 'bg-violet-600 text-white shadow-md' : 'text-gray-500 hover:bg-gray-100'}`}
+                      >
+                        <Pencil className="w-4 h-4" /> Manual Build
+                      </button>
                     </div>
-                  ) : (
-                    <div className="space-y-4">
-                      <div className="flex items-center justify-between bg-blue-50 border border-blue-100 p-4 rounded-2xl">
-                        <div className="flex items-center gap-2 text-blue-900 text-sm font-semibold">
-                          <Dumbbell className="w-4 h-4 text-blue-600" />
-                          <span>Showing Workout Schedule for <strong className="capitalize">{selectedDay}</strong></span>
+                    {exerciseBuildMode === 'ai' && exercisePlanPresent && (
+                      <Button onClick={() => handleGeneratePlan('exercise')} disabled={isGenerating} variant="outline" size="sm" className="text-blue-700 border-blue-200 text-xs gap-1.5">
+                        {isGenerating && generatingTarget === 'exercise' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                        Re-generate
+                      </Button>
+                    )}
+                  </div>
+
+                  {/* ── AI MODE ─────────────────────────────────────────────── */}
+                  {exerciseBuildMode === 'ai' && (
+                    <>
+                      {!exercisePlanPresent ? (
+                        <div className="bg-white rounded-3xl border border-gray-200 p-10 text-center space-y-4 shadow-sm">
+                          <div className="w-16 h-16 bg-blue-50 rounded-2xl flex items-center justify-center mx-auto text-blue-600">
+                            <Dumbbell className="w-8 h-8" />
+                          </div>
+                          <div>
+                            <h3 className="text-xl font-bold text-gray-900">No Exercise Plan Assigned</h3>
+                            <p className="text-sm text-gray-500 max-w-md mx-auto mt-1">
+                              Generate a 7-day AI workout plan — uses exercises from your library so patients can view videos in the app.
+                            </p>
+                          </div>
+                          <div className="flex gap-3 justify-center">
+                            <Button onClick={() => handleGeneratePlan('exercise')} disabled={isGenerating} className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-6 py-6 rounded-2xl shadow-lg gap-2 text-sm">
+                              {isGenerating && generatingTarget === 'exercise' ? <Loader2 className="w-5 h-5 animate-spin" /> : <Sparkles className="w-5 h-5" />}
+                              {isGenerating && generatingTarget === 'exercise' ? 'Generating...' : 'Generate 7-Day Plan with AI'}
+                            </Button>
+                            <Button onClick={() => { setExerciseBuildMode('manual'); if (exLibrary.length === 0) loadExLibrary() }} variant="outline" className="px-6 py-6 rounded-2xl text-sm font-bold gap-2 text-violet-700 border-violet-300">
+                              <Pencil className="w-5 h-5" /> Build Manually
+                            </Button>
+                          </div>
                         </div>
-                        <Button
-                          onClick={() => handleGeneratePlan('exercise')}
-                          disabled={isGenerating}
-                          variant="outline"
-                          size="sm"
-                          className="bg-white hover:bg-blue-100 text-blue-700 border-blue-200 font-bold text-xs gap-1.5"
-                        >
-                          {isGenerating && generatingTarget === 'exercise' ? (
-                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          ) : (
-                            <RefreshCw className="w-3.5 h-3.5" />
-                          )}
-                          Re-generate Exercise
+                      ) : (
+                        <div className="space-y-4">
+                          <div className="flex items-center gap-2 text-blue-900 text-sm font-semibold bg-blue-50 border border-blue-100 p-4 rounded-2xl">
+                            <Dumbbell className="w-4 h-4 text-blue-600" />
+                            <span>Showing Workout Schedule for <strong className="capitalize">{selectedDay}</strong></span>
+                          </div>
+                          <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm flex items-center justify-between">
+                            <div>
+                              <span className="text-xs font-semibold text-blue-600 uppercase tracking-wider">Workout Focus</span>
+                              <h4 className="text-lg font-bold text-gray-900 mt-0.5">{dayExercise.type || 'General Fitness'}</h4>
+                            </div>
+                            <div className="flex items-center gap-2 bg-blue-50 text-blue-800 px-3.5 py-1.5 rounded-full text-xs font-bold border border-blue-100">
+                              <Clock className="w-4 h-4 text-blue-600" />
+                              <span>{dayExercise.duration_minutes ?? 30} mins</span>
+                            </div>
+                          </div>
+                          <div className="space-y-3">
+                            {Array.isArray(dayExercise.exercises) && dayExercise.exercises.length > 0 ? (
+                              dayExercise.exercises.map((ex: any, idx: number) => (
+                                <div key={idx} className="bg-white border border-gray-200 rounded-2xl p-4 shadow-sm flex items-start justify-between gap-4 hover:border-blue-200 transition-colors">
+                                  <div className="space-y-1.5 flex-1">
+                                    <h5 className="font-bold text-gray-900 text-base flex items-center gap-2">
+                                      <span className="w-6 h-6 rounded-full bg-blue-100 text-blue-700 font-extrabold text-xs flex items-center justify-center shrink-0">{idx + 1}</span>
+                                      {ex.name}
+                                    </h5>
+                                    {ex.notes && <p className="text-xs text-gray-500 italic pl-8">Note: {ex.notes}</p>}
+                                  </div>
+                                  <div className="flex items-center gap-2 shrink-0">
+                                    {ex.sets && <span className="bg-gray-100 text-gray-800 text-xs font-bold px-3 py-1 rounded-full border border-gray-200">{ex.sets} Sets</span>}
+                                    {ex.reps && <span className="bg-blue-50 text-blue-700 text-xs font-bold px-3 py-1 rounded-full border border-blue-200">{ex.reps} {typeof ex.reps === 'number' ? 'Reps' : ''}</span>}
+                                    {ex.duration && <span className="bg-emerald-50 text-emerald-700 text-xs font-bold px-3 py-1 rounded-full border border-emerald-200">{ex.duration}</span>}
+                                  </div>
+                                </div>
+                              ))
+                            ) : (
+                              <div className="bg-white border border-gray-200 rounded-2xl p-6 text-center text-gray-500 text-sm">No specific exercises listed for {selectedDay}.</div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  )}
+
+                  {/* ── MANUAL BUILD MODE ───────────────────────────────────── */}
+                  {exerciseBuildMode === 'manual' && (
+                    <div className="space-y-4">
+                      <div className="bg-violet-50 border border-violet-200 rounded-2xl p-4 flex items-center justify-between">
+                        <div className="flex items-center gap-2 text-violet-900 text-sm font-semibold">
+                          <Pencil className="w-4 h-4 text-violet-600" />
+                          Manually building plan for <strong className="capitalize">{manualPlanDay}</strong>
+                        </div>
+                        <Button onClick={saveManualPlan} disabled={savingManualPlan} size="sm" className="bg-violet-600 hover:bg-violet-700 text-white font-bold text-xs gap-1.5">
+                          {savingManualPlan ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                          Save Plan
                         </Button>
                       </div>
 
-                      {/* Workout Summary Banner */}
-                      <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm flex items-center justify-between">
-                        <div>
-                          <span className="text-xs font-semibold text-blue-600 uppercase tracking-wider">Workout Focus</span>
-                          <h4 className="text-lg font-bold text-gray-900 mt-0.5">
-                            {dayExercise.type || 'General Fitness'}
-                          </h4>
+                      {/* Day Tabs */}
+                      <div className="flex gap-1.5 flex-wrap">
+                        {DAYS.map(d => (
+                          <button
+                            key={d.key}
+                            onClick={() => setManualPlanDay(d.key)}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${manualPlanDay === d.key ? 'bg-violet-600 text-white shadow-md' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+                          >
+                            {d.short}
+                            {(manualPlan[d.key]?.exercises?.length || 0) > 0 && (
+                              <span className="ml-1.5 bg-white/30 text-current text-[10px] px-1 rounded-full">
+                                {manualPlan[d.key]?.exercises?.length}
+                              </span>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* Day Settings */}
+                      <div className="bg-white border border-gray-200 rounded-2xl p-4 space-y-3 shadow-sm">
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="text-xs font-semibold text-gray-500 mb-1 block">Workout Focus / Type</label>
+                            <input
+                              type="text"
+                              placeholder="e.g. Full Body Cardio"
+                              value={manualPlan[manualPlanDay]?.type || ''}
+                              onChange={e => setManualPlan(prev => ({ ...prev, [manualPlanDay]: { ...prev[manualPlanDay], type: e.target.value } }))}
+                              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-xs font-semibold text-gray-500 mb-1 block">Duration (minutes)</label>
+                            <input
+                              type="number"
+                              min={0}
+                              value={manualPlan[manualPlanDay]?.duration_minutes || 30}
+                              onChange={e => setManualPlan(prev => ({ ...prev, [manualPlanDay]: { ...prev[manualPlanDay], duration_minutes: parseInt(e.target.value) || 0 } }))}
+                              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400"
+                            />
+                          </div>
                         </div>
-                        <div className="flex items-center gap-2 bg-blue-50 text-blue-800 px-3.5 py-1.5 rounded-full text-xs font-bold border border-blue-100">
-                          <Clock className="w-4 h-4 text-blue-600" />
-                          <span>{dayExercise.duration_minutes ?? 30} mins</span>
+
+                        {/* Selected Exercises for this day */}
+                        <div>
+                          <label className="text-xs font-semibold text-gray-500 mb-2 block">Exercises for <span className="capitalize text-violet-700">{manualPlanDay}</span></label>
+                          {(manualPlan[manualPlanDay]?.exercises || []).length === 0 ? (
+                            <div className="text-xs text-gray-400 text-center py-4 border border-dashed border-gray-200 rounded-xl">No exercises added. Pick from the library below ↓</div>
+                          ) : (
+                            <div className="space-y-2">
+                              {(manualPlan[manualPlanDay]?.exercises || []).map((ex: any, idx: number) => (
+                                <div key={idx} className="flex items-center gap-2 bg-violet-50 border border-violet-100 rounded-xl px-3 py-2">
+                                  <span className="w-5 h-5 rounded-full bg-violet-200 text-violet-800 text-[10px] font-extrabold flex items-center justify-center shrink-0">{idx+1}</span>
+                                  <span className="flex-1 text-sm font-semibold text-gray-900 truncate">{ex.name}</span>
+                                  <input
+                                    type="text"
+                                    placeholder="sets"
+                                    value={ex.sets || ''}
+                                    onChange={e => updateExerciseField(manualPlanDay, idx, 'sets', e.target.value)}
+                                    className="w-12 text-xs border border-violet-200 rounded-lg px-2 py-1 focus:outline-none"
+                                  />
+                                  <span className="text-xs text-gray-400">×</span>
+                                  <input
+                                    type="text"
+                                    placeholder="reps"
+                                    value={ex.reps || ''}
+                                    onChange={e => updateExerciseField(manualPlanDay, idx, 'reps', e.target.value)}
+                                    className="w-14 text-xs border border-violet-200 rounded-lg px-2 py-1 focus:outline-none"
+                                  />
+                                  <button onClick={() => removeExerciseFromDay(manualPlanDay, idx)} className="text-red-400 hover:text-red-600 shrink-0">
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       </div>
 
-                      {/* Exercises List */}
-                      <div className="space-y-3">
-                        {Array.isArray(dayExercise.exercises) && dayExercise.exercises.length > 0 ? (
-                          dayExercise.exercises.map((ex: any, idx: number) => (
-                            <div
-                              key={idx}
-                              className="bg-white border border-gray-200 rounded-2xl p-4 shadow-sm flex items-start justify-between gap-4 hover:border-blue-200 transition-colors"
-                            >
-                              <div className="space-y-1.5 flex-1">
-                                <h5 className="font-bold text-gray-900 text-base flex items-center gap-2">
-                                  <span className="w-6 h-6 rounded-full bg-blue-100 text-blue-700 font-extrabold text-xs flex items-center justify-center shrink-0">
-                                    {idx + 1}
-                                  </span>
-                                  {ex.name}
-                                </h5>
-
-                                {ex.notes && (
-                                  <p className="text-xs text-gray-500 italic pl-8">
-                                    Note: {ex.notes}
-                                  </p>
-                                )}
-                              </div>
-
-                              <div className="flex items-center gap-2 shrink-0">
-                                {ex.sets && (
-                                  <span className="bg-gray-100 text-gray-800 text-xs font-bold px-3 py-1 rounded-full border border-gray-200">
-                                    {ex.sets} Sets
-                                  </span>
-                                )}
-                                {ex.reps && (
-                                  <span className="bg-blue-50 text-blue-700 text-xs font-bold px-3 py-1 rounded-full border border-blue-200">
-                                    {ex.reps} {typeof ex.reps === 'number' ? 'Reps' : ''}
-                                  </span>
-                                )}
-                                {ex.duration && (
-                                  <span className="bg-emerald-50 text-emerald-700 text-xs font-bold px-3 py-1 rounded-full border border-emerald-200">
-                                    {ex.duration}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          ))
+                      {/* Exercise Library Picker */}
+                      <div className="bg-white border border-gray-200 rounded-2xl p-4 shadow-sm space-y-3">
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm font-bold text-gray-700 flex items-center gap-1.5"><List className="w-4 h-4 text-violet-500" />Exercise Library</span>
+                          <span className="text-xs text-gray-400">{exLibrary.length} exercises</span>
+                        </div>
+                        <input
+                          type="text"
+                          placeholder="Search exercises..."
+                          value={exSearchQuery}
+                          onChange={e => setExSearchQuery(e.target.value)}
+                          className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
+                        />
+                        {exLibraryLoading ? (
+                          <div className="flex items-center justify-center py-6 text-violet-500">
+                            <Loader2 className="w-5 h-5 animate-spin" />
+                          </div>
                         ) : (
-                          <div className="bg-white border border-gray-200 rounded-2xl p-6 text-center text-gray-500 text-sm">
-                            No specific exercises listed for {selectedDay}.
+                          <div className="max-h-64 overflow-y-auto space-y-2 pr-1">
+                            {exLibrary
+                              .filter(ex => !exSearchQuery || ex.title?.toLowerCase().includes(exSearchQuery.toLowerCase()) || ex.category?.toLowerCase().includes(exSearchQuery.toLowerCase()))
+                              .map((ex: any) => (
+                                <div key={ex.id} className="flex items-center justify-between gap-3 hover:bg-violet-50 rounded-xl px-3 py-2 transition-colors group">
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-sm font-semibold text-gray-900 truncate">{ex.title}</p>
+                                    <p className="text-xs text-gray-400 capitalize">{ex.category} · {ex.difficulty}</p>
+                                  </div>
+                                  <button
+                                    onClick={() => addExerciseToDay(ex)}
+                                    className="shrink-0 flex items-center gap-1 text-xs font-bold text-violet-600 hover:text-violet-800 opacity-0 group-hover:opacity-100 transition-opacity bg-violet-100 hover:bg-violet-200 px-2 py-1 rounded-lg"
+                                  >
+                                    <PlusCircle className="w-3.5 h-3.5" /> Add
+                                  </button>
+                                </div>
+                              ))}
                           </div>
                         )}
                       </div>
                     </div>
                   )}
+
                 </div>
               )}
             </div>

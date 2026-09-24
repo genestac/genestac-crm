@@ -256,6 +256,7 @@ function ExerciseForm({
 
   const [uploadingVideo, setUploadingVideo]   = useState(false)
   const [uploadingThumb, setUploadingThumb]   = useState(false)
+  const [isDraggingThumb, setIsDraggingThumb] = useState(false)
   const [videoProgress, setVideoProgress]     = useState(0)
   const [saving, setSaving]                   = useState(false)
 
@@ -618,9 +619,18 @@ function ExerciseForm({
                 </div>
               ) : (
                 <button
+                  type="button"
                   onClick={() => thumbRef.current?.click()}
+                  onDragOver={(e) => { e.preventDefault(); setIsDraggingThumb(true); }}
+                  onDragLeave={(e) => { e.preventDefault(); setIsDraggingThumb(false); }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setIsDraggingThumb(false);
+                    const file = e.dataTransfer.files?.[0];
+                    if (file) uploadThumbnail(file);
+                  }}
                   disabled={uploadingThumb}
-                  className="w-full border-2 border-dashed border-gray-200 rounded-xl p-5 flex flex-col items-center gap-2 hover:border-emerald-400 hover:bg-emerald-50/50 transition-colors disabled:opacity-50"
+                  className={`w-full border-2 border-dashed rounded-xl p-5 flex flex-col items-center gap-2 transition-colors disabled:opacity-50 ${isDraggingThumb ? 'border-emerald-500 bg-emerald-100' : 'border-gray-200 hover:border-emerald-400 hover:bg-emerald-50/50'}`}
                 >
                   {uploadingThumb ? (
                     <Loader2 className="w-7 h-7 text-emerald-500 animate-spin" />
@@ -628,7 +638,7 @@ function ExerciseForm({
                     <ImageIcon className="w-7 h-7 text-gray-400" />
                   )}
                   <span className="text-sm font-medium text-gray-600">
-                    {uploadingThumb ? 'Uploading...' : 'Upload thumbnail'}
+                    {uploadingThumb ? 'Uploading...' : 'Click or drag to upload thumbnail'}
                   </span>
                   <span className="text-xs text-muted-foreground">JPG, PNG, WebP · 640×360px ideal</span>
                 </button>
