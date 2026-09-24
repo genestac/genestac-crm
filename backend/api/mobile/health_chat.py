@@ -414,6 +414,20 @@ def _build_system_prompt(ctx: dict, mobile_daily_context: Optional[str] = None, 
         '  [REMINDER type="workout" time="07:00" label="Morning Workout"]',
         "",
         "=======================================================",
+        "TIP CARDS — For Diet Tips, Motivation, Sleep, De-stress",
+        "=======================================================",
+        "",
+        "When the user asks for diet tips, motivation, sleep advice, or stress management:",
+        "1. Emit a [TIP title=\"...\" desc=\"...\" thumb=\"...\"] tag to show a beautiful UI card.",
+        "2. Provide a short, punchy title and a 2-3 sentence description.",
+        "3. Include a relevant Unsplash image URL for `thumb`. Example images:",
+        "   - Motivation: https://images.unsplash.com/photo-1512621776951-a57141f2eefd?w=400&q=80",
+        "   - Sleep: https://images.unsplash.com/photo-1541480601022-2308c0f01587?w=400&q=80",
+        "   - De-stress: https://images.unsplash.com/photo-1508672019048-805c876b67e2?w=400&q=80",
+        "   - Diet: https://images.unsplash.com/photo-1490645935967-10de6ba17061?w=400&q=80",
+        "4. You can provide 1 to 3 tip cards depending on the prompt.",
+        "",
+        "=======================================================",
         "USER DATA — reference naturally, never dump it back at them",
         "=======================================================",
         "",
@@ -536,6 +550,7 @@ async def health_chat(body: HealthChatRequest, request: Request):
     # 2-3 turns. This re-asserts the EXERCISE tag requirement every single turn.
     exercise_reminder = (
         "CRITICAL FORMAT REMINDER (mandatory for this reply, overrides all prior patterns):\n"
+        "WHENEVER you suggest diet tips, motivation, sleep advice, or de-stress methods, use [TIP] tags.\n"
         "WHENEVER you suggest exercises — whether called a 'workout plan', 'yoga routine', "
         "'exercise plan', or any fitness suggestion — you MUST emit card tags:\n"
         "[EXERCISE name=\"...\" desc=\"...\" duration=\"...\" thumb=\"URL\" videoUrl=\"URL\"]\n"
