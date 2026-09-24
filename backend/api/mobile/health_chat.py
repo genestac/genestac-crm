@@ -149,6 +149,21 @@ def _fetch_exercises(sb, limit: int = 40) -> list:
 
 def _build_user_context(user_id: str) -> dict:
     ctx = {}
+
+    # ── Exercise library is fetched FIRST, in its own try block ──────────────
+    # It must never be blocked by a failure in user-data queries.
+    try:
+        sb_ex = create_client(
+            os.getenv("SUPABASE_URL", ""),
+            os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_KEY", ""),
+        )
+        ctx["exercises"] = _fetch_exercises(sb_ex, limit=40)
+        logger.info(f"[HealthChat] Exercise library loaded: {len(ctx['exercises'])} exercises")
+    except Exception as e:
+        ctx["exercises"] = []
+        logger.warning(f"[HealthChat] Exercise fetch error: {e}")
+
+    # ── User profile + health data ────────────────────────────────────────────
     try:
         sb = create_client(
             os.getenv("SUPABASE_URL", ""),
@@ -197,11 +212,8 @@ def _build_user_context(user_id: str) -> dict:
         if plan.data:
             ctx["current_plan"] = plan.data[0]
 
-        # Exercise library — gives AI real thumbnails + video URLs
-        ctx["exercises"] = _fetch_exercises(sb, limit=40)
-
     except Exception as e:
-        logger.warning(f"[HealthChat] Context fetch error: {e}")
+        logger.warning(f"[HealthChat] User context fetch error: {e}")
 
     return ctx
 
