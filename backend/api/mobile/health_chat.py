@@ -535,3 +535,64 @@ async def health_chat(body: HealthChatRequest, request: Request):
         f"has_exercise={'[EXERCISE' in reply} | has_food={'[FOOD' in reply} | has_reminder={'[REMINDER' in reply}"
     )
     return HealthChatResponse(reply=reply)
+
+
+# ── Dev/debug endpoint — key-protected, no user JWT needed ───────────────────
+class DebugChatRequest(BaseModel):
+    prompt: str = "Show me 3 yoga exercises for beginners"
+
+class DebugChatResponse(BaseModel):
+    reply: str
+    has_exercise: bool
+    has_food: bool
+    has_reminder: bool
+    tags: list[str]
+    system_prompt_preview: str
+
+@router.post("/debug", response_model=DebugChatResponse)
+async def health_chat_debug(body: DebugChatRequest, request: Request):
+    """
+    POST /api/mobile/health-chat/debug
+    Key-protected debug endpoint — tests exercise card generation without a user JWT.
+    Set HEALTH_CHAT_DEBUG_KEY in .env to enable.
+    """
+    debug_key = os.getenv("HEALTH_CHAT_DEBUG_KEY", "")
+    if not debug_key:
+        raise HTTPException(status_code=404, detail="Debug endpoint not enabled")
+    req_key = request.headers.get("X-Debug-Key", "")
+    if req_key != debug_key:
+        raise HTTPException(status_code=403, detail="Invalid debug key")
+
+    # Build context with empty user data but real exercise library
+    sb = create_client(os.getenv("SUPABASE_URL", ""), os.getenv("SUPABASE_KEY", ""))
+    exercises = _fetch_exercises(sb, limit=40)
+    ctx = {"exercises": exercises}
+    system_prompt = _build_system_prompt(ctx)
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": body.prompt},
+    ]
+
+    try:
+        client = openai.AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        resp = await client.chat.completions.create(
+            model="gpt-4o",
+            messages=messages,
+            max_tokens=1200,
+            temperature=0.7,
+        )
+        reply = resp.choices[0].message.content.strip()
+    except openai.OpenAIError as e:
+        raise HTTPException(status_code=502, detail=f"OpenAI error: {e}")
+
+    import re as _re
+    tags = _re.findall(r"\[(?:EXERCISE|FOOD|REMINDER)[^\]]*\]", reply)
+    return DebugChatResponse(
+        reply=reply,
+        has_exercise="[EXERCISE" in reply,
+        has_food="[FOOD" in reply,
+        has_reminder="[REMINDER" in reply,
+        tags=tags,
+        system_prompt_preview=system_prompt[:500],
+    )
