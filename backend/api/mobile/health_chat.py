@@ -224,18 +224,30 @@ def _build_exercise_rich_ui(exercises: list) -> str:
         "",
         "RULES:",
         "1. ONLY suggest exercises from the EXERCISE LIBRARY below.",
-        "2. Use EXACTLY the title, thumbnail_url, and video_url from the library.",
-        "3. Emit one [EXERCISE ...] tag per suggested exercise.",
-        "4. Do NOT invent exercises not in the list.",
+        "2. Use EXACTLY the title and video_url from the library.",
+        "3. For thumb: use the thumb value shown in the library (already resolved — never leave it blank).",
+        "4. Emit one [EXERCISE ...] tag per suggested exercise — ALWAYS emit the tag, never skip it.",
         "5. Choose exercises that match the user's goals, difficulty, and category.",
-        "6. NEVER use Unsplash links — use the thumbnail_url from the library.",
-        "7. Do NOT use numbered lists — use card tags only.",
+        "6. Do NOT use numbered lists — use card tags only.",
+        "7. NEVER leave thumb empty or omit it — a thumb value is always provided in the library.",
+        "8. Suggest 2–4 exercises per reply.",
         "",
     ]
 
     if not exercises:
         lines.append("(Exercise library is currently empty — skip exercise card tags.)")
         return "\n".join(lines)
+
+    # Per-category Unsplash fallback thumbnails (used when thumbnail_url is NULL in DB)
+    FALLBACK_THUMBS: dict = {
+        "yoga":       "https://images.unsplash.com/photo-1544367567-0f2fcb009e0b?w=400&q=80",
+        "strength":   "https://images.unsplash.com/photo-1581009146145-b5ef050c2e1e?w=400&q=80",
+        "cardio":     "https://images.unsplash.com/photo-1538805060514-97d9cc17730c?w=400&q=80",
+        "breathing":  "https://images.unsplash.com/photo-1506126613408-eca07ce68773?w=400&q=80",
+        "meditation": "https://images.unsplash.com/photo-1528715471579-d1bcf0ba5e83?w=400&q=80",
+        "stretching": "https://images.unsplash.com/photo-1575052814086-f385e2e2ad1b?w=400&q=80",
+        "default":    "https://images.unsplash.com/photo-1571019614242-c5c5dee9f50b?w=400&q=80",
+    }
 
     lines.append("EXERCISE LIBRARY (choose from these only):")
     lines.append("")
@@ -249,7 +261,10 @@ def _build_exercise_rich_ui(exercises: list) -> str:
     for cat, exs in sorted(by_cat.items()):
         lines.append(f"  [{cat.upper()}]")
         for ex in exs:
-            thumb = ex.get("thumbnail_url") or ""
+            db_thumb = ex.get("thumbnail_url") or ""
+            fallback = FALLBACK_THUMBS.get(cat.lower(), FALLBACK_THUMBS["default"])
+            # Always resolve to a non-empty thumb — AI receives a ready-to-use value
+            thumb = db_thumb if db_thumb else fallback
             video = ex.get("video_url") or ""
             duration = f"{ex.get('duration_minutes')} mins" if ex.get("duration_minutes") else "—"
             diff = ex.get("difficulty") or "beginner"
@@ -263,10 +278,10 @@ def _build_exercise_rich_ui(exercises: list) -> str:
 
     lines += [
         "EXAMPLE TAG FORMAT:",
-        '[EXERCISE name="Sun Salutation A" desc="Full body warm-up flow." duration="10 mins" '
-        'thumb="https://your-cdn.com/sun-sal.jpg" videoUrl="https://cloudinary.com/video.mp4"]',
+        '[EXERCISE name="Sun Salutation A" desc="Full body warm-up flow." duration="15 mins" '
+        'thumb="https://images.unsplash.com/photo-1544367567-0f2fcb009e0b?w=400&q=80" videoUrl="https://res.cloudinary.com/example/video.mp4"]',
         "",
-        "When no exercise fits, you may skip the card and suggest a general tip instead.",
+        "Always emit [EXERCISE ...] tags when suggesting exercises — never skip or replace with plain text.",
     ]
 
     return "\n".join(lines)
