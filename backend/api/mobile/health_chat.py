@@ -523,11 +523,15 @@ async def health_chat(body: HealthChatRequest, request: Request):
     # GPT learns from conversation history and reverts to numbered lists after
     # 2-3 turns. This re-asserts the EXERCISE tag requirement every single turn.
     exercise_reminder = (
-        "CRITICAL FORMAT REMINDER (applies to this reply, overrides prior patterns):\n"
-        "When suggesting exercises, you MUST emit [EXERCISE name=\"...\" desc=\"...\" "
-        "duration=\"...\" thumb=\"URL\" videoUrl=\"URL\"] tags — one per exercise.\n"
-        "Do NOT use numbered lists, bullet points, or plain text for exercises.\n"
-        "Use ONLY exercises from the EXERCISE LIBRARY. Always include a valid thumb URL."
+        "CRITICAL FORMAT REMINDER (mandatory for this reply, overrides all prior patterns):\n"
+        "WHENEVER you suggest exercises — whether called a 'workout plan', 'yoga routine', "
+        "'exercise plan', or any fitness suggestion — you MUST emit card tags:\n"
+        "[EXERCISE name=\"...\" desc=\"...\" duration=\"...\" thumb=\"URL\" videoUrl=\"URL\"]\n"
+        "One tag per exercise. Suggest 2-4 exercises.\n"
+        "FORBIDDEN: numbered lists (1. 2. 3.), bullet points, bold headers for exercises.\n"
+        "FORBIDDEN: warm-up / workout / cool-down sections in plain text.\n"
+        "ALLOWED: brief intro sentence BEFORE the first [EXERCISE] tag.\n"
+        "Use ONLY exercises from the EXERCISE LIBRARY in the system prompt with their thumb URLs."
     )
     messages.append({"role": "system", "content": exercise_reminder})
 
