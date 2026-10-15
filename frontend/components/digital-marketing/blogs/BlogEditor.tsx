@@ -4,13 +4,14 @@ import { useState, useTransition, useEffect, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import {
-  Save, Globe, Eye, ArrowLeft, Loader2, Sparkles, Wand2, X, CheckCircle2, Clock,
+  Save, Globe, Eye, ArrowLeft, Loader2, Sparkles, Wand2, X, CheckCircle2, Clock, Calendar,
 } from 'lucide-react'
 import { BlockCanvas } from './BlockCanvas'
 import { SEOPanel, type SEOData } from './SEOPanel'
 import type { ContentBlock } from './types'
 import { saveBlog, publishBlog } from '@/app/digital-marketing/actions'
 import type { Blog } from '@/app/digital-marketing/actions'
+import { toLocalDatetimeInput } from '@/types/blog'
 
 interface Props {
   initialBlog?: Blog | null
@@ -36,6 +37,7 @@ export function BlogEditor({ initialBlog }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [isPublishing, setIsPublishing] = useState(false)
+  const [isScheduling, setIsScheduling] = useState(false)
 
   const [blocks, setBlocks] = useState<ContentBlock[]>(
     ((initialBlog?.content_layout as unknown) as ContentBlock[]) ?? []
@@ -55,6 +57,12 @@ export function BlogEditor({ initialBlog }: Props) {
     faqs:             initialBlog?.faqs              ?? [],
   }))
 
+  // ─── Schedule Modal State ─────────────────────────────────────────────────
+  const [showScheduleModal, setShowScheduleModal] = useState(false)
+  const [scheduleDatetime, setScheduleDatetime] = useState<string>(() => {
+    return seo.publishedAt ? toLocalDatetimeInput(seo.publishedAt) : ''
+  })
+
   // ─── AI Formatter State ───────────────────────────────────────────────────
   const [showAIModal, setShowAIModal] = useState(false)
   const [rawText, setRawText] = useState('')
@@ -69,7 +77,7 @@ export function BlogEditor({ initialBlog }: Props) {
   // Track whether we have saved once (to get an id for new posts)
   const [savedBlogId, setSavedBlogId] = useState<string | undefined>(initialBlog?.id)
 
-  const buildFormData = useCallback((overrideStatus?: string): FormData => {
+  const buildFormData = useCallback((overrideStatus?: string, overridePublishedAt?: string): FormData => {
     const fd = new FormData()
     const id = savedBlogId || initialBlog?.id
     if (id) fd.append('id', id)
@@ -84,7 +92,13 @@ export function BlogEditor({ initialBlog }: Props) {
     fd.append('og_image', seo.ogImage)
     fd.append('canonical_url', seo.canonicalUrl)
     fd.append('faqs', JSON.stringify(seo.faqs))
-    if (seo.publishedAt) fd.append('published_at', seo.publishedAt)
+
+    const targetTime = overridePublishedAt ?? seo.publishedAt
+    if (targetTime) {
+      const parsed = new Date(targetTime)
+      const iso = isNaN(parsed.getTime()) ? targetTime : parsed.toISOString()
+      fd.append('published_at', iso)
+    }
     return fd
   }, [seo, blocks, savedBlogId, initialBlog?.id])
 
@@ -96,7 +110,7 @@ export function BlogEditor({ initialBlog }: Props) {
 
     setAutoSaveStatus('saving')
     try {
-      await saveBlog(buildFormData('draft'))
+      await saveBlog(buildFormData())
       lastSavedRef.current = snapshot
       setAutoSaveStatus('saved')
       setTimeout(() => setAutoSaveStatus('idle'), 3000)
@@ -120,13 +134,63 @@ export function BlogEditor({ initialBlog }: Props) {
     startTransition(async () => {
       try {
         await saveBlog(buildFormData('draft'))
-        lastSavedRef.current = JSON.stringify({ seo, blocks })
+        setSEO(prev => ({ ...prev, status: 'draft' }))
+        lastSavedRef.current = JSON.stringify({ seo: { ...seo, status: 'draft' }, blocks })
         toast.success('Draft saved successfully')
         router.push('/digital-marketing/blogs')
       } catch (e: unknown) {
         toast.error(e instanceof Error ? e.message : 'Save failed')
       }
     })
+  }
+
+  const handleScheduleSubmit = async (customDatetime?: string) => {
+    if (!seo.title.trim()) { toast.error('Post title is required'); return }
+    const timeToSchedule = customDatetime || scheduleDatetime
+    if (!timeToSchedule) { toast.error('Please pick a date and time for publishing'); return }
+
+    const targetDate = new Date(timeToSchedule)
+    if (isNaN(targetDate.getTime())) { toast.error('Invalid schedule date/time'); return }
+    if (targetDate.getTime() <= Date.now()) {
+      toast.error('Scheduled time must be in the future')
+      return
+    }
+
+    const isoTime = targetDate.toISOString()
+    setIsScheduling(true)
+    try {
+      await saveBlog(buildFormData('scheduled', isoTime))
+      setSEO(prev => ({
+        ...prev,
+        status: 'scheduled',
+        publishedAt: toLocalDatetimeInput(isoTime),
+      }))
+      lastSavedRef.current = JSON.stringify({
+        seo: { ...seo, status: 'scheduled', publishedAt: toLocalDatetimeInput(isoTime) },
+        blocks,
+      })
+      setShowScheduleModal(false)
+      toast.success('⏰ Post scheduled successfully!', {
+        description: `Will automatically publish on ${targetDate.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}.`,
+      })
+      router.push('/digital-marketing/blogs')
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Scheduling failed')
+    } finally {
+      setIsScheduling(false)
+    }
+  }
+
+  const applyPreset = (hoursFromNow: number) => {
+    const d = new Date(Date.now() + hoursFromNow * 3600 * 1000)
+    setScheduleDatetime(toLocalDatetimeInput(d))
+  }
+
+  const applyTomorrow = (hour: number, minute: number = 0) => {
+    const d = new Date()
+    d.setDate(d.getDate() + 1)
+    d.setHours(hour, minute, 0, 0)
+    setScheduleDatetime(toLocalDatetimeInput(d))
   }
 
   const handlePublish = async () => {
@@ -202,7 +266,7 @@ export function BlogEditor({ initialBlog }: Props) {
     }
   }
 
-  const isWorking = isPending || isPublishing
+  const isWorking = isPending || isPublishing || isScheduling
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -280,6 +344,29 @@ export function BlogEditor({ initialBlog }: Props) {
           >
             {isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
             Save Draft
+          </button>
+
+          {/* Schedule Button */}
+          <button
+            type="button"
+            onClick={() => {
+              setScheduleDatetime(seo.publishedAt ? toLocalDatetimeInput(seo.publishedAt) : toLocalDatetimeInput(new Date(Date.now() + 3600 * 1000)))
+              setShowScheduleModal(true)
+            }}
+            disabled={isWorking}
+            className={`flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-full border transition-all disabled:opacity-50 ${
+              seo.status === 'scheduled'
+                ? 'bg-blue-600 text-white border-blue-600 shadow-md shadow-blue-500/20 hover:bg-blue-700 hover:scale-105'
+                : 'border-border text-foreground hover:bg-blue-50 dark:hover:bg-blue-950/30 hover:border-blue-300 dark:hover:border-blue-700'
+            }`}
+            title="Schedule post to auto-publish on a timer"
+          >
+            {isScheduling ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Clock className={`w-4 h-4 ${seo.status === 'scheduled' ? 'text-white' : 'text-blue-500'}`} />
+            )}
+            {seo.status === 'scheduled' ? 'Scheduled' : 'Schedule'}
           </button>
 
           <button
@@ -454,6 +541,123 @@ Premium - 29999/month - Full support
           </div>
         </div>
       )}
+
+      {/* ── Schedule Post Modal ── */}
+      {showScheduleModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="bg-white dark:bg-gray-900 rounded-3xl shadow-2xl w-full max-w-lg flex flex-col overflow-hidden border border-border">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between px-6 py-5 border-b border-border bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/30 dark:to-indigo-950/30 rounded-t-3xl">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-xl text-white shadow-lg">
+                  <Clock className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-gray-900 dark:text-white text-lg">Schedule Post</h3>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Set a timer for automatic publishing</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowScheduleModal(false)}
+                className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 space-y-5">
+              {/* Presets */}
+              <div>
+                <label className="block text-xs font-semibold text-muted-foreground mb-2 uppercase tracking-wider">
+                  Quick Presets
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => applyPreset(1)}
+                    className="px-3 py-2 text-xs font-semibold rounded-xl border border-border bg-muted/30 hover:bg-muted text-foreground transition-all hover:scale-102"
+                  >
+                    +1 Hour
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => applyPreset(3)}
+                    className="px-3 py-2 text-xs font-semibold rounded-xl border border-border bg-muted/30 hover:bg-muted text-foreground transition-all hover:scale-102"
+                  >
+                    +3 Hours
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => applyTomorrow(9, 0)}
+                    className="px-3 py-2 text-xs font-semibold rounded-xl border border-border bg-muted/30 hover:bg-muted text-foreground transition-all hover:scale-102"
+                  >
+                    Tomorrow 9 AM
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => applyTomorrow(18, 0)}
+                    className="px-3 py-2 text-xs font-semibold rounded-xl border border-border bg-muted/30 hover:bg-muted text-foreground transition-all hover:scale-102"
+                  >
+                    Tomorrow 6 PM
+                  </button>
+                </div>
+              </div>
+
+              {/* Date & Time Picker */}
+              <div>
+                <label className="block text-xs font-semibold text-muted-foreground mb-1.5 uppercase tracking-wider flex items-center gap-1.5">
+                  <Calendar className="w-3.5 h-3.5 text-blue-500" />
+                  Target Date &amp; Time
+                </label>
+                <input
+                  type="datetime-local"
+                  value={scheduleDatetime}
+                  onChange={e => setScheduleDatetime(e.target.value)}
+                  className="w-full text-base font-medium px-4 py-2.5 rounded-xl border border-border bg-background outline-none focus:ring-2 focus:ring-blue-500/50"
+                />
+              </div>
+
+              {/* Informational Card */}
+              <div className="bg-blue-50 dark:bg-blue-950/30 rounded-2xl p-4 border border-blue-100 dark:border-blue-900/50 space-y-1.5">
+                <p className="text-xs font-semibold text-blue-900 dark:text-blue-200 flex items-center gap-1.5">
+                  <CheckCircle2 className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
+                  Automatic Status Transition
+                </p>
+                <p className="text-xs text-blue-700 dark:text-blue-300 leading-relaxed">
+                  The post status will change to <strong>Scheduled</strong>. When your chosen timer arrives, the CRM backend scheduler will automatically switch it to <strong>Published</strong> and generate the Article Schema JSON-LD.
+                </p>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="flex items-center justify-between px-6 py-4 border-t border-border bg-gray-50 dark:bg-gray-800/50 rounded-b-3xl">
+              <button
+                type="button"
+                onClick={() => setShowScheduleModal(false)}
+                disabled={isScheduling}
+                className="px-5 py-2.5 text-sm font-medium rounded-full border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => handleScheduleSubmit()}
+                disabled={isScheduling || !scheduleDatetime}
+                className="flex items-center gap-2 px-6 py-2.5 text-sm font-semibold rounded-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-500/20 hover:shadow-blue-500/40 hover:scale-105 transition-all disabled:opacity-50 disabled:scale-100"
+              >
+                {isScheduling ? (
+                  <><Loader2 className="w-4 h-4 animate-spin" /> Scheduling…</>
+                ) : (
+                  <><Clock className="w-4 h-4" /> Confirm Schedule</>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
+

@@ -170,6 +170,12 @@ export function BlogListClient({ initialBlogs }: Props) {
                         <StatusIcon className="w-3 h-3" />
                         {blog.status}
                       </span>
+                      {blog.status === 'scheduled' && blog.published_at && (
+                        <p className="text-[11px] text-blue-600 dark:text-blue-400 mt-1 flex items-center gap-1 font-medium">
+                          <Clock className="w-3 h-3 shrink-0" />
+                          {format(new Date(blog.published_at), 'MMM d, h:mm a')}
+                        </p>
+                      )}
                     </td>
                     <td className="px-5 py-4 text-xs text-muted-foreground hidden lg:table-cell">
                       {format(new Date(blog.created_at), 'MMM d, yyyy')}

@@ -104,3 +104,12 @@ export interface Blog {
   created_at: string
   updated_at: string
 }
+
+export function toLocalDatetimeInput(dateInput?: string | Date | null): string {
+  if (!dateInput) return ''
+  const d = new Date(dateInput)
+  if (isNaN(d.getTime())) return ''
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+

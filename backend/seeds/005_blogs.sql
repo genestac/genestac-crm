@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS blogs (
 CREATE INDEX IF NOT EXISTS idx_blogs_slug   ON blogs (slug);
 CREATE INDEX IF NOT EXISTS idx_blogs_status ON blogs (status);
 CREATE INDEX IF NOT EXISTS idx_blogs_author ON blogs (author_id);
+CREATE INDEX IF NOT EXISTS idx_blogs_scheduled_publish ON blogs (status, published_at) WHERE status IN ('draft', 'scheduled');
 
 -- 4. Auto-update updated_at on row change
 CREATE OR REPLACE FUNCTION update_blogs_updated_at()
@@ -92,7 +93,15 @@ CREATE POLICY "blogs_privileged_delete"
     get_staff_role() IN ('digital_marketing', 'superadmin', 'master_admin')
   );
 
--- 7b. Anonymous / public — read published blogs only
+-- 7b. Anonymous / public — read published blogs, or scheduled blogs whose publish time has arrived
 CREATE POLICY "blogs_public_select"
   ON blogs FOR SELECT
-  USING (status = 'published');
+  USING (
+    status = 'published'
+    OR (
+      status IN ('draft', 'scheduled')
+      AND published_at IS NOT NULL
+      AND published_at <= now()
+    )
+  );
+

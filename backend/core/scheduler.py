@@ -1508,6 +1508,66 @@ def sweep_undecided_lead_nudges():
         traceback.print_exc()
 
 
+def sweep_scheduled_blogs():
+    """
+    Runs every minute. Finds blogs in 'scheduled' or 'draft' status
+    whose published_at time has arrived, generates article SEO schema,
+    and updates status to 'published'.
+    """
+    try:
+        supabase: Client = get_supabase_client()
+        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+        # Find scheduled or draft blogs whose timer has arrived
+        res = (
+            supabase.table("blogs")
+            .select("*")
+            .in_("status", ["scheduled", "draft"])
+            .not_.is_("published_at", "null")
+            .lte("published_at", now_iso)
+            .execute()
+        )
+        due_blogs = res.data or []
+        if not due_blogs:
+            return
+
+        from api.admin.blogs import build_article_schema
+
+        print(f"[Blog Scheduler] Found {len(due_blogs)} scheduled blog(s) due for publishing.")
+
+        for blog in due_blogs:
+            try:
+                # If author_id is set, fetch author name for Schema
+                if blog.get("author_id"):
+                    author_res = (
+                        supabase.table("staffs")
+                        .select("full_name")
+                        .eq("id", blog["author_id"])
+                        .single()
+                        .execute()
+                    )
+                    blog["author_name"] = author_res.data.get("full_name", "Genestac Team") if author_res.data else "Genestac Team"
+
+                schema = build_article_schema(blog)
+
+                supabase.table("blogs").update({
+                    "status": "published",
+                    "dynamic_schema_json": schema,
+                    "updated_at": now_iso
+                }).eq("id", blog["id"]).execute()
+
+                print(f"[Blog Scheduler] ✅ Published blog '{blog.get('title')}' (ID: {blog.get('id')})")
+            except Exception as blog_err:
+                print(f"[Blog Scheduler] ❌ Failed to publish blog {blog.get('id')}: {blog_err}")
+
+    except _NETWORK_ERRORS as e:
+        print(f"[Blog Scheduler] ⚠️ Network unavailable, skipping sweep: {type(e).__name__}")
+    except Exception as e:
+        import traceback
+        print(f"[Blog Scheduler Error]: {e}")
+        traceback.print_exc()
+
+
 def start_scheduler():
     if not scheduler.running:
         # Sweep for auto-calls and pending callbacks every 5 minutes
@@ -1531,6 +1591,8 @@ def start_scheduler():
         scheduler.add_job(sweep_whatsapp_followups, 'interval', minutes=1, id="wa_followup_sweep", replace_existing=True)
         # Send Google Meet 10-min reminders (checks every minute)
         scheduler.add_job(sweep_meet_reminders, 'interval', minutes=1, id="meet_reminder_sweep", replace_existing=True)
+        # Sweep scheduled blogs every minute to publish when timer expires
+        scheduler.add_job(sweep_scheduled_blogs, 'interval', minutes=1, id="blog_publish_sweep", replace_existing=True)
         # 24-hour nudge for undecided NEW leads (runs daily at 10:00 AM IST)
         scheduler.add_job(
             sweep_undecided_lead_nudges, 'cron',

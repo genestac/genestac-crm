@@ -9,6 +9,7 @@ import {
 } from 'lucide-react'
 import { uploadBlogImage } from '@/app/digital-marketing/actions'
 import { ImageCropperModal } from './ImageCropperModal'
+import { toLocalDatetimeInput } from '@/types/blog'
 
 export interface SEOData {
   title: string
@@ -211,14 +212,17 @@ export function SEOPanel({ data, onChange, baseUrl = 'https://genestac.com/blog'
           {data.status === 'scheduled' && (
             <div>
               <label className="block text-xs font-semibold text-muted-foreground mb-1 uppercase tracking-wider">
-                <Calendar className="w-3.5 h-3.5 inline mr-1" /> Publish At
+                <Calendar className="w-3.5 h-3.5 inline mr-1 text-blue-500" /> Publish At (Timer)
               </label>
               <input
                 type="datetime-local"
-                value={data.publishedAt}
+                value={toLocalDatetimeInput(data.publishedAt)}
                 onChange={e => update('publishedAt', e.target.value)}
                 className="w-full text-sm px-3 py-2 rounded-xl border border-border bg-background outline-none focus:ring-2 focus:ring-violet-500/50"
               />
+              <p className="text-[11px] text-muted-foreground mt-1">
+                Post will auto-publish when this timer expires.
+              </p>
             </div>
           )}
           
