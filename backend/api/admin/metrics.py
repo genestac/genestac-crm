@@ -382,6 +382,22 @@ async def get_admin_metrics(
                     todays_orders_revenue += amt
         except Exception as e:
             print(f"Error fetching orders: {e}")
+
+        # 4b. PAID Proforma Invoices (admin-created invoices from external payments)
+        try:
+            paid_pi_res = supabase.table("proforma_invoices") \
+                .select("total_amount, created_at") \
+                .eq("status", "PAID") \
+                .execute()
+            for pi in (paid_pi_res.data or []):
+                amt = float(pi.get("total_amount") or 0)
+                total_revenue += amt
+                created_at_str = pi.get("created_at")
+                if created_at_str and created_at_str >= start_of_today_str:
+                    todays_orders_count += 1
+                    todays_orders_revenue += amt
+        except Exception as e:
+            print(f"Error fetching paid proforma invoices for revenue: {e}")
         
         # 5. Recent Activity
         activities = []

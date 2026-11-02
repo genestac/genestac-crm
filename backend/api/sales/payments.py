@@ -217,6 +217,32 @@ async def get_invoice_by_id(invoice_id: str, supabase: Client=Depends(get_supaba
             if not user_res.data:
                 user_res = supabase.table('leads').select('*').eq('id', user_id).execute()
             invoice_data['users'] = user_res.data[0] if user_res.data else None
+
+        # Resolve cart metadata (addresses, items, notes)
+        cart_id = invoice_data.get('cart_id')
+        if cart_id:
+            try:
+                cart_res = supabase.table('cart').select('notes').eq('id', cart_id).execute()
+                if cart_res.data and cart_res.data[0].get('notes'):
+                    meta = json.loads(cart_res.data[0]['notes'])
+                    invoice_data['metadata'] = meta
+                    invoice_data['billing_address'] = meta.get('billing_address')
+                    invoice_data['shipping_address'] = meta.get('shipping_address')
+                    invoice_data['place_of_supply'] = meta.get('place_of_supply')
+                    invoice_data['place_of_delivery'] = meta.get('place_of_delivery')
+                    if meta.get('items'):
+                        invoice_data['items'] = meta.get('items')
+            except Exception as _m_err:
+                print(f"Error parsing cart notes metadata: {_m_err}")
+
+            if not invoice_data.get('items'):
+                try:
+                    items_res = supabase.table('cart_items').select('*').eq('cart_id', cart_id).execute()
+                    if items_res.data:
+                        invoice_data['items'] = items_res.data
+                except Exception as _ci_err:
+                    print(f"Error fetching cart items: {_ci_err}")
+
         settings = get_global_settings_from_db(supabase)
         return {'success': True, 'data': invoice_data, 'settings': settings}
     except Exception as e:
@@ -235,21 +261,35 @@ async def get_invoice_pdf(invoice_id: str, supabase: Client=Depends(get_supabase
             plan_res = supabase.table('plans').select('*').eq('id', plan_id).execute()
             invoice_data['plans'] = plan_res.data[0] if plan_res.data else {}
 
-        # Resolve product name from cart → cart_items (proper relational lookup)
+        # Resolve product name and metadata from cart → cart_items
         cart_id = invoice_data.get('cart_id')
-        if cart_id and not plan_id:
+        if cart_id:
+            try:
+                cart_res = supabase.table('cart').select('notes').eq('id', cart_id).execute()
+                if cart_res.data and cart_res.data[0].get('notes'):
+                    meta = json.loads(cart_res.data[0]['notes'])
+                    invoice_data['metadata'] = meta
+                    invoice_data['billing_address'] = meta.get('billing_address')
+                    invoice_data['shipping_address'] = meta.get('shipping_address')
+                    invoice_data['place_of_supply'] = meta.get('place_of_supply')
+                    invoice_data['place_of_delivery'] = meta.get('place_of_delivery')
+                    if meta.get('items'):
+                        invoice_data['items'] = meta.get('items')
+            except Exception as _m_err:
+                print(f"Error parsing cart notes in PDF: {_m_err}")
+
             try:
                 items_res = supabase.table('cart_items').select(
-                    'item_name, item_description, inventory_id, quantity'
+                    'item_name, item_description, inventory_id, quantity, unit_mrp, line_total'
                 ).eq('cart_id', cart_id).execute()
                 if items_res.data:
-                    # Build a readable item_name from cart_items
+                    if not invoice_data.get('items'):
+                        invoice_data['items'] = items_res.data
                     names = [i.get('item_name') or i.get('item_description', '') for i in items_res.data]
                     invoice_data['item_name'] = ', '.join(n for n in names if n)
             except Exception as _ce:
                 print(f'[PDF] cart_items lookup failed: {_ce}')
 
-        # Remove variant_id lookup — not needed, cart_items already has the name
         user_id = invoice_data.get('user_id')
         if user_id:
             user_res = supabase.table('users').select('*').eq('id', user_id).execute()
@@ -264,8 +304,9 @@ async def get_invoice_pdf(invoice_id: str, supabase: Client=Depends(get_supabase
         inv_settings = settings.get('invoice_settings', {})
         pdf_bytes = generate_invoice_pdf(invoice_data, user, plan, company_info, bank_details, inv_settings)
 
+        prefix = "INV" if invoice_data.get("status") == "PAID" else "PI"
         safe_name = str(invoice_data.get('invoice_number', 'Invoice')).replace('/', '-')
-        return Response(content=pdf_bytes, media_type='application/pdf', headers={'Content-Disposition': f'attachment; filename="PI_{safe_name}.pdf"'})
+        return Response(content=pdf_bytes, media_type='application/pdf', headers={'Content-Disposition': f'attachment; filename="{prefix}_{safe_name}.pdf"'})
     except Exception as e:
         import traceback
         traceback.print_exc()

@@ -40,6 +40,23 @@ export default async function ProformaInvoicePage({ params }: { params: Promise<
   
   const invoiceDate = new Date(invoice.invoice_date || invoice.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' })
   
+  const isPaid = invoice.status === 'PAID'
+  const shipping = invoice.shipping_address || invoice.metadata?.shipping_address || {}
+  const billing = invoice.billing_address || invoice.metadata?.billing_address || {}
+  const placeOfSupply = invoice.place_of_supply || invoice.metadata?.place_of_supply || companyInfo.state_name || 'Haryana'
+  const placeOfDelivery = invoice.place_of_delivery || invoice.metadata?.place_of_delivery || shipping.state || 'Haryana'
+
+  const formatAddress = (addr: any) => {
+    if (!addr) return null
+    const parts = [
+      addr.house_no ? `${addr.house_no}, ${addr.address_line_1 || ''}` : addr.address_line_1,
+      addr.address_line_2,
+      addr.landmark ? `Near ${addr.landmark}` : null,
+      [addr.city, addr.state, addr.postal_code].filter(Boolean).join(', ')
+    ].filter(Boolean)
+    return parts.length > 0 ? parts.join(', ') : null
+  }
+
   const amountToWords = (amount: number) => {
     // Very simple conversion for demonstration, a real library would be better for Indian numbering
     return `INR ${amount.toLocaleString('en-IN')} Only`
@@ -237,8 +254,23 @@ export default async function ProformaInvoicePage({ params }: { params: Promise<
                     style={{ width: '100%', height: 'auto', objectFit: 'contain' }}
                   />
               </div>
-              <div className="inv-document-title">
-                  <h1>Proforma Invoice</h1>
+              <div className="inv-document-title" style={{ textAlign: 'right' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '8px' }}>
+                      <h1>{isPaid ? 'Tax Invoice' : 'Proforma Invoice'}</h1>
+                      {isPaid && (
+                          <span style={{
+                              backgroundColor: '#16a34a',
+                              color: '#ffffff',
+                              fontSize: '11px',
+                              fontWeight: 700,
+                              padding: '3px 8px',
+                              borderRadius: '4px',
+                              letterSpacing: '0.5px'
+                          }}>
+                              PAID
+                          </span>
+                      )}
+                  </div>
               </div>
           </div>
 
@@ -263,11 +295,11 @@ export default async function ProformaInvoicePage({ params }: { params: Promise<
                       </div>
                       <div className="inv-meta-item">
                           <span className="inv-label">Terms of Payment</span>
-                          <span className="inv-value">Immediate</span>
+                          <span className="inv-value">{isPaid ? 'PAID (External)' : 'Immediate'}</span>
                       </div>
                       <div className="inv-meta-item">
                           <span className="inv-label">Reference No.</span>
-                          <span className="inv-value">{invoice.id.substring(0,8).toUpperCase()}</span>
+                          <span className="inv-value">{invoice.razorpay_link_id || invoice.id.substring(0,8).toUpperCase()}</span>
                       </div>
                   </div>
               </div>
@@ -277,17 +309,37 @@ export default async function ProformaInvoicePage({ params }: { params: Promise<
               <div className="inv-box">
                   <div className="inv-box-title">Consignee (Ship To)</div>
                   <div className="inv-text-sm">
-                      <div className="inv-highlight-text" style={{ fontSize: '15px', marginBottom: '4px' }}>{user.name || user.phone}</div>
-                      Email: {user.email || 'N/A'}<br />
-                      Phone: {user.phone}
+                      <div className="inv-highlight-text" style={{ fontSize: '15px', marginBottom: '4px' }}>
+                          {shipping.contact_name || user.name || user.phone}
+                      </div>
+                      {formatAddress(shipping) && (
+                          <div style={{ color: '#334155', marginBottom: '4px', lineHeight: '1.4' }}>
+                              {formatAddress(shipping)}
+                          </div>
+                      )}
+                      <div>Phone: {shipping.contact_phone || user.phone || 'N/A'}</div>
+                      {user.email && <div>Email: {user.email}</div>}
+                      <div style={{ marginTop: '6px', fontSize: '11px', fontWeight: 600, color: '#0f4c81' }}>
+                          Place of Delivery: {placeOfDelivery}
+                      </div>
                   </div>
               </div>
               <div className="inv-box">
                   <div className="inv-box-title">Buyer (Bill To)</div>
                   <div className="inv-text-sm">
-                      <div className="inv-highlight-text" style={{ fontSize: '15px', marginBottom: '4px' }}>{user.name || user.phone}</div>
-                      Email: {user.email || 'N/A'}<br />
-                      Phone: {user.phone}
+                      <div className="inv-highlight-text" style={{ fontSize: '15px', marginBottom: '4px' }}>
+                          {billing.contact_name || user.name || user.phone}
+                      </div>
+                      {formatAddress(billing) && (
+                          <div style={{ color: '#334155', marginBottom: '4px', lineHeight: '1.4' }}>
+                              {formatAddress(billing)}
+                          </div>
+                      )}
+                      <div>Phone: {billing.contact_phone || user.phone || 'N/A'}</div>
+                      {user.email && <div>Email: {user.email}</div>}
+                      <div style={{ marginTop: '6px', fontSize: '11px', fontWeight: 600, color: '#0f4c81' }}>
+                          Place of Supply: {placeOfSupply}
+                      </div>
                   </div>
               </div>
           </div>
@@ -297,7 +349,7 @@ export default async function ProformaInvoicePage({ params }: { params: Promise<
                   <thead>
                       <tr>
                           <th style={{ width: '5%' }}>Sl No.</th>
-                          <th style={{ width: '45%' }}>Description of Services</th>
+                          <th style={{ width: '45%' }}>Description of Goods/Services</th>
                           <th style={{ width: '10%' }}>HSN/SAC</th>
                           <th style={{ width: '10%' }}>Quantity</th>
                           <th style={{ width: '10%' }}>Rate</th>
@@ -305,14 +357,33 @@ export default async function ProformaInvoicePage({ params }: { params: Promise<
                       </tr>
                   </thead>
                   <tbody>
-                      <tr>
-                          <td>1</td>
-                          <td><strong>{plan?.name || 'Premium Health Membership'}</strong></td>
-                          <td></td>
-                          <td>1</td>
-                          <td>{parseFloat(invoice.base_price).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
-                          <td>{parseFloat(invoice.base_price).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
-                      </tr>
+                      {invoice.items && invoice.items.length > 0 ? (
+                          invoice.items.map((it: any, idx: number) => {
+                              const itName = it.item_name || it.name || 'Item'
+                              const qty = it.quantity || 1
+                              const rate = parseFloat(it.unit_mrp || it.mrp || 0)
+                              const lineTot = parseFloat(it.line_total || (rate * qty))
+                              return (
+                                  <tr key={idx}>
+                                      <td>{idx + 1}</td>
+                                      <td><strong>{itName}</strong></td>
+                                      <td></td>
+                                      <td>{qty}</td>
+                                      <td>{rate.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                                      <td>{lineTot.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                                  </tr>
+                              )
+                          })
+                      ) : (
+                          <tr>
+                              <td>1</td>
+                              <td><strong>{plan?.name || invoice.item_name || 'Premium Health Membership'}</strong></td>
+                              <td></td>
+                              <td>1</td>
+                              <td>{parseFloat(invoice.base_price).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                              <td>{parseFloat(invoice.base_price).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                          </tr>
+                      )}
                       {parseFloat(invoice.discount_percentage) > 0 && (
                           <tr>
                               <td></td>
@@ -371,12 +442,20 @@ export default async function ProformaInvoicePage({ params }: { params: Promise<
               </div>
               
               <div className="inv-box inv-signature-box">
-                  <div className="inv-text-sm" style={{ marginBottom: '50px', textAlign: 'right', width: '100%' }}>
+                  <div className="inv-text-sm" style={{ marginBottom: '16px', textAlign: 'right', width: '100%' }}>
                       <em>E. & O.E</em>
                   </div>
                   
-                  <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontSize: '12px', marginBottom: '12px' }}>for <strong>{companyInfo.name}</strong></div>
+                  <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+                      {/* Genestac Logo at bottom */}
+                      <div style={{ maxWidth: '130px', marginBottom: '8px' }}>
+                          <img
+                            src={companyInfo.logo_url || '/logo.jpeg'}
+                            alt="Genestac Logo"
+                            style={{ width: '100%', height: 'auto', maxHeight: '38px', objectFit: 'contain' }}
+                          />
+                      </div>
+                      <div style={{ fontSize: '12px', marginBottom: '8px' }}>for <strong>{companyInfo.name || 'GENESTAC THERAPEUTICS LLP'}</strong></div>
                       {/* Signature image */}
                       {companyInfo.signature_url && (
                         <img
@@ -391,21 +470,39 @@ export default async function ProformaInvoicePage({ params }: { params: Promise<
               </div>
           </div>
 
-          <div className="inv-bottom-bar" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '24px', background: '#f8fafc', borderTop: '2px dashed #cbd5e1' }}>
-              <a 
-                href={invoice.payment_url || invoice.razorpay_url} 
-                target="_blank" 
-                rel="noopener noreferrer"
-                className="inline-flex items-center justify-center bg-green-600 hover:bg-green-700 text-white font-bold py-4 px-10 rounded-xl shadow-lg hover:shadow-xl transition-all hover:scale-105 duration-200 text-lg w-full sm:w-auto print:shadow-none print:transform-none print:transition-none print:scale-100"
-                style={{ textDecoration: 'none' }}
-              >
-                Pay Now
-              </a>
-              <div style={{ fontSize: '12px', color: '#64748b', textAlign: 'center' }}>
-                If the button is not working, click this link: <br/>
-                <a href={invoice.razorpay_url} target="_blank" className="font-semibold text-blue-600 hover:underline mt-1 inline-block">{invoice.razorpay_url}</a>
+          {/* DO NOT INCLUDE PAYMENT LINK IN PAID INVOICE */}
+          {isPaid ? (
+              <div className="inv-bottom-bar" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '16px 24px', background: '#f0fdf4', borderTop: '1px solid #bbf7d0' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#166534', fontWeight: 600, fontSize: '13px' }}>
+                      <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#22c55e', display: 'inline-block' }}></span>
+                      Invoice Status: PAID
+                      {invoice.razorpay_link_id && (
+                          <span style={{ fontSize: '11px', fontFamily: 'monospace', color: '#15803d', background: '#dcfce7', padding: '2px 6px', borderRadius: '4px', marginLeft: '4px' }}>
+                              Ref: {invoice.razorpay_link_id}
+                          </span>
+                      )}
+                  </div>
+                  <div style={{ fontSize: '11px', color: '#15803d', marginTop: '4px' }}>
+                      Thank you for your business! This is an official tax invoice receipt.
+                  </div>
               </div>
-          </div>
+          ) : (invoice.payment_url || invoice.razorpay_url) ? (
+              <div className="inv-bottom-bar" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '24px', background: '#f8fafc', borderTop: '2px dashed #cbd5e1' }}>
+                  <a 
+                    href={invoice.payment_url || invoice.razorpay_url} 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center justify-center bg-green-600 hover:bg-green-700 text-white font-bold py-4 px-10 rounded-xl shadow-lg hover:shadow-xl transition-all hover:scale-105 duration-200 text-lg w-full sm:w-auto print:shadow-none print:transform-none print:transition-none print:scale-100"
+                    style={{ textDecoration: 'none' }}
+                  >
+                    Pay Now
+                  </a>
+                  <div style={{ fontSize: '12px', color: '#64748b', textAlign: 'center', marginTop: '12px' }}>
+                    If the button is not working, click this link: <br/>
+                    <a href={invoice.razorpay_url} target="_blank" className="font-semibold text-blue-600 hover:underline mt-1 inline-block">{invoice.razorpay_url}</a>
+                  </div>
+              </div>
+          ) : null}
 
       </div>
     </div>

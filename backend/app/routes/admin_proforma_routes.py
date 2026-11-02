@@ -93,53 +93,86 @@ def search_items(
     admin_user: dict = Depends(require_admin),
 ):
     """Search inventory products + plan variants for PI line items."""
+    import re
     q = q.strip()
+    raw_tokens = [re.sub(r'^[^\w.]+|[^\w.]+$', '', t).lower() for t in q.split()]
+    tokens = [t for t in raw_tokens if t]
+
     results = []
     try:
-        # Inventory
+        # 1. Inventory & variants
         inv_res = supabase.table("inventory") \
-            .select("id, name, price, compare_at_price, unit") \
+            .select("id, name, price, compare_at_price, unit, description") \
             .eq("is_active", True) \
-            .ilike("name", f"%{q}%") \
-            .limit(15).execute()
-        for item in (inv_res.data or []):
-            mrp = item.get("compare_at_price") or item.get("price") or 0
-            results.append({
-                "id": item["id"],
-                "type": "inventory",
-                "name": item["name"],
-                "mrp": float(mrp),
-                "unit": item.get("unit") or "unit",
-            })
+            .execute()
+        var_res = supabase.table("inventory_variants") \
+            .select("id, inventory_id, label, price, compare_at_price, dosage_strength, sku") \
+            .execute()
 
-        # Plans + variants
-        plans_res = supabase.table("plans") \
-            .select("id, name, price, gst_percentage, plan_variants(id, duration_label, base_price, is_active)") \
-            .ilike("name", f"%{q}%") \
-            .limit(10).execute()
-        for plan in (plans_res.data or []):
-            variants = plan.get("plan_variants") or []
-            active_variants = [v for v in variants if v.get("is_active")]
-            if active_variants:
-                for v in active_variants:
+        variants_by_inv = {}
+        for v in (var_res.data or []):
+            variants_by_inv.setdefault(v["inventory_id"], []).append(v)
+
+        for item in (inv_res.data or []):
+            variants = variants_by_inv.get(item["id"], [])
+            if variants:
+                for v in variants:
+                    label = v.get("label") or v.get("dosage_strength") or v.get("sku") or ""
+                    search_text = f"{item['name']} {label} {v.get('dosage_strength') or ''} {v.get('sku') or ''}".lower()
+                    if not tokens or all(t in search_text for t in tokens):
+                        variant_price = float(v.get("price") or item.get("price") or 0)
+                        results.append({
+                            "id": v["id"],
+                            "type": "inventory_variant",
+                            "inventory_id": item["id"],
+                            "name": f"{item['name']}{(' – ' + label) if label else ''}",
+                            "mrp": variant_price,
+                            "unit": item.get("unit") or "unit",
+                        })
+            else:
+                search_text = f"{item['name']} {item.get('description') or ''}".lower()
+                if not tokens or all(t in search_text for t in tokens):
+                    item_price = float(item.get("price") or 0)
                     results.append({
-                        "id": v["id"],
-                        "type": "plan_variant",
+                        "id": item["id"],
+                        "type": "inventory",
+                        "inventory_id": item["id"],
+                        "name": item["name"],
+                        "mrp": item_price,
+                        "unit": item.get("unit") or "unit",
+                    })
+
+        # 2. Plans & variants
+        plans_res = supabase.table("plans") \
+            .select("id, name, price, gst_percentage, plan_variants(id, duration_label, base_price, discounted_price, is_active)") \
+            .execute()
+
+        for plan in (plans_res.data or []):
+            variants = [v for v in (plan.get("plan_variants") or []) if v.get("is_active")]
+            if variants:
+                for v in variants:
+                    search_text = f"{plan['name']} {v.get('duration_label', '')}".lower()
+                    if not tokens or all(t in search_text for t in tokens):
+                        plan_price = float(v.get("discounted_price") or v.get("base_price") or plan.get("price") or 0)
+                        results.append({
+                            "id": v["id"],
+                            "type": "plan_variant",
+                            "plan_id": plan["id"],
+                            "name": f"{plan['name']} – {v.get('duration_label', '')}",
+                            "mrp": plan_price,
+                            "unit": "subscription",
+                        })
+            else:
+                search_text = plan["name"].lower()
+                if not tokens or all(t in search_text for t in tokens):
+                    results.append({
+                        "id": plan["id"],
+                        "type": "plan",
                         "plan_id": plan["id"],
-                        "name": f"{plan['name']} – {v.get('duration_label', '')}",
-                        "mrp": float(v.get("base_price") or plan.get("price") or 0),
+                        "name": plan["name"],
+                        "mrp": float(plan.get("price") or 0),
                         "unit": "subscription",
                     })
-            else:
-                # Plan without variants
-                results.append({
-                    "id": plan["id"],
-                    "type": "plan",
-                    "plan_id": plan["id"],
-                    "name": plan["name"],
-                    "mrp": float(plan.get("price") or 0),
-                    "unit": "subscription",
-                })
 
         return {"success": True, "data": results}
     except Exception as e:

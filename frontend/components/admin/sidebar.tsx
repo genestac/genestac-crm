@@ -30,7 +30,8 @@ import {
   Megaphone,
   Bell,
   Dumbbell,
-  Webhook
+  Webhook,
+  Receipt
 } from 'lucide-react'
 import { logout } from '@/app/auth/actions'
 
@@ -73,6 +74,7 @@ const modules: { title: string; routes: RouteItem[] }[] = [
       { name: 'Lead Settings', path: '/admin/lead-settings', icon: Settings },
       { name: 'Lead Assignment', path: '/admin/lead-assignment', icon: Users },
       { name: 'Proforma Invoices', path: '/admin/proforma-invoices', icon: FileText },
+      { name: 'Invoices', path: '/admin/invoices', icon: Receipt },
       { name: 'Doctors', path: '/admin/doctors', icon: Stethoscope },
       { name: 'Consultations', path: '/admin/consultations', icon: FileText },
       { name: 'Medical Plans', path: '/admin/plans', icon: CreditCard },

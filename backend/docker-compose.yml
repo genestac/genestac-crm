@@ -5,6 +5,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    image: genestac-backend:latest
+    container_name: genestac-crm-api
     restart: always
     ports:
       - "127.0.0.1:8000:8000"

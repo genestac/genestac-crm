@@ -85,13 +85,14 @@ from api.webhooks import leads as leads_webhook
 app.include_router(leads_webhook.router, prefix="/api/webhooks", tags=["webhooks-leads"])
 
 from api import templates, custom_fields
-from app.routes import admin_proforma_routes, invoice_settings_routes
+from app.routes import admin_proforma_routes, invoice_settings_routes, admin_invoice_routes
 
 app.include_router(templates.router, prefix="/api/templates", tags=["templates"])
 app.include_router(custom_fields.router, prefix="/api/admin/custom-fields", tags=["admin-custom-fields"])
 app.include_router(public.router, prefix="/api/public", tags=["public"])
 app.include_router(admin_proforma_routes.router, prefix="/api/v2/admin/proforma-invoices", tags=["admin-proformas"])
 app.include_router(invoice_settings_routes.router, prefix="/api/v2/admin/invoice-settings", tags=["admin-invoice-settings"])
+app.include_router(admin_invoice_routes.router, prefix="/api/v2/admin/invoices", tags=["admin-invoices"])
 
 # ── Mobile App — AI Health Coach Chat ─────────────────────────────────────────
 from api.mobile import health_chat as mobile_health_chat

@@ -42,6 +42,10 @@ export async function fetchAPI(endpoint: string, options: RequestInit = {}, time
   
   const headers = new Headers(options.headers || {})
   
+  if (options.body && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json')
+  }
+  
   if (token) {
     // Send token via Cookie AND Authorization headers (Original Way)
     headers.set('Cookie', `access_token=${token}`)
